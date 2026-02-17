@@ -1,0 +1,57 @@
+﻿### Found 9 duplicate groups in data_cert1.csv ###
+
+Group: 항공기사, 군항공기사고구조사 1급, 군항공기사고구조사 2급
+  - 항공기사 [T151]: Real (Has Stats)
+  - 군항공기사고구조사 1급 [S296]: Duplicate (No Stats)
+  - 군항공기사고구조사 2급 [S297]: Duplicate (No Stats)
+------------------------------
+Group: 미용사(네일), 미용사(메이크업), 미용사(일반), 미용사(피부), 애견미용사
+  - 미용사(네일) [T343]: Real (Has Stats)
+  - 미용사(메이크업) [T344]: Real (Has Stats)
+  - 미용사(일반) [T345]: Real (Has Stats)
+  - 미용사(피부) [T346]: Real (Has Stats)
+  - 애견미용사 [M245]: Duplicate (No Stats)
+------------------------------
+Group: 이륜자동차정비기능사, 자동차정비기능사
+  - 이륜자동차정비기능사 [T560]: Duplicate (No Stats)
+  - 자동차정비기능사 [T585]: Real (Has Stats)
+------------------------------
+Group: 임상심리사 1급, 정신건강임상심리사 1급
+  - 임상심리사 1급 [T576]: Real (Has Stats)
+  - 정신건강임상심리사 1급 [S280]: Duplicate (No Stats)
+------------------------------
+Group: 임상심리사 2급, 정신건강임상심리사 2급
+  - 임상심리사 2급 [T577]: Real (Has Stats)
+  - 정신건강임상심리사 2급 [S281]: Duplicate (No Stats)
+------------------------------
+Group: 전산회계운용사 1급, 전산회계
+  - 전산회계운용사 1급 [T621]: Real (Has Stats)
+  - 전산회계 [M120]: Duplicate (No Stats)
+------------------------------
+Group: 소프트웨어자산관리사(C-SAM), 자산관리사(FP)
+  - 소프트웨어자산관리사(C-SAM) [M082]: Duplicate (No Stats)
+  - 자산관리사(FP) [M103]: Real (Has Stats)
+------------------------------
+Group: 관광통역안내사(독어), 관광통역안내사(러시아어), 관광통역안내사(말레이/인도네시아어), 관광통역안내사(베트남어), 관광통역안내사(불어), 관광통역안내사(스페인어), 관광통역안내사(아랍어), 관광통역안내사(영어), 관광통역안내사(이탈리아어), 관광통역안내사(일본어), 관광통역안내사(중국어), 관광통역안내사(태국어)
+  - 관광통역안내사(독어) [S031]: Real (Has Stats)
+  - 관광통역안내사(러시아어) [S032]: Duplicate (No Stats)
+  - 관광통역안내사(말레이/인도네시아어) [S033]: Duplicate (No Stats)
+  - 관광통역안내사(베트남어) [S034]: Duplicate (No Stats)
+  - 관광통역안내사(불어) [S035]: Real (Has Stats)
+  - 관광통역안내사(스페인어) [S036]: Real (Has Stats)
+  - 관광통역안내사(아랍어) [S037]: Duplicate (No Stats)
+  - 관광통역안내사(영어) [S038]: Duplicate (No Stats)
+  - 관광통역안내사(이탈리아어) [S039]: Duplicate (No Stats)
+  - 관광통역안내사(일본어) [S040]: Duplicate (No Stats)
+  - 관광통역안내사(중국어) [S041]: Duplicate (No Stats)
+  - 관광통역안내사(태국어) [S042]: Duplicate (No Stats)
+------------------------------
+Group: 철도교통안전관리자, 교통안전관리자 (도로), 교통안전관리자 (철도), 교통안전관리자 (항공), 교통안전관리자 (항만), 교통안전관리자 (삭도), 교통안전관리자
+  - 철도교통안전관리자 [S233]: Duplicate (No Stats)
+  - 교통안전관리자 (도로) [S334]: Real (Has Stats)
+  - 교통안전관리자 (철도) [S335]: Real (Has Stats)
+  - 교통안전관리자 (항공) [S336]: Real (Has Stats)
+  - 교통안전관리자 (항만) [S337]: Real (Has Stats)
+  - 교통안전관리자 (삭도) [S338]: Real (Has Stats)
+  - 교통안전관리자 [S345]: Duplicate (No Stats)
+------------------------------

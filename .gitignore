@@ -1,0 +1,53 @@
+# =========================
+# Secrets / env (절대 커밋 금지)
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Node / Vite / React (frontend)
+# =========================
+**/node_modules/
+**/dist/
+**/build/
+**/.vite/
+**/.cache/
+**/*.log
+
+# =========================
+# Python / FastAPI (backend)
+# =========================
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+
+**/.venv/
+**/venv/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# Python build artifacts
+**/*.egg-info/
+**/.eggs/
+
+# =========================
+# Database / local volumes
+# =========================
+**/*.sqlite3
+**/data/
+**/uploads/
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+**/.vscode/
+**/.idea/
+
+# =========================
+# Docker (선택: 로컬 전용 파일 제외)
+# =========================
+**/.docker/
