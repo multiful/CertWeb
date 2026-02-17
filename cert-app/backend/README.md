@@ -1,6 +1,7 @@
 
-### 구조
+### 백엔드 구조
 
+```text
 backend/
 ├── app/
 │   ├── api/            # 라우터 (엔드포인트 정의)
@@ -30,3 +31,4 @@ backend/
 ├── tests/              # Pytest 유닛 및 통합 테스트
 ├── main.py
 └── .env.example
+```
