@@ -1,60 +1,59 @@
 ## 프로젝트 구조
 
 cert-app/
-├── backend/
+├── backend/                    # FastAPI 백엔드 서비스
 │   ├── app/
-│   │   ├── api/                # API 엔드포인트 계층
-│   │   │   ├── v1/             # API 버전 관리
-│   │   │   │   ├── api.py      # 모든 라우터 통합
-│   │   │   │   └── endpoints/  # 기능별 라우트 분리
-│   │   │   │       ├── certs.py
-│   │   │   │       ├── recommendations.py
-│   │   │   │       ├── admin.py
-│   │   │   │       └── favorites.py
-│   │   ├── core/               # 앱 공통 설정
-│   │   │   ├── config.py       # Pydantic Settings 환경 변수 관리
-│   │   │   ├── security.py     # 인증 및 보안 설정
-│   │   │   └── redis.py        # Redis 클라이언트 초기화
-│   │   ├── db/                 # 데이터베이스 계층
-│   │   │   ├── base.py         # 모든 모델 통합 (Alembic용)
-│   │   │   └── session.py      # 엔진 및 세션 설정
-│   │   ├── models/             # SQLAlchemy 모델 (도메인별 분리)
+│   │   ├── api/                # API 엔드포인트 레이어
+│   │   │   └── v1/             # API 버전 관리
+│   │   │       ├── api.py      # 라우터 통합 관리
+│   │   │       └── endpoints/  # 기능별 세부 라우트
+│   │   │           ├── certs.py
+│   │   │           ├── recommendations.py
+│   │   │           ├── admin.py
+│   │   │           └── favorites.py
+│   │   ├── core/               # 시스템 공통 설정
+│   │   │   ├── config.py       # 환경 변수 및 설정
+│   │   │   ├── security.py     # 인증 및 보안 로직
+│   │   │   └── redis.py        # Redis 연결 설정
+│   │   ├── db/                 # 데이터베이스 관리
+│   │   │   ├── base.py         # DB 모델 통합 (Alembic용)
+│   │   │   └── session.py      # DB 엔진/세션 생성
+│   │   ├── models/             # SQLAlchemy DB 테이블 모델
 │   │   │   ├── cert.py
 │   │   │   ├── user.py
 │   │   │   └── stats.py
-│   │   ├── schemas/            # Pydantic 스키마 (Request/Response 모델)
+│   │   ├── schemas/            # Pydantic 데이터 검증 모델
 │   │   │   ├── cert.py
 │   │   │   ├── recommendation.py
-│   │   │   └── common.py       # 공통 응답 규격
-│   │   ├── crud/               # DB 직접 접근 로직 (도메인별 분리)
+│   │   │   └── common.py
+│   │   ├── crud/               # 단순 DB 접근(Create/Read/Update/Delete)
 │   │   │   ├── crud_cert.py
 │   │   │   └── crud_user.py
-│   │   └── services/           # 비즈니스 로직 (복합 로직 처리)
+│   │   └── services/           # 비즈니스 로직 및 복합 연산
 │   │       └── recommend_service.py
-│   ├── main.py                 # 앱 초기화 및 미들웨어 설정
-│   ├── alembic/                # DB 마이그레이션 관리 (권장)
-│   ├── Dockerfile
-│   └── requirements.txt
-├── frontend/
+│   ├── main.py                 # 애플리케이션 진입점 (FastAPI 인스턴스)
+│   ├── alembic/                # 데이터베이스 마이그레이션 이력
+│   ├── Dockerfile              # 백엔드 컨테이너 설정
+│   └── requirements.txt        # 의존성 패키지 목록
+├── frontend/                   # React 프론트엔드 서비스
 │   ├── src/
-│   │   ├── api/                # Axios 클라이언트 및 API 호출 함수
-│   │   ├── components/         # 재사용 가능한 공통 UI
-│   │   │   ├── common/         # Button, Modal 등
-│   │   │   └── layout/         # Header, Footer
-│   │   ├── features/           # 도메인 중심 기능 구조 (권장)
-│   │   │   ├── certs/          # 자격증 관련 컴포넌트 & 로직
-│   │   │   └── recommendations/# 추천 관련 컴포넌트 & 로직
-│   │   ├── hooks/              # 커스텀 훅 (useAuth, useCerts 등)
-│   │   ├── lib/                # 유틸리티 (utils, formatters)
-│   │   ├── pages/              # 라우트별 페이지 컴포넌트
-│   │   ├── store/              # 전역 상태 관리 (Zustand 등)
-│   │   └── types/              # TypeScript 인터페이스
-│   ├── public/
-│   ├── Dockerfile
-│   └── package.json
-├── docker-compose.yml
-└── README.md
-
+│   │   ├── api/                # Axios API 클라이언트 정의
+│   │   ├── components/         # 전역 공통 컴포넌트
+│   │   │   ├── common/         # 기초 UI (Button, Input 등)
+│   │   │   └── layout/         # 레이아웃 (Navbar, Footer 등)
+│   │   ├── features/           # 도메인 기반 기능 모듈
+│   │   │   ├── certs/          # 자격증 관련 UI & 로직
+│   │   │   └── recommendations/# 추천 시스템 관련 UI & 로직
+│   │   ├── hooks/              # 재사용 가능한 커스텀 훅
+│   │   ├── lib/                # 유틸리티 및 라이브러리 설정
+│   │   ├── pages/              # 라우팅 페이지 컴포넌트
+│   │   ├── store/              # 전역 상태 관리 (Zustand, Redux 등)
+│   │   └── types/              # TypeScript 인터페이스/타입 정의
+│   ├── public/                 # 정적 에셋 (이미지, 파비콘 등)
+│   ├── Dockerfile              # 프론트엔드 컨테이너 설정
+│   └── package.json            # 프로젝트 의존성 및 스크립트
+├── docker-compose.yml          # 전체 스택 오케스트레이션
+└── README.md                   # 프로젝트 문서
 
 1. 환경 변수 설정
 각 디렉토리의 .env.example 파일을 복사하여 실제 환경에 맞는 설정값을 입력합니다.
