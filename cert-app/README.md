@@ -1,5 +1,6 @@
 ## 프로젝트 구조
 
+```text
 cert-app/
 ├── backend/                    # FastAPI 백엔드 서비스
 │   ├── app/
@@ -54,6 +55,7 @@ cert-app/
 │   └── package.json            # 프로젝트 의존성 및 스크립트
 ├── docker-compose.yml          # 전체 스택 오케스트레이션
 └── README.md                   # 프로젝트 문서
+```
 
 1. 환경 변수 설정
 각 디렉토리의 .env.example 파일을 복사하여 실제 환경에 맞는 설정값을 입력합니다.
