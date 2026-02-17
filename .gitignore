@@ -1,53 +1,53 @@
-# =========================
-# Secrets / env (절대 커밋 금지)
-# =========================
+# ==============================================================================
+# CERTFINDER PROJECT GITIGNORE
+# ==============================================================================
+
+# [Secrets & Environment]
+# 민감한 설정 정보 및 API 키 파일
 .env
 .env.*
 !.env.example
 
-# =========================
-# Node / Vite / React (frontend)
-# =========================
-**/node_modules/
-**/dist/
-**/build/
-**/.vite/
-**/.cache/
-**/*.log
+# [Frontend] Node.js / Vite / React
+# 의존성 패키지 및 빌드 결과물
+node_modules/
+dist/
+build/
+.vite/
+.cache/
+*.log
 
-# =========================
-# Python / FastAPI (backend)
-# =========================
-**/__pycache__/
-**/*.py[cod]
-**/*.pyo
+# [Backend] Python / FastAPI
+# 컴파일된 바이트코드 및 가상환경
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
 
-**/.venv/
-**/venv/
-**/.pytest_cache/
-**/.mypy_cache/
-**/.ruff_cache/
+# [Testing & Linting]
+# 테스트 결과 및 린터 캐시
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
 
-# Python build artifacts
-**/*.egg-info/
-**/.eggs/
+# [Database & Storage]
+# 로컬 개발용 DB 및 업로드된 정적 파일
+*.sqlite3
+backend/data/
+frontend/public/uploads/
 
-# =========================
-# Database / local volumes
-# =========================
-**/*.sqlite3
-**/data/
-**/uploads/
-
-# =========================
-# OS / Editor
-# =========================
+# [OS & Editors]
+# 운영체제 생성 파일 및 IDE 설정
 .DS_Store
 Thumbs.db
-**/.vscode/
-**/.idea/
+.vscode/
+.idea/
 
-# =========================
-# Docker (선택: 로컬 전용 파일 제외)
-# =========================
-**/.docker/
+# [Certificates - Important]
+# 프로젝트 특성상 생성될 수 있는 개인키/인증서 파일 제외
+*.pem
+*.key
+*.crt
+!**/example.crt
