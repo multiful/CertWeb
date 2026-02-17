@@ -16,7 +16,6 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-// import { Skeleton } from '@/components/ui/skeleton';
 import { getJobDetail } from '@/lib/api';
 import type { Job } from '@/types';
 import { useRouter } from '@/App';
