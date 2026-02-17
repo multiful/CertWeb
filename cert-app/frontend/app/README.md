@@ -71,3 +71,26 @@ export default defineConfig([
   },
 ])
 ```
+
+## 구조 
+
+frontend/
+├── src/
+│   ├── api/            # API 클라이언트 (Axios 인스턴스 등)
+│   │   └── certApi.ts
+│   ├── assets/         # 이미지, 아이콘, 폰트
+│   ├── components/
+│   │   ├── common/     # Button, Input 등 공용 컴포넌트
+│   │   └── layout/     # Navbar, Footer, Sidebar
+│   ├── features/       # 도메인별 기능 집합 (추천 구조)
+│   │   ├── certs/
+│   │   │   ├── components/
+│   │   │   └── certSlice.ts (상태 관리)
+│   ├── hooks/          # 순수 UI 로직 관련 커스텀 훅
+│   ├── pages/          # 실제 라우트 페이지
+│   ├── store/          # Redux 또는 Zustand 상태 관리
+│   ├── types/          # TypeScript 인터페이스 정의
+│   └── utils/          # 날짜 포맷팅 등 유틸리티 함수
+├── public/
+├── .env.example
+└── tailwind.config.js
