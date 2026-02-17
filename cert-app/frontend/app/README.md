@@ -74,6 +74,7 @@ export default defineConfig([
 
 ## 구조 
 
+```text
 frontend/
 ├── src/
 │   ├── api/            # API 클라이언트 (Axios 인스턴스 등)
@@ -94,3 +95,4 @@ frontend/
 ├── public/
 ├── .env.example
 └── tailwind.config.js
+```
