@@ -13,6 +13,7 @@ import type {
   Job,
   SemanticSearchResponse,
   HybridRecommendationResponse,
+  TrendingQualificationListResponse,
 } from '@/types';
 import { mockApi } from './mockApi';
 
@@ -105,6 +106,16 @@ export async function getRecommendations(
     return await apiRequest<RecommendationListResponse>(`/recommendations?major=${encodeURIComponent(major)}&limit=${limit}`);
   } catch {
     return mockApi.getRecommendations(major);
+  }
+}
+
+export async function getTrendingCerts(
+  limit: number = 10
+): Promise<TrendingQualificationListResponse> {
+  try {
+    return await apiRequest<TrendingQualificationListResponse>(`/certs/trending/now?limit=${limit}`);
+  } catch {
+    return { items: [], total: 0 };
   }
 }
 

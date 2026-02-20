@@ -61,6 +61,7 @@ export function CertListPage() {
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [inputValue, setInputValue] = useState(params.q || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [favoritesItems, setFavoritesItems] = useState<any[]>([]);
 
   // Load favorites
   useEffect(() => {
@@ -69,11 +70,19 @@ export function CertListPage() {
         try {
           const res = await getFavorites(token, 1, 1000);
           setFavoriteIds(res.items.map(f => f.qual_id));
+          // Extract the qualification data from UserFavorite objects
+          const certs = res.items.map(f => ({
+            ...f.qualification,
+            // Enforce structure expected by list item
+            latest_pass_rate: f.qualification.latest_pass_rate,
+            avg_difficulty: f.qualification.avg_difficulty
+          }));
+          setFavoritesItems(certs);
         } catch (err: any) {
-          // If 401, treat as not logged in or session expired - clear favorites
           if (err.message && err.message.includes('401')) {
             console.warn('Session expired or invalid token, clearing favorites');
             setFavoriteIds([]);
+            setFavoritesItems([]);
           } else {
             console.error('Failed to load favorites from API:', err);
           }
@@ -83,6 +92,8 @@ export function CertListPage() {
         if (saved) {
           try {
             setFavoriteIds(JSON.parse(saved));
+            // For guest, we can't easily get full data without searching
+            // but the app should ideally handle this.
           } catch {
             setFavoriteIds([]);
           }
@@ -146,10 +157,18 @@ export function CertListPage() {
 
   // Filter items locally if Favorites Only is active
   const filteredItems = useMemo(() => {
+    if (isFavoritesOnly) {
+      // If we are logged in, use the full fetched favorites list
+      if (user && favoritesItems.length > 0) {
+        return favoritesItems;
+      }
+      // If guest or favoritesData is empty, fallback to current page filtered (limited)
+      if (!data) return [];
+      return data.items.filter(item => favoriteIds.includes(item.qual_id));
+    }
     if (!data) return [];
-    if (!isFavoritesOnly) return data.items;
-    return data.items.filter(item => favoriteIds.includes(item.qual_id));
-  }, [data, isFavoritesOnly, favoriteIds]);
+    return data.items;
+  }, [data, isFavoritesOnly, favoriteIds, favoritesItems, user]);
 
   // Debounce search input - Removed to ensure explicit search action
   /*

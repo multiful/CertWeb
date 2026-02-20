@@ -21,6 +21,7 @@ import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { useRouter } from '@/App';
+import { useMajors } from '@/hooks/useRecommendations';
 
 export function UserMenu() {
     const router = useRouter();
@@ -29,6 +30,8 @@ export function UserMenu() {
     const [loading, setLoading] = useState(false);
     const [isSignUp, setIsSignUp] = useState(false);
     const [signupStep, setSignupStep] = useState(1); // 1: Email, 2: Code + Details
+    const [showMajorSuggestions, setShowMajorSuggestions] = useState(false);
+    const { majors: availableMajors } = useMajors();
 
     // Form States
     const [email, setEmail] = useState('');
@@ -224,7 +227,11 @@ export function UserMenu() {
             </Button>
 
             <Dialog open={isLoginOpen} onOpenChange={(open) => { if (!open) resetStates(); setIsLoginOpen(open); }}>
-                <DialogContent className="bg-slate-950/98 backdrop-blur-2xl border-slate-800 text-slate-200 sm:max-w-[420px] rounded-[2rem] shadow-2xl p-0 overflow-hidden">
+                <DialogContent
+                    className="bg-slate-950/98 backdrop-blur-2xl border-slate-800 text-slate-200 sm:max-w-[420px] rounded-[2rem] shadow-2xl p-0 overflow-hidden"
+                    onPointerDownOutside={(e) => e.preventDefault()}
+                    onEscapeKeyDown={(e) => e.preventDefault()}
+                >
                     <div className="p-8 space-y-6">
                         <DialogHeader>
                             <DialogTitle className="text-3xl font-extrabold tracking-tight">
@@ -308,9 +315,41 @@ export function UserMenu() {
                                                 </div>
                                             </div>
 
-                                            <div className="space-y-2">
+                                            <div className="space-y-2 relative">
                                                 <Label className="text-slate-400 text-[11px] font-bold uppercase">전공 (선택)</Label>
-                                                <Input value={major} onChange={(e) => setMajor(e.target.value)} className="bg-slate-950 border-slate-800 h-11" placeholder="예: 컴퓨터공학" />
+                                                <div className="relative">
+                                                    <Input
+                                                        value={major}
+                                                        onChange={(e) => {
+                                                            setMajor(e.target.value);
+                                                            setShowMajorSuggestions(true);
+                                                        }}
+                                                        onFocus={() => setShowMajorSuggestions(true)}
+                                                        onBlur={() => setTimeout(() => setShowMajorSuggestions(false), 200)}
+                                                        className="bg-slate-950 border-slate-800 h-11"
+                                                        placeholder="예: 컴퓨터공학"
+                                                    />
+                                                    {showMajorSuggestions && major.length > 0 && (
+                                                        <div className="absolute bottom-full left-0 right-0 mb-2 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-[100] max-h-48 overflow-y-auto">
+                                                            {availableMajors
+                                                                .filter(m => m.toLowerCase().includes(major.toLowerCase()))
+                                                                .slice(0, 10)
+                                                                .map(m => (
+                                                                    <div
+                                                                        key={m}
+                                                                        onMouseDown={() => {
+                                                                            setMajor(m);
+                                                                            setShowMajorSuggestions(false);
+                                                                        }}
+                                                                        className="px-4 py-2 hover:bg-slate-800 cursor-pointer text-sm text-slate-300 border-b border-slate-800/50 last:border-0"
+                                                                    >
+                                                                        {m}
+                                                                    </div>
+                                                                ))
+                                                            }
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
 

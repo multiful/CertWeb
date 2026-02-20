@@ -9,10 +9,11 @@ from app.schemas import (
     QualificationListResponse,
     QualificationDetailResponse,
     QualificationListItemResponse,
-    QualificationListItemResponse,
     QualificationStatsListResponse,
     QualificationFilterParams,
-    PassRateTrendResponse
+    PassRateTrendResponse,
+    TrendingQualificationListResponse,
+    TrendingQualificationResponse
 )
 from sqlalchemy import text
 from datetime import date
@@ -119,9 +120,12 @@ async def get_certs(
         total_pages=total_pages
     )
     
-    # Cache the response
-    redis_client.set(cache_key, response.model_dump(mode="json"), get_cache_ttl("list"))
-    
+    # If searching, increment trending for top results
+    if q and response_items:
+        # Increment trending for the top 3 results to avoid over-counting everything
+        for item in response_items[:3]:
+            redis_client.increment_trending("trending_certs", str(item.qual_id), amount=0.5)
+            
     return response
 
 
@@ -165,6 +169,8 @@ async def get_cert_detail(
     cached = redis_client.get(cache_key)
     if cached:
         logger.debug(f"Cache hit for cert detail: {qual_id}")
+        # Increment trending traffic
+        redis_client.increment_trending("trending_certs", str(qual_id), amount=1.0)
         return QualificationDetailResponse(**cached)
     
     # Get from database
@@ -174,6 +180,9 @@ async def get_cert_detail(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Certification with ID {qual_id} not found"
         )
+    
+    # Increment trending traffic for DB hit too
+    redis_client.increment_trending("trending_certs", str(qual_id), amount=1.0)
     
     # Get aggregated stats
     from app.crud import get_qualification_aggregated_stats
@@ -336,3 +345,41 @@ async def get_cert_trends(
         results = db.execute(query_calc, {"qual_id": qual_id, "start_year": start_year}).mappings().all()
 
     return [PassRateTrendResponse(**row) for row in results]
+
+
+@router.get(
+    "/trending/now",
+    response_model=TrendingQualificationListResponse,
+    summary="Get trending certifications",
+    description="Get real-time trending certifications based on user traffic (clicks/searches)."
+)
+async def get_trending_certs(
+    limit: int = Query(10, ge=1, le=20),
+    db: Session = Depends(get_db_session)
+):
+    """Get real-time trending certifications from Redis."""
+    trending_data = redis_client.get_trending("trending_certs", limit)
+    
+    if not trending_data:
+        # Fallback to recent popular search or defaults if Redis is empty
+        return TrendingQualificationListResponse(items=[], total=0)
+    
+    items = []
+    for qual_id_str, score in trending_data:
+        qual_id = int(qual_id_str)
+        qual = qualification_crud.get_by_id(db, qual_id)
+        if qual:
+            items.append(
+                TrendingQualificationResponse(
+                    qual_id=qual.qual_id,
+                    qual_name=qual.qual_name,
+                    qual_type=qual.qual_type,
+                    main_field=qual.main_field,
+                    score=score
+                )
+            )
+            
+    return TrendingQualificationListResponse(
+        items=items,
+        total=len(items)
+    )

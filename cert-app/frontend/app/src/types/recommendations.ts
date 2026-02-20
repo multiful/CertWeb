@@ -28,3 +28,16 @@ export interface HybridRecommendationResponse {
     interest?: string;
     results: HybridRecommendationResult[];
 }
+
+export interface TrendingQualification {
+    qual_id: number;
+    qual_name: string;
+    qual_type: string | null;
+    main_field: string | null;
+    score: number;
+}
+
+export interface TrendingQualificationListResponse {
+    items: TrendingQualification[];
+    total: number;
+}

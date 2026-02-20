@@ -16,29 +16,32 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from '@/App';
-import { getCertifications } from '@/lib/api';
-import type { QualificationListItem } from '@/types';
+import { getTrendingCerts } from '@/lib/api';
+import type { TrendingQualification } from '@/types';
 
 export function HomePage() {
   const router = useRouter();
   const [search, setSearch] = useState('');
-  const [topCerts, setTopCerts] = useState<QualificationListItem[]>([]);
+  const [trendingCerts, setTrendingCerts] = useState<TrendingQualification[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const fetchTrendingData = async () => {
+    try {
+      const res = await getTrendingCerts(6);
+      setTrendingCerts(res.items);
+    } catch (error) {
+      console.error('Failed to fetch trending data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [certsRes] = await Promise.all([
-          getCertifications({ page_size: 6, sort: 'recent' })
-        ]);
-        setTopCerts(certsRes.items);
-      } catch (error) {
-        console.error('Failed to fetch home data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
+    fetchTrendingData();
+
+    // Refresh every 5 minutes (300,000 ms)
+    const interval = setInterval(fetchTrendingData, 300000);
+    return () => clearInterval(interval);
   }, []);
 
   const handleSearch = (e: React.FormEvent) => {
@@ -249,23 +252,26 @@ export function HomePage() {
             </div>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {topCerts.map((cert) => (
+              {trendingCerts.map((cert, index) => (
                 <div
                   key={cert.qual_id}
                   onClick={() => router.navigate(`/certs/${cert.qual_id}`)}
-                  className="group relative p-6 bg-slate-900 border border-slate-800 rounded-2xl hover:border-slate-600 transition-all cursor-pointer overflow-hidden"
+                  className="group relative p-6 bg-slate-900 border border-slate-800 rounded-2xl hover:border-blue-500/50 hover:bg-slate-900/80 transition-all cursor-pointer overflow-hidden shadow-lg"
                 >
                   <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-blue-600/5 to-transparent rounded-bl-full group-hover:from-blue-600/10 transition-colors" />
+
+                  {/* Rank Badge */}
+                  <div className="absolute -top-1 -left-1 w-8 h-8 bg-blue-600 text-white rounded-br-xl flex items-center justify-center font-bold text-xs z-10">
+                    {index + 1}
+                  </div>
 
                   <div className="relative space-y-4">
                     <div className="flex justify-between items-start">
                       <Badge className="bg-slate-800 text-slate-300 border-none px-2 py-0">{cert.qual_type}</Badge>
-                      {cert.latest_pass_rate && (
-                        <div className="flex items-center gap-1 text-emerald-400 text-sm font-bold">
-                          <Zap className="w-3 h-3 fill-emerald-400" />
-                          {cert.latest_pass_rate}%
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1 text-blue-400 text-sm font-bold bg-blue-400/5 px-2 py-1 rounded-lg border border-blue-400/10">
+                        <TrendingUp className="w-3 h-3" />
+                        {cert.score.toFixed(1)}
+                      </div>
                     </div>
 
                     <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors line-clamp-1">
@@ -274,14 +280,17 @@ export function HomePage() {
 
                     <div className="flex items-center gap-3 text-xs text-slate-500 font-medium">
                       <span className="flex items-center gap-1">
-                        <Award className="w-3 h-3" /> {cert.managing_body || "정보 없음"}
+                        <Award className="w-3 h-3" /> {cert.main_field || "정보 없음"}
                       </span>
-                      <span className="w-1 h-1 rounded-full bg-slate-700" />
-                      <span>{cert.grade_code || "등급 없음"}</span>
                     </div>
                   </div>
                 </div>
               ))}
+              {trendingCerts.length === 0 && !loading && (
+                <div className="col-span-full py-12 text-center text-slate-500 bg-slate-900/20 rounded-2xl border border-dashed border-slate-800">
+                  데이터 집계 중입니다... 자격증을 검색하거나 상세 페이지를 조회해보세요!
+                </div>
+              )}
             </div>
           )}
         </div>

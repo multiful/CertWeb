@@ -179,6 +179,31 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Rate limit check error: {e}")
             return True, max_requests, 0
+            
+    # ============== Trending Operations ==============
+    
+    def increment_trending(self, key: str, member: str, amount: float = 1.0) -> bool:
+        """Increment score for a member in a sorted set (trending)."""
+        if not self.client:
+            return False
+        try:
+            self.client.zincrby(key, amount, member)
+            # Keep only top 100 to save memory
+            self.client.zremrangebyrank(key, 0, -101)
+            return True
+        except Exception as e:
+            logger.error(f"Redis zincrby error: {e}")
+            return False
+            
+    def get_trending(self, key: str, top_n: int = 10) -> List[tuple[str, float]]:
+        """Get top members from a sorted set with scores."""
+        if not self.client:
+            return []
+        try:
+            return self.client.zrevrange(key, 0, top_n - 1, withscores=True)
+        except Exception as e:
+            logger.error(f"Redis zrevrange error: {e}")
+            return []
     
     # ============== Cache Key Helpers ==============
     

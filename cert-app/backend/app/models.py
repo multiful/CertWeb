@@ -65,7 +65,7 @@ class MajorQualificationMap(Base):
     __tablename__ = "major_qualification_map"
     
     map_id = Column(Integer, primary_key=True, index=True)
-    major = Column(String(100), nullable=False, index=True)
+    major = Column(String(100), ForeignKey("major.major_name", ondelete="CASCADE"), nullable=False, index=True)
     qual_id = Column(Integer, ForeignKey("qualification.qual_id", ondelete="CASCADE"), nullable=False, index=True)
     score = Column(Float, nullable=False, default=1.0)
     weight = Column(Float, nullable=True)
@@ -76,6 +76,7 @@ class MajorQualificationMap(Base):
     
     # Relationships
     qualification = relationship("Qualification", back_populates="major_mappings")
+    major_obj = relationship("Major", back_populates="qualification_mappings")
     
     __table_args__ = (
         UniqueConstraint('major', 'qual_id', name='uq_major_qual'),
@@ -117,10 +118,13 @@ class Profile(Base):
     birth_date = Column(String(10))
     department = Column(String(100))
     grade_year = Column(Integer)
-    detail_major = Column(String(100))
+    detail_major = Column(String(100), ForeignKey("major.major_name", ondelete="SET NULL"), nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # Relationships
+    major_obj = relationship("Major", backref="profiles")
     
     def __repr__(self):
         return f"<Profile(id='{self.id}', userid='{self.userid}')>"
@@ -170,6 +174,9 @@ class Major(Base):
     major_category = Column(String(100), nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    qualification_mappings = relationship("MajorQualificationMap", back_populates="major_obj")
     
     def __repr__(self):
         return f"<Major(id={self.major_id}, name='{self.major_name}')>"

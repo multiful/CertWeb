@@ -176,6 +176,21 @@ class PassRateTrendResponse(BaseModel):
     difficulty_score: Optional[float] = None
 
 
+class TrendingQualificationResponse(BaseModel):
+    """Schema for trending qualification."""
+    qual_id: int
+    qual_name: str
+    qual_type: Optional[str] = None
+    main_field: Optional[str] = None
+    score: float
+
+
+class TrendingQualificationListResponse(BaseModel):
+    """Schema for list of trending qualifications."""
+    items: List[TrendingQualificationResponse]
+    total: int
+
+
 # ============== List Response Schemas ==============
 
 class PaginatedResponse(BaseModel):

@@ -316,12 +316,8 @@ class MajorQualificationMapCRUD:
     
     @staticmethod
     def get_majors_list(db: Session) -> List[str]:
-        """Get list of all majors."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     return list(data_loader.major_mappings.keys())
-
-        return [r[0] for r in db.query(MajorQualificationMap.major).distinct().all()]
+        """Get list of all majors from the dedicated Major table."""
+        return [r[0] for r in db.query(Major.major_name).order_by(Major.major_name).all()]
     
     @staticmethod
     def create(db: Session, obj_in: MajorQualificationMapCreate) -> MajorQualificationMap:
@@ -476,33 +472,52 @@ def get_qualification_aggregated_stats(
     #         "total_candidates": total_candidates,
     #     }
 
-    latest = QualificationStatsCRUD.get_latest_by_qual_id(db, qual_id)
+    # 1. Get raw stats from DB
+    raw_stats = db.query(
+        func.avg(QualificationStats.pass_rate).label("avg_pass_rate"),
+        func.avg(QualificationStats.difficulty_score).label("avg_diff"),
+        func.sum(QualificationStats.candidate_cnt).label("total_cands"),
+        func.count(QualificationStats.stat_id).label("num_records")
+    ).filter(QualificationStats.qual_id == qual_id).first()
     
-    if not latest:
+    if not raw_stats or not raw_stats.num_records:
         return {
             "latest_pass_rate": None,
             "avg_difficulty": None,
             "total_candidates": None,
         }
     
-    # Calculate average difficulty
-    avg_difficulty = db.query(
-        func.avg(QualificationStats.difficulty_score)
-    ).filter(
-        QualificationStats.qual_id == qual_id
-    ).scalar()
+    # 2. Derive base difficulty from pass rate
+    # Logic: Lower pass rate -> Higher difficulty (1-10 scale)
+    # Using a simple 10 - (PassRate / 10) formula as a baseline
+    avg_pass_rate = raw_stats.avg_pass_rate or 35.0  # Default to 35% if null
+    base_diff = max(1.0, min(10.0, (100 - avg_pass_rate) / 10.0))
     
-    # Calculate total candidates
-    total_candidates = db.query(
-        func.sum(QualificationStats.candidate_cnt)
-    ).filter(
-        QualificationStats.qual_id == qual_id
-    ).scalar()
+    # 3. Bayesian Smoothing / Regularization
+    # We want to pull the difficulty towards a stable mean if data is sparse
+    # C = Confidence weight for candidate count
+    # K = Confidence weight for number of records
+    C_THRESHOLD = 500  # We trust the data fully if > 500 candidates
+    K_THRESHOLD = 3    # We trust the data fully if > 3 exam rounds
+    
+    total_cands = raw_stats.total_cands or 0
+    num_records = raw_stats.num_records or 0
+    
+    # Global/Prior mean difficulty for certifications
+    PRIOR_DIFF = 6.5
+    
+    # Confidence factor [0.0 to 1.0]
+    conf_cands = min(1.0, total_cands / C_THRESHOLD)
+    conf_records = min(1.0, num_records / K_THRESHOLD)
+    confidence = (conf_cands + conf_records) / 2.0
+    
+    # Final smoothed difficulty
+    final_difficulty = (base_diff * confidence) + (PRIOR_DIFF * (1 - confidence))
     
     return {
-        "latest_pass_rate": latest.pass_rate,
-        "avg_difficulty": round(avg_difficulty, 2) if avg_difficulty else None,
-        "total_candidates": int(total_candidates) if total_candidates else None,
+        "latest_pass_rate": QualificationStatsCRUD.get_latest_by_qual_id(db, qual_id).pass_rate,
+        "avg_difficulty": round(final_difficulty, 1),
+        "total_candidates": int(total_cands),
     }
 
 

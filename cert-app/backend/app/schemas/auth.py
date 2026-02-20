@@ -10,7 +10,7 @@ class EmailVerifyCodeRequest(BaseModel):
 
 class AuthSignupComplete(BaseModel):
     name: str = Field(..., min_length=1)
-    userid: str = Field(..., min_length=4, max_length=20)
+    userid: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$|^[a-zA-Z0-9]{8}$")
     email: EmailStr
     password: str = Field(..., min_length=6)
     password_confirm: str = Field(..., min_length=6)

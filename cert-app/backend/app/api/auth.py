@@ -199,6 +199,13 @@ async def signup_complete(
     }
 
     try:
+        if payload.detail_major:
+            # Ensure major exists in major table for foreign key constraint
+            db.execute(
+                text("INSERT INTO major (major_name) VALUES (:major) ON CONFLICT (major_name) DO NOTHING"),
+                {"major": payload.detail_major}
+            )
+
         db.execute(
             text("""
                 INSERT INTO profiles (id, name, userid, birth_date, email, detail_major)

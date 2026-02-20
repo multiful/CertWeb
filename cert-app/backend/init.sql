@@ -1,6 +1,13 @@
 -- Initial database setup with sample data
 
 -- Create tables (if not using Alembic)
+CREATE TABLE IF NOT EXISTS major (
+    major_id SERIAL PRIMARY KEY,
+    major_name VARCHAR(100) UNIQUE NOT NULL,
+    major_category VARCHAR(100),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY,
     userid VARCHAR(50) UNIQUE,
@@ -9,7 +16,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     birth_date VARCHAR(10),
     department VARCHAR(100),
     grade_year INTEGER,
-    detail_major VARCHAR(100),
+    detail_major VARCHAR(100) REFERENCES major(major_name) ON DELETE SET NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE
 );
@@ -44,7 +51,7 @@ CREATE TABLE IF NOT EXISTS qualification_stats (
 
 CREATE TABLE IF NOT EXISTS major_qualification_map (
     map_id SERIAL PRIMARY KEY,
-    major VARCHAR(100) NOT NULL,
+    major VARCHAR(100) NOT NULL REFERENCES major(major_name) ON DELETE CASCADE,
     qual_id INTEGER REFERENCES qualification(qual_id) ON DELETE CASCADE,
     score FLOAT DEFAULT 1.0,
     weight FLOAT,
@@ -96,6 +103,10 @@ INSERT INTO qualification (qual_name, qual_type, main_field, ncs_large, managing
 ('간호사', '국가자격', '보건·의료', '간호', '한국보건의료인국가시험원', NULL, TRUE),
 ('의사', '국가자격', '보건·의료', '의료', '한국보건의료인국가시험원', NULL, TRUE),
 ('약사', '국가자격', '보건·의료', '약학', '한국보건의료인국가시험원', NULL, TRUE)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO major (major_name) VALUES
+('컴퓨터공학'), ('소프트웨어공학'), ('정보통신공학'), ('전기공학'), ('전자공학'), ('기계공학'), ('건축학'), ('토목공학'), ('경영학'), ('회계학'), ('간호학'), ('의학'), ('약학')
 ON CONFLICT DO NOTHING;
 
 -- Insert sample stats

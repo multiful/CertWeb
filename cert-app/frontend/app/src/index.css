@@ -69,7 +69,22 @@
   * {
     @apply border-border;
   }
+
+  html {
+    font-size: 15.36px;
+    /* Default is 16px. 15.36px is 96% scale. */
+  }
+
   body {
     @apply bg-background text-foreground;
+    min-height: 100vh;
+  }
+
+  #root {
+    max-width: 1600px;
+    /* Constrain wide screens to ~80% of typical 1920px resolution */
+    margin: 0 auto;
+    position: relative;
+    width: 100%;
   }
 }
