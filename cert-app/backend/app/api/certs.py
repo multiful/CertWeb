@@ -15,7 +15,7 @@ from app.schemas import (
     TrendingQualificationListResponse,
     TrendingQualificationResponse
 )
-from sqlalchemy import text
+from sqlalchemy import text, func
 from datetime import date
 from app.crud import qualification_crud, stats_crud, get_qualification_aggregated_stats
 from app.redis_client import redis_client
@@ -160,6 +160,7 @@ async def get_filter_options(
 async def get_cert_detail(
     qual_id: int,
     db: Session = Depends(get_db_session),
+    user_id: Optional[str] = Depends(get_optional_user),
     _: None = Depends(check_rate_limit)
 ):
     """Get certification detail by ID."""
@@ -171,6 +172,11 @@ async def get_cert_detail(
         logger.debug(f"Cache hit for cert detail: {qual_id}")
         # Increment trending traffic
         redis_client.increment_trending("trending_certs", str(qual_id), amount=1.0)
+        
+        # Store in recent for user
+        if user_id:
+            redis_client.push_recent(f"user:{user_id}:recent_certs", str(qual_id))
+            
         return QualificationDetailResponse(**cached)
     
     # Get from database
@@ -183,6 +189,10 @@ async def get_cert_detail(
     
     # Increment trending traffic for DB hit too
     redis_client.increment_trending("trending_certs", str(qual_id), amount=1.0)
+    
+    # Store in recent for user
+    if user_id:
+        redis_client.push_recent(f"user:{user_id}:recent_certs", str(qual_id))
     
     # Get aggregated stats
     from app.crud import get_qualification_aggregated_stats
@@ -361,8 +371,25 @@ async def get_trending_certs(
     trending_data = redis_client.get_trending("trending_certs", limit)
     
     if not trending_data:
-        # Fallback to recent popular search or defaults if Redis is empty
-        return TrendingQualificationListResponse(items=[], total=0)
+        # Fallback to top certifications by total candidate count if Redis is empty
+        from app.models import Qualification, QualificationStats
+        top_quals = db.query(
+            Qualification,
+            func.sum(QualificationStats.candidate_cnt).label("total_cands")
+        ).join(QualificationStats).group_by(Qualification.qual_id).order_by(text("total_cands DESC")).limit(limit).all()
+        
+        items = []
+        for qual, total_cands in top_quals:
+            items.append(
+                TrendingQualificationResponse(
+                    qual_id=qual.qual_id,
+                    qual_name=qual.qual_name,
+                    qual_type=qual.qual_type,
+                    main_field=qual.main_field,
+                    score=float(total_cands or 0)
+                )
+            )
+        return TrendingQualificationListResponse(items=items, total=len(items))
     
     items = []
     for qual_id_str, score in trending_data:
@@ -383,3 +410,98 @@ async def get_trending_certs(
         items=items,
         total=len(items)
     )
+
+@router.get(
+    "/search/rag",
+    summary="RAG-based advanced search",
+    description="Vector search + Redis traffic score fusion for the most relevant results."
+)
+async def rag_search(
+    q: str = Query(..., min_length=2),
+    limit: int = Query(5, ge=1, le=10),
+    db: Session = Depends(get_db_session)
+):
+    """Perform RAG search with traffic score boosting."""
+    from app.services.vector_service import vector_service
+    
+    # 1. Vector similarity search
+    vector_results = vector_service.similarity_search(db, q, limit=limit)
+    
+    # 2. Traffic score fusion (Boost by Redis clicks)
+    fusion_results = []
+    for res in vector_results:
+        qual_id = res['qual_id']
+        # If qual_id is None (not matched yet), skip boosting
+        traffic_score = 0
+        if qual_id:
+            raw_score = redis_client.db.zscore("trending_certs", str(qual_id))
+            traffic_score = float(raw_score or 0) / 100.0 # Normalize boost
+        
+        # Combine scores
+        res['final_score'] = res['similarity'] + traffic_score
+        fusion_results.append(res)
+    
+    # Sort by final score
+    fusion_results.sort(key=lambda x: x['final_score'], reverse=True)
+    
+    return {
+        "query": q,
+        "items": fusion_results
+    }
+
+
+@router.get(
+    "/recent/viewed",
+    response_model=list[QualificationListItemResponse],
+    summary="Get recently viewed certifications",
+    description="Get list of recently viewed certifications from Redis for the current user."
+)
+async def get_recent_viewed(
+    db: Session = Depends(get_db_session),
+    user_id: Optional[str] = Depends(get_optional_user),
+    _: None = Depends(check_rate_limit)
+):
+    """Get recently viewed certifications for the user."""
+    if not user_id:
+        return []
+    
+    key = f"user:{user_id}:recent_certs"
+    recent_ids = redis_client.get_recent(key, count=10)
+    
+    if not recent_ids:
+        return []
+    
+    # Fetch details and preserve order
+    response_items = []
+    # Convert IDs to int
+    try:
+        int_ids = [int(rid) for rid in recent_ids]
+    except Exception:
+        return []
+    
+    # Get qualifications
+    from app.models import Qualification
+    quals = db.query(Qualification).filter(Qualification.qual_id.in_(int_ids)).all()
+    qual_map = {q.qual_id: q for q in quals}
+    
+    for qid in int_ids:
+        if qid in qual_map:
+            item = qual_map[qid]
+            stats = get_qualification_aggregated_stats(db, item.qual_id)
+            response_items.append(
+                QualificationListItemResponse(
+                    qual_id=item.qual_id,
+                    qual_name=item.qual_name,
+                    qual_type=item.qual_type,
+                    main_field=item.main_field,
+                    ncs_large=item.ncs_large,
+                    managing_body=item.managing_body,
+                    grade_code=item.grade_code,
+                    is_active=item.is_active,
+                    created_at=item.created_at,
+                    updated_at=item.updated_at,
+                    **stats
+                )
+            )
+            
+    return response_items

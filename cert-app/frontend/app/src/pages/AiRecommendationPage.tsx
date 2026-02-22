@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getHybridRecommendations, getAvailableMajors } from '@/lib/api';
-import { useRouter } from '@/App';
+import { useRouter } from '@/lib/router';
 import type { HybridRecommendationResponse } from '@/types';
 import { toast } from 'sonner';
 

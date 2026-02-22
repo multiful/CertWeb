@@ -488,15 +488,10 @@ def get_qualification_aggregated_stats(
         }
     
     # 2. Derive base difficulty from pass rate
-    # Logic: Lower pass rate -> Higher difficulty (1-10 scale)
-    # Using a simple 10 - (PassRate / 10) formula as a baseline
     avg_pass_rate = raw_stats.avg_pass_rate or 35.0  # Default to 35% if null
     base_diff = max(1.0, min(10.0, (100 - avg_pass_rate) / 10.0))
     
     # 3. Bayesian Smoothing / Regularization
-    # We want to pull the difficulty towards a stable mean if data is sparse
-    # C = Confidence weight for candidate count
-    # K = Confidence weight for number of records
     C_THRESHOLD = 500  # We trust the data fully if > 500 candidates
     K_THRESHOLD = 3    # We trust the data fully if > 3 exam rounds
     
@@ -511,11 +506,46 @@ def get_qualification_aggregated_stats(
     conf_records = min(1.0, num_records / K_THRESHOLD)
     confidence = (conf_cands + conf_records) / 2.0
     
+    # 4. Level-based Difficulty Adjustment (Heuristic Weighting)
+    # Get qualification metadata
+    from app.models import Qualification
+    qual = db.query(Qualification).filter(Qualification.qual_id == qual_id).first()
+    
+    level_weight = 1.0
+    if qual:
+        # National Technical Qualifications (국가기술자격)
+        if qual.qual_type == "국가기술자격":
+            if qual.grade_code in ["기술사", "기능장"]:
+                level_weight = 1.3
+            elif qual.grade_code == "기사":
+                level_weight = 1.15
+            elif qual.grade_code == "산업기사":
+                level_weight = 1.05
+            elif qual.grade_code == "기능사":
+                level_weight = 0.95
+        # National Professional Qualifications (국가전문자격)
+        elif qual.qual_type == "국가전문자격":
+            # Per user request: Weight between Technical Professional (1.3) and Engineer (1.15)
+            level_weight = 1.22
+        # Private Qualifications (민간자격)
+        elif qual.qual_type and "민간" in qual.qual_type:
+            level_weight = 0.85
+
+    # Apply weight to base difficulty
+    base_diff *= level_weight
+
     # Final smoothed difficulty
     final_difficulty = (base_diff * confidence) + (PRIOR_DIFF * (1 - confidence))
     
+    # Ensure it stays within 1.0 - 10.0
+    final_difficulty = max(1.0, min(10.0, final_difficulty))
+
+    # 5. Get latest pass rate safely
+    latest = QualificationStatsCRUD.get_latest_by_qual_id(db, qual_id)
+    latest_pass_rate = latest.pass_rate if latest else None
+    
     return {
-        "latest_pass_rate": QualificationStatsCRUD.get_latest_by_qual_id(db, qual_id).pass_rate,
+        "latest_pass_rate": latest_pass_rate,
         "avg_difficulty": round(final_difficulty, 1),
         "total_candidates": int(total_cands),
     }

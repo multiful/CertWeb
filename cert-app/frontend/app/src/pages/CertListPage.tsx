@@ -13,7 +13,7 @@ import {
   RefreshCw,
   Bookmark
 } from 'lucide-react';
-import { getFavorites, addFavorite, removeFavorite } from '@/lib/api';
+import { getFavorites, addFavorite, removeFavorite, getTrendingCerts } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
@@ -28,7 +28,7 @@ import {
   SelectValue
 } from '@/components/ui/select';
 import { useCerts, useFilterOptions } from '@/hooks/useCerts';
-import { useRouter } from '@/App';
+import { useRouter } from '@/lib/router';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { CertFilterParams, SortOption } from '@/types';
 
@@ -58,46 +58,63 @@ export function CertListPage() {
 
   const { data, loading, error, refetch } = useCerts(params);
   const { data: filters } = useFilterOptions();
+  const [trendingCerts, setTrendingCerts] = useState<any[]>([]);
+
+  // Load trending certs
+  useEffect(() => {
+    async function loadTrending() {
+      try {
+        const res = await getTrendingCerts(5);
+        setTrendingCerts(res.items);
+      } catch (err) {
+        console.error('Failed to load trending certs:', err);
+      }
+    }
+    loadTrending();
+  }, []);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [inputValue, setInputValue] = useState(params.q || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [favoritesItems, setFavoritesItems] = useState<any[]>([]);
+  const [favoritesLoading, setFavoritesLoading] = useState(true);
 
   // Load favorites
   useEffect(() => {
     async function loadFavorites() {
       if (user && token) {
+        setFavoritesLoading(true);
         try {
           const res = await getFavorites(token, 1, 1000);
-          setFavoriteIds(res.items.map(f => f.qual_id));
+          setFavoriteIds(res.items.map((f: any) => f.qual_id));
           // Extract the qualification data from UserFavorite objects
-          const certs = res.items.map(f => ({
-            ...f.qualification,
-            // Enforce structure expected by list item
-            latest_pass_rate: f.qualification.latest_pass_rate,
-            avg_difficulty: f.qualification.avg_difficulty
+          const certs = res.items.map((f: any) => ({
+            ...(f.qualification || {}),
+            latest_pass_rate: f.qualification?.latest_pass_rate,
+            avg_difficulty: f.qualification?.avg_difficulty
           }));
           setFavoritesItems(certs);
         } catch (err: any) {
           if (err.message && err.message.includes('401')) {
-            console.warn('Session expired or invalid token, clearing favorites');
             setFavoriteIds([]);
             setFavoritesItems([]);
           } else {
-            console.error('Failed to load favorites from API:', err);
+            console.error('Failed to load favorites:', err);
           }
+        } finally {
+          setFavoritesLoading(false);
         }
       } else if (!user) {
         const saved = localStorage.getItem('bookmarks');
         if (saved) {
           try {
             setFavoriteIds(JSON.parse(saved));
-            // For guest, we can't easily get full data without searching
-            // but the app should ideally handle this.
           } catch {
             setFavoriteIds([]);
           }
         }
+        setFavoritesLoading(false);
+      } else {
+        setFavoritesLoading(false);
       }
     }
     loadFavorites();
@@ -361,19 +378,35 @@ export function CertListPage() {
           <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest whitespace-nowrap mr-2">
             인기 검색어
           </span>
-          {["정보처리기사", "산업안전기사", "컴퓨터활용능력1급", "전기기사", "데이터분석준전문가"].map((keyword) => (
-            <Badge
-              key={keyword}
-              variant="outline"
-              className="cursor-pointer bg-slate-900/50 hover:bg-blue-600/20 hover:text-blue-400 hover:border-blue-500/30 transition-all whitespace-nowrap"
-              onClick={() => {
-                setInputValue(keyword);
-                updateParam('q', keyword);
-              }}
-            >
-              {keyword}
-            </Badge>
-          ))}
+          {trendingCerts.length > 0 ? (
+            trendingCerts.map((cert) => (
+              <Badge
+                key={cert.qual_id}
+                variant="outline"
+                className="cursor-pointer bg-slate-900/50 hover:bg-blue-600/20 hover:text-blue-400 hover:border-blue-500/30 transition-all whitespace-nowrap"
+                onClick={() => {
+                  setInputValue(cert.qual_name);
+                  updateParam('q', cert.qual_name);
+                }}
+              >
+                {cert.qual_name}
+              </Badge>
+            ))
+          ) : (
+            ["정보처리기사", "산업안전기사", "컴퓨터활용능력1급", "전기기사", "데이터분석준전문가"].map((keyword) => (
+              <Badge
+                key={keyword}
+                variant="outline"
+                className="cursor-pointer bg-slate-900/50 hover:bg-blue-600/20 hover:text-blue-400 hover:border-blue-500/30 transition-all whitespace-nowrap"
+                onClick={() => {
+                  setInputValue(keyword);
+                  updateParam('q', keyword);
+                }}
+              >
+                {keyword}
+              </Badge>
+            ))
+          )}
         </div>
 
         {/* Categories Chips */}
@@ -426,7 +459,7 @@ export function CertListPage() {
 
       {/* Content Section */}
       <div className="min-h-[400px]">
-        {loading ? (
+        {(loading || (isFavoritesOnly && favoritesLoading)) ? (
           <div className={viewMode === 'grid' ? "grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" : "space-y-4"}>
             {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
               <Skeleton key={i} className={`bg-slate-900/50 ${viewMode === 'grid' ? 'h-64 rounded-3xl' : 'h-24 rounded-2xl'}`} />

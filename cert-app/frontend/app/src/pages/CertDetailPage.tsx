@@ -38,7 +38,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useCertDetail, useCertStats } from '@/hooks/useCerts';
-import { useRouter } from '@/App';
+import { useRouter } from '@/lib/router';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/useAuth';
 import { checkFavorite, addFavorite, removeFavorite } from '@/lib/api';

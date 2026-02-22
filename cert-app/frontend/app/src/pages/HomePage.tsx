@@ -7,7 +7,6 @@ import {
   ArrowRight,
   CheckCircle2,
   Briefcase,
-  Zap,
   ChevronRight,
   Target,
   Sparkles
@@ -15,7 +14,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useRouter } from '@/App';
+import { useRouter } from '@/lib/router';
 import { getTrendingCerts } from '@/lib/api';
 import type { TrendingQualification } from '@/types';
 

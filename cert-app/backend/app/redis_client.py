@@ -204,6 +204,38 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Redis zrevrange error: {e}")
             return []
+            
+    # ============== List Operations (Recent Items) ==============
+    
+    def push_recent(self, key: str, value: str, max_items: int = 10) -> bool:
+        """Add item to a list and keep it at most max_items."""
+        if not self.client:
+            return False
+        try:
+            pipe = self.client.pipeline()
+            # Remove duplicate if exists to move it to front
+            pipe.lrem(key, 0, value)
+            # Push to front
+            pipe.lpush(key, value)
+            # Trim to max_items
+            pipe.ltrim(key, 0, max_items - 1)
+            # Expire after 30 days of inactivity
+            pipe.expire(key, 30 * 86400)
+            pipe.execute()
+            return True
+        except Exception as e:
+            logger.error(f"Redis push_recent error: {e}")
+            return False
+            
+    def get_recent(self, key: str, count: int = 10) -> List[str]:
+        """Get recent items from a list."""
+        if not self.client:
+            return []
+        try:
+            return self.client.lrange(key, 0, count - 1)
+        except Exception as e:
+            logger.error(f"Redis lrange error: {e}")
+            return []
     
     # ============== Cache Key Helpers ==============
     

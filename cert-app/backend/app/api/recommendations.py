@@ -102,9 +102,10 @@ async def get_recommendations(
             mappings = major_map_crud.get_by_major_with_stats(db, matched_major, limit)
     
     if not mappings:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No recommendations found for major: {major}"
+        return RecommendationListResponse(
+            items=[],
+            major=major,
+            total=0
         )
     
     # Build response

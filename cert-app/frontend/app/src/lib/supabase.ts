@@ -35,7 +35,13 @@ const createSafeClient = () => {
             })
         } as any;
     }
-    return createClient(supabaseUrl, supabaseAnonKey);
+    return createClient(supabaseUrl, supabaseAnonKey, {
+        auth: {
+            storage: window.sessionStorage,
+            persistSession: true,
+            autoRefreshToken: true,
+        }
+    });
 };
 
 export const supabase = createSafeClient();

@@ -114,6 +114,7 @@ class Profile(Base):
     id = Column(String(255), primary_key=True, index=True) # UUID string
     userid = Column(String(50), unique=True, index=True)
     name = Column(String(100))
+    nickname = Column(String(100))
     email = Column(String(255), unique=True, index=True)
     birth_date = Column(String(10))
     department = Column(String(100))

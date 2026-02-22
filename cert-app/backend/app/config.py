@@ -36,12 +36,19 @@ class Settings(BaseSettings):
     CACHE_TTL_RECOMMENDATIONS: int = 600  # 10 minutes
     
     # Rate Limiting
-    RATE_LIMIT_REQUESTS: int = 100
+    RATE_LIMIT_REQUESTS: int = 200
     RATE_LIMIT_WINDOW: int = 60  # seconds
+    
+    # Email (SMTP)
+    SMTP_HOST: str = "smtp.gmail.com"
+    SMTP_PORT: int = 587
+    EMAIL_USER: str = ""
+    EMAIL_PASSWORD: str = ""
     
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"
 
 
 @lru_cache()

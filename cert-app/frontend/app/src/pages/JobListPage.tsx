@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getJobs } from '@/lib/api';
 import type { Job } from '@/types';
-import { useRouter } from '@/App';
+import { useRouter } from '@/lib/router';
 import {
     ResponsiveContainer,
     RadarChart,

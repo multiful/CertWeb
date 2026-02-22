@@ -8,13 +8,22 @@ class EmailVerifyCodeRequest(BaseModel):
     email: EmailStr
     code: str
 
+class UserIdCheckRequest(BaseModel):
+    userid: str
+
 class AuthSignupComplete(BaseModel):
     name: str = Field(..., min_length=1)
-    userid: str = Field(..., min_length=8, max_length=8, pattern=r"^\d{8}$|^[a-zA-Z0-9]{8}$")
+    userid: str = Field(..., min_length=4, max_length=20, pattern=r"^[a-zA-Z0-9_]+$")
     email: EmailStr
     password: str = Field(..., min_length=6)
     password_confirm: str = Field(..., min_length=6)
     birth_date: str = Field(..., description="YYMMDD")
+    detail_major: Optional[str] = None
+
+class UserProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    userid: Optional[str] = None
+    nickname: Optional[str] = None
     detail_major: Optional[str] = None
 
 class AuthSignupResponse(BaseModel):

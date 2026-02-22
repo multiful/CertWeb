@@ -18,7 +18,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { getJobDetail } from '@/lib/api';
 import type { Job } from '@/types';
-import { useRouter } from '@/App';
+import { useRouter } from '@/lib/router';
 import {
     ResponsiveContainer,
     RadarChart,

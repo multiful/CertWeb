@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Award, Search, ThumbsUp, Menu, X, Home, BrainCircuit } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Link, useRouter } from '@/App';
+import { Link, useRouter } from '@/lib/router';
 import { UserMenu } from './UserMenu';
 
 interface NavItem {

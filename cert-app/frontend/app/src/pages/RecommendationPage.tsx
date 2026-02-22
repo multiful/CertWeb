@@ -7,7 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useRecommendations, useMajors } from '@/hooks/useRecommendations';
-import { useRouter } from '@/App';
+import { useRouter } from '@/lib/router';
 
 const sampleMajors = [
   '컴퓨터공학',

@@ -19,7 +19,7 @@ import { mockApi } from './mockApi';
 
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
-async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
+async function apiRequest<T>(path: string, options?: RequestInit, retries = 2): Promise<T> {
   try {
     const response = await fetch(`${BASE_URL}${path}`, options);
     if (!response.ok) {
@@ -27,6 +27,12 @@ async function apiRequest<T>(path: string, options?: RequestInit): Promise<T> {
     }
     return await response.json();
   } catch (error: any) {
+    if (error.name === 'TypeError' && retries > 0) {
+      console.warn(`[Network Retry] Failed to fetch ${path}. Retrying... (${retries} attempts left)`);
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      return apiRequest<T>(path, options, retries - 1);
+    }
+
     if (error.message && error.message.includes('401')) {
       console.warn(`API Request 401 for ${path}`);
     } else {
@@ -250,4 +256,37 @@ export async function checkFavorite(
   } catch {
     return { qual_id: qualId, is_favorite: false };
   }
+}
+
+export async function getRecentViewed(token: string): Promise<any[]> {
+  try {
+    return await apiRequest<any[]>('/certs/recent/viewed', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+  } catch {
+    return [];
+  }
+}
+export async function updateProfile(
+  token: string,
+  updates: { name?: string; userid?: string; nickname?: string; detail_major?: string }
+): Promise<any> {
+  return await apiRequest<any>('/auth/profile', {
+    method: 'PATCH',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(updates)
+  });
+}
+
+export async function checkUserId(userid: string): Promise<{ available: boolean, message: string }> {
+  return await apiRequest<{ available: boolean, message: string }>('/auth/check-userid', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userid })
+  });
 }

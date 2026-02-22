@@ -15,7 +15,8 @@ from app.schemas.auth import (
     AuthSignupResponse,
     AuthLoginRequest,
     AuthTokenResponse,
-    UserIdCheckResponse
+    UserIdCheckRequest,
+    UserProfileUpdate
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -105,6 +106,18 @@ async def verify_email_code(payload: EmailVerifyCodeRequest):
 
     return {"success": True, "message": "이메일 인증이 완료되었습니다."}
 
+@router.post("/check-userid")
+async def check_userid(payload: UserIdCheckRequest, db: Session = Depends(get_db)):
+    """Check if userid is already taken."""
+    id_row = db.execute(
+        text("SELECT 1 FROM profiles WHERE userid = :uid"),
+        {"uid": payload.userid}
+    ).scalar()
+    
+    if id_row:
+        return {"available": False, "message": "이미 사용 중인 아이디입니다."}
+    return {"available": True, "message": "사용 가능한 아이디입니다."}
+
 @router.post("/signup-complete", response_model=AuthSignupResponse, status_code=201)
 async def signup_complete(
     payload: AuthSignupComplete, 
@@ -113,7 +126,8 @@ async def signup_complete(
 ):
     """[Sign-up Step 3] Complete registration and save profile."""
     # Security Check: Ensure the token belongs to the email being registered
-    if token_payload.get("email") != payload.email:
+    token_email = token_payload.get("email") or token_payload.get("user_metadata", {}).get("email")
+    if token_email != payload.email:
         raise HTTPException(status_code=403, detail="토큰의 이메일과 요청된 이메일이 일치하지 않습니다.")
 
     if payload.password != payload.password_confirm:
@@ -145,7 +159,9 @@ async def signup_complete(
                     "email_confirm": True,
                     "user_metadata": {
                         "name": payload.name,
+                        "full_name": payload.name,
                         "userid": payload.userid,
+                        "nickname": payload.userid,
                         "birth_date": payload.birth_date,
                         "detail_major": payload.detail_major
                     }
@@ -165,7 +181,9 @@ async def signup_complete(
                     "email_confirm": True,
                     "user_metadata": {
                         "name": payload.name,
+                        "full_name": payload.name,
                         "userid": payload.userid,
+                        "nickname": payload.userid,
                         "birth_date": payload.birth_date,
                         "detail_major": payload.detail_major
                     }
@@ -193,6 +211,7 @@ async def signup_complete(
         "id": user_id,
         "name": payload.name,
         "userid": payload.userid,
+        "nickname": payload.userid, # Default to userid
         "birth_date": payload.birth_date,
         "email": payload.email,
         "detail_major": payload.detail_major
@@ -208,11 +227,12 @@ async def signup_complete(
 
         db.execute(
             text("""
-                INSERT INTO profiles (id, name, userid, birth_date, email, detail_major)
-                VALUES (:id, :name, :userid, :birth_date, :email, :detail_major)
+                INSERT INTO profiles (id, name, userid, nickname, birth_date, email, detail_major)
+                VALUES (:id, :name, :userid, :nickname, :birth_date, :email, :detail_major)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     userid = EXCLUDED.userid,
+                    nickname = EXCLUDED.nickname,
                     birth_date = EXCLUDED.birth_date,
                     email = EXCLUDED.email,
                     detail_major = EXCLUDED.detail_major
@@ -289,11 +309,63 @@ async def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
         expires_in=data.get("expires_in")
     )
 
-@router.get("/check-userid", response_model=UserIdCheckResponse)
-async def check_userid(userid: str = Query(...), db: Session = Depends(get_db)):
-    """Check if userid is available."""
-    row = db.execute(
-        text("SELECT 1 FROM profiles WHERE userid = :uid"),
-        {"uid": userid},
-    ).scalar()
-    return UserIdCheckResponse(available=row is None)
+@router.patch("/profile")
+async def update_profile(
+    payload: UserProfileUpdate,
+    db: Session = Depends(get_db),
+    token_payload: dict = Depends(get_current_user_from_token)
+):
+    """Update user profile (name, userid, major)."""
+    user_id = token_payload.get("sub")
+    
+    # 1. Prepare updates
+    updates = {}
+    if payload.name: 
+        updates["name"] = payload.name
+        updates["full_name"] = payload.name
+    if payload.nickname:
+        updates["nickname"] = payload.nickname
+    if payload.userid: 
+        # Usually userid is not changed after signup, but if allowed:
+        existing = db.execute(
+            text("SELECT id FROM profiles WHERE userid = :uid AND id != :id"),
+            {"uid": payload.userid, "id": user_id}
+        ).scalar()
+        if existing:
+            raise HTTPException(status_code=400, detail="이미 사용 중인 아이디입니다.")
+        updates["userid"] = payload.userid
+    if payload.detail_major: 
+        updates["detail_major"] = payload.detail_major
+        # Ensure major exists
+        db.execute(
+            text("INSERT INTO major (major_name) VALUES (:major) ON CONFLICT (major_name) DO NOTHING"),
+            {"major": payload.detail_major}
+        )
+
+    if not updates:
+        return {"message": "변경 사항이 없습니다."}
+
+    # 2. Update local DB
+    local_fields = ["name", "nickname", "userid", "detail_major"]
+    local_updates = {k: v for k, v in updates.items() if k in local_fields}
+    
+    if local_updates:
+        set_clause = ", ".join([f"{k} = :{k}" for k in local_updates.keys()])
+        db.execute(
+            text(f"UPDATE profiles SET {set_clause}, updated_at = NOW() WHERE id = :id"),
+            {**local_updates, "id": user_id}
+        )
+    
+    # 3. Update Supabase metadata
+    try:
+        requests.put(
+            f"{settings.SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+            headers=_admin_headers(),
+            json={"user_metadata": updates},
+            timeout=10
+        )
+    except Exception as e:
+        logger.warning(f"Failed to sync metadata to Supabase: {e}")
+
+    db.commit()
+    return {"message": "프로필이 업데이트되었습니다.", "updates": updates}
