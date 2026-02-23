@@ -110,9 +110,16 @@ async def get_recommendations(
         matched_map = db.query(MajorQualificationMap.major).filter(
             or_(
                 MajorQualificationMap.major.ilike(f"%{clean_major}%"),
-                text(f"'{search_major}' ILIKE '%' || major || '%'")
+                text(":major ILIKE '%' || major || '%'")
             )
-        ).first()
+        ).params(major=search_major).first()
+
+        # Extra fallback for things like "게임공학과" -> "게임공" -> no match -> "게임"
+        if not matched_map and len(clean_major) >= 3:
+            short_major = clean_major[:2]
+            matched_map = db.query(MajorQualificationMap.major).filter(
+                MajorQualificationMap.major.ilike(f"%{short_major}%")
+            ).first()
 
         if matched_map:
             matched_major = matched_map[0]

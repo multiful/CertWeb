@@ -44,7 +44,9 @@ def send_email_task(name: str, sender_email: str, subject: str, message: str):
         server.quit()
         logger.info(f"Successfully sent contact email from {sender_email}")
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Failed to send email: {e}\n{error_trace}")
 
 @router.post("")
 async def submit_contact(

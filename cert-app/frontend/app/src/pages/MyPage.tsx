@@ -251,7 +251,7 @@ export function MyPage() {
                                 </p>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
                                 <div className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-blue-500/30 transition-all duration-500">
                                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Major</p>
                                     <div className="flex items-center gap-3">
@@ -269,6 +269,13 @@ export function MyPage() {
                                                 return gy === 0 || gy === null || gy === undefined ? 'None' : `${gy}학년`;
                                             })()}
                                         </p>
+                                    </div>
+                                </div>
+                                <div className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-emerald-500/30 transition-all duration-500">
+                                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Saved Certs</p>
+                                    <div className="flex items-center gap-3">
+                                        <Bookmark className="w-5 h-5 text-emerald-400" />
+                                        <p className="text-lg font-bold text-slate-200">{favorites.length}개</p>
                                     </div>
                                 </div>
                             </div>
