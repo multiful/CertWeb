@@ -277,7 +277,7 @@ export async function getRecentViewed(token: string): Promise<any[]> {
 }
 export async function updateProfile(
   token: string,
-  updates: { name?: string; userid?: string; nickname?: string; detail_major?: string }
+  updates: { name?: string; userid?: string; nickname?: string; detail_major?: string; grade_year?: number | null }
 ): Promise<any> {
   return await apiRequest<any>('/auth/profile', {
     method: 'PATCH',

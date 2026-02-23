@@ -5,7 +5,7 @@ import { useMajors } from '@/hooks/useRecommendations';
 import {
     User, Bookmark, History, ChevronRight,
     Mail, School, Award, Sparkles,
-    Search, Activity, Settings
+    Search, Settings
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -221,8 +221,8 @@ export function MyPage() {
                                                                     type="button"
                                                                     onClick={() => setGradeYear(year)}
                                                                     className={`flex-1 min-w-[60px] h-10 rounded-xl font-bold text-sm transition-all border ${gradeYear === year
-                                                                            ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20'
-                                                                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                                                                        ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20'
+                                                                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                                                                         }`}
                                                                 >
                                                                     {year === 0 ? 'None' : `${year}학년`}
