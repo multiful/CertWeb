@@ -2,7 +2,7 @@
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, or_
 import logging
 
 from app.api.deps import get_db_session, check_rate_limit, get_current_user, get_optional_user
@@ -87,34 +87,38 @@ async def get_recommendations(
         return RecommendationListResponse(**cached)
     
     # Get mappings from database
-    mappings = major_map_crud.get_by_major_with_stats(db, major, limit)
+    search_major = major.strip()
+    mappings = major_map_crud.get_by_major_with_stats(db, search_major, limit)
     
+    # 1. If no exact match, try stripping "학부", "학과", "공학부" and fuzzy matching
     if not mappings:
+        # Clean major name to find core keyword
+        clean_major = search_major
+        for suffix in ["학부", "학과", "전공", "공학부"]:
+            if clean_major.endswith(suffix):
+                clean_major = clean_major[:-len(suffix)]
+                break
+        
         from app.models import MajorQualificationMap
-        # Find the first major in MajorQualificationMap that contains the queried major
+        # Find the first major in MajorQualificationMap that contains or is contained by the clean name
         matched_map = db.query(MajorQualificationMap.major).filter(
-            MajorQualificationMap.major.ilike(f"%{major}%")
+            or_(
+                MajorQualificationMap.major.ilike(f"%{clean_major}%"),
+                text(f"'{search_major}' ILIKE '%' || major || '%'")
+            )
         ).first()
 
         if matched_map:
             matched_major = matched_map[0]
+            logger.info(f"Fuzzy match: '{search_major}' -> '{matched_major}'")
             mappings = major_map_crud.get_by_major_with_stats(db, matched_major, limit)
-            major = matched_major # Update major name to the matched one for the response
-        else:
-            # Fallback if no ILIKE matches, try inverse
-            matched_map_inverse = db.query(MajorQualificationMap.major).filter(
-                text(f"'{major}' ILIKE '%' || major || '%'")
-            ).first()
-            if matched_map_inverse:
-                matched_major = matched_map_inverse[0]
-                mappings = major_map_crud.get_by_major_with_stats(db, matched_major, limit)
-                major = matched_major
-
+            major = matched_major
     
+    # 2. Final safety: If STILL no results, return empty items with 200 OK, not error
     if not mappings:
         return RecommendationListResponse(
             items=[],
-            major=major,
+            major=search_major,
             total=0
         )
     
