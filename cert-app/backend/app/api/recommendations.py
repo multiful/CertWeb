@@ -71,14 +71,16 @@ def generate_recommendation_reason(
 async def get_recommendations(
     major: str = Query(..., description="Major or field of study"),
     limit: int = Query(10, ge=1, le=50, description="Number of recommendations"),
+    grade_year: Optional[int] = Query(None, description="Grade year (0-4)"),
     db: Session = Depends(get_db_session),
     _: None = Depends(check_rate_limit)
 ):
     """Get certification recommendations for a major."""
     cache_key = redis_client.make_cache_key(
-        "recs:v5",
+        "recs:v6",
         major=major.lower().strip(),
-        limit=limit
+        limit=limit,
+        grade=grade_year
     )
     
     # Try cache
@@ -161,6 +163,16 @@ async def get_recommendations(
         # If no stats, rely 100% on relevance
         if latest_stats:
             final_score = (base_relevance * 0.6) + (demand_score * 0.2) + (stability_score * 0.2)
+            
+            # 4. Academic level adjustment (Difficulty based)
+            # None(0), 1, 2 -> weight up diff <= 6
+            # 3, 4 -> weight up diff > 6
+            if grade_year is not None:
+                diff = latest_stats.difficulty_score if latest_stats.difficulty_score else 5.0
+                if grade_year <= 2: 
+                    if diff <= 6: final_score += 1.5
+                else:
+                    if diff > 6: final_score += 1.5
         else:
             final_score = base_relevance
             
@@ -205,9 +217,9 @@ async def get_my_recommendations(
     _: None = Depends(check_rate_limit)
 ):
     """Get recommendations based on current user's profile major."""
-    # 1. Get user's major from profiles table
+    # 1. Get user's major and grade from profiles table
     row = db.execute(
-        text("SELECT detail_major FROM profiles WHERE id = :id"),
+        text("SELECT detail_major, grade_year FROM profiles WHERE id = :id"),
         {"id": user_id}
     ).mappings().first()
     
@@ -218,9 +230,10 @@ async def get_my_recommendations(
         )
     
     major = row["detail_major"]
+    grade_year = row["grade_year"]
     
     # Use existing recommendation logic
-    return await get_recommendations(major=major, limit=limit, db=db, _=None)
+    return await get_recommendations(major=major, limit=limit, grade_year=grade_year, db=db, _=None)
 
 
 @router.get(

@@ -25,6 +25,7 @@ class UserProfileUpdate(BaseModel):
     userid: Optional[str] = None
     nickname: Optional[str] = None
     detail_major: Optional[str] = None
+    grade_year: Optional[int] = None
 
 class AuthSignupResponse(BaseModel):
     user_id: str

@@ -38,6 +38,7 @@ export function MyPage() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [nickname, setNickname] = useState('');
     const [userMajor, setUserMajor] = useState('');
+    const [gradeYear, setGradeYear] = useState<number | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
 
     // Sync state when dialog opens
@@ -45,6 +46,7 @@ export function MyPage() {
         if (isSettingsOpen && user) {
             setNickname(user.user_metadata?.nickname || user.user_metadata?.userid || '');
             setUserMajor(user.user_metadata?.detail_major || '');
+            setGradeYear(user.user_metadata?.grade_year !== undefined ? Number(user.user_metadata.grade_year) : null);
         }
     }, [isSettingsOpen, user]);
 
@@ -80,7 +82,8 @@ export function MyPage() {
         try {
             await updateProfile(token, {
                 nickname: nickname,
-                detail_major: userMajor
+                detail_major: userMajor,
+                grade_year: gradeYear === null ? 0 : gradeYear
             });
             toast.success('프로필이 업데이트되었습니다.');
             setIsSettingsOpen(false);
@@ -209,6 +212,25 @@ export function MyPage() {
                                                             )}
                                                         </div>
                                                     </div>
+                                                    <div className="space-y-3">
+                                                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">학년 / 상태</Label>
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {[0, 1, 2, 3, 4].map((year) => (
+                                                                <button
+                                                                    key={year}
+                                                                    type="button"
+                                                                    onClick={() => setGradeYear(year)}
+                                                                    className={`flex-1 min-w-[60px] h-10 rounded-xl font-bold text-sm transition-all border ${gradeYear === year
+                                                                            ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20'
+                                                                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                                                                        }`}
+                                                                >
+                                                                    {year === 0 ? 'None' : `${year}학년`}
+                                                                </button>
+                                                            ))}
+                                                        </div>
+                                                        <p className="text-[10px] text-slate-500 italic px-1 font-medium">대학 미진학/졸업은 'None'을 선택하세요.</p>
+                                                    </div>
                                                 </div>
                                                 <DialogFooter>
                                                     <Button type="button" variant="ghost" onClick={() => setIsSettingsOpen(false)} className="rounded-2xl font-bold text-slate-400">취소</Button>
@@ -234,10 +256,12 @@ export function MyPage() {
                                     </div>
                                 </div>
                                 <div className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-purple-500/30 transition-all duration-500">
-                                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Stats</p>
+                                    <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Academic Level</p>
                                     <div className="flex items-center gap-3">
-                                        <Activity className="w-5 h-5 text-purple-400" />
-                                        <p className="text-lg font-bold text-slate-200">{favorites.length} Favorites</p>
+                                        <Award className="w-5 h-5 text-purple-400" />
+                                        <p className="text-lg font-bold text-slate-200">
+                                            {user.user_metadata?.grade_year === 0 || !user.user_metadata?.grade_year ? 'None' : `${user.user_metadata.grade_year}학년`}
+                                        </p>
                                     </div>
                                 </div>
                             </div>

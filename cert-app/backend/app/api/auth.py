@@ -361,12 +361,14 @@ async def update_profile(
             text("INSERT INTO major (major_name) VALUES (:major) ON CONFLICT (major_name) DO NOTHING"),
             {"major": payload.detail_major}
         )
+    if payload.grade_year is not None:
+        updates["grade_year"] = payload.grade_year
 
     if not updates:
         return {"message": "변경 사항이 없습니다."}
 
     # 2. Update local DB via Upsert
-    local_fields = ["name", "nickname", "userid", "detail_major"]
+    local_fields = ["name", "nickname", "userid", "detail_major", "grade_year"]
     local_updates = {k: v for k, v in updates.items() if k in local_fields}
     
     if local_updates:

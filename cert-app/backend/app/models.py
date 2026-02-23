@@ -122,7 +122,6 @@ class Profile(Base):
     nickname = Column(String(100))
     email = Column(String(255), unique=True, index=True)
     birth_date = Column(String(10))
-    department = Column(String(100))
     grade_year = Column(Integer)
     detail_major = Column(String(100), ForeignKey("major.major_name", ondelete="SET NULL"), nullable=True)
     
