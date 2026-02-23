@@ -21,6 +21,7 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog";
 import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile } from '@/lib/api';
+import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
 // Re-importing missing icons (added Activity, Target)
@@ -57,6 +58,8 @@ export function MyPage() {
 
     const loadData = async () => {
         try {
+            let fetchedMajor = user?.user_metadata?.detail_major;
+
             if (token) {
                 const favRes = await getFavorites(token, 1, 5);
                 setFavorites(favRes.items.map((f: any) => f.qualification));
@@ -66,11 +69,14 @@ export function MyPage() {
 
                 const profileData = await getProfile(token);
                 setProfile(profileData);
+                // Use freshly fetched profile data (not stale state)
+                if (profileData?.detail_major) {
+                    fetchedMajor = profileData.detail_major;
+                }
             }
 
-            const major = profile?.detail_major || user?.user_metadata?.detail_major;
-            if (major) {
-                const recRes = await getRecommendations(major, 20);
+            if (fetchedMajor) {
+                const recRes = await getRecommendations(fetchedMajor, 20);
                 setRecommendations(recRes.items || []);
             }
         } catch (err: any) {
@@ -92,6 +98,7 @@ export function MyPage() {
             toast.success('프로필이 업데이트되었습니다.');
             setIsSettingsOpen(false);
             // Refresh local state or force reload
+            await supabase.auth.refreshSession();
             window.location.reload();
         } catch (err: any) {
             toast.error(err.message || '프로필 업데이트에 실패했습니다.');
