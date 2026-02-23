@@ -238,13 +238,26 @@ async def get_available_majors(
     _: None = Depends(check_rate_limit)
 ):
     """Get list of available majors."""
-    cache_key = "recs:majors"
+    cache_key = "recs:majors:v2"
     
-    cached = redis_client.get(cache_key)
-    if cached:
-        return {"majors": cached}
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            # Robust list check
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            
+            if isinstance(cached, list):
+                return {"majors": cached}
+    except Exception as e:
+        logger.warning(f"Cache read failed for majors list: {e}")
     
     majors = major_map_crud.get_majors_list(db)
+    # Ensure it's a list before returning/caching
+    if not isinstance(majors, list):
+        majors = list(majors) if majors else []
+        
     redis_client.set(cache_key, majors, get_cache_ttl())
     
     return {"majors": majors}
