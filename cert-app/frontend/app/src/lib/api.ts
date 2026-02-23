@@ -17,7 +17,7 @@ import type {
 } from '@/types';
 import { mockApi } from './mockApi';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://certweb-xzpx.onrender.com/api/v1';
 
 async function apiRequest<T>(path: string, options?: RequestInit, retries = 2): Promise<T> {
   try {

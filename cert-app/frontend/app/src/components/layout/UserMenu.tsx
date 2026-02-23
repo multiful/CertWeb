@@ -46,7 +46,7 @@ export function UserMenu() {
     const [verificationCode, setVerificationCode] = useState('');
     const [isIdAvailable, setIsIdAvailable] = useState<boolean | null>(null);
 
-    const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
+    const API_BASE = import.meta.env.VITE_API_BASE_URL || 'https://certweb-xzpx.onrender.com/api/v1';
 
     const handleSendOTP = async () => {
         if (!email) return toast.error('이메일을 입력해주세요.');

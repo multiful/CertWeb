@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { ReactNode, MouseEvent } from 'react';
 
-export type Route = 'home' | 'certs' | 'cert-detail' | 'recommendations' | 'ai-recommendations' | 'jobs' | 'job-detail' | 'mypage' | 'privacy' | 'terms';
+export type Route = 'home' | 'certs' | 'cert-detail' | 'recommendations' | 'ai-recommendations' | 'jobs' | 'job-detail' | 'mypage' | 'privacy' | 'terms' | 'contact';
 
 export interface RouteState {
     route: Route;
@@ -37,6 +37,8 @@ export const getRouteFromPath = (path: string, search: string): RouteState => {
         route = 'jobs';
     } else if (path === '/mypage') {
         route = 'mypage';
+    } else if (path === '/contact') {
+        route = 'contact';
     }
     return { route, params };
 };
@@ -68,6 +70,7 @@ export const RouterContext = {
             case 'jobs': return '/jobs';
             case 'job-detail' as any: return `/jobs/${params?.jobId || ''}`;
             case 'mypage': return '/mypage';
+            case 'contact': return '/contact';
             default: return '/';
         }
     },

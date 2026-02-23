@@ -10,6 +10,7 @@ import { JobDetailPage } from '@/pages/JobDetailPage';
 import { MyPage } from '@/pages/MyPage';
 import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage';
 import { TermsOfServicePage } from '@/pages/TermsOfServicePage';
+import { ContactPage } from '@/pages/ContactPage';
 import { Toaster } from '@/components/ui/sonner';
 import {
   getRouteFromPath,
@@ -64,6 +65,8 @@ function App() {
         return <PrivacyPolicyPage />;
       case 'terms':
         return <TermsOfServicePage />;
+      case 'contact':
+        return <ContactPage />;
       default:
         return <HomePage />;
     }

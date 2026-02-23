@@ -102,6 +102,8 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://cert-web-sand.vercel.app",
+        "https://cert-web-multifuls-projects.vercel.app",
     ],
     allow_origin_regex=r"https?://.*", # Be more flexible for local dev if needed
     allow_credentials=True,
