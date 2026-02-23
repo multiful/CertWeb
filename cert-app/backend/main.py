@@ -88,6 +88,13 @@ app = FastAPI(
 )
 
 # Add middleware
+from fastapi.middleware.gzip import GZipMiddleware
+
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000  # Only compress responses larger than 1KB
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

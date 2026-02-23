@@ -18,6 +18,8 @@ const navItems: NavItem[] = [
   { path: '/ai-recommendations', label: 'AI 추천', icon: <BrainCircuit className="w-4 h-4" /> },
 ];
 
+import { CertLogo } from '../common/CertLogo';
+
 export function Layout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { route } = useRouter();
@@ -38,10 +40,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center group-hover:shadow-[0_0_15px_rgba(59,130,246,0.5)] transition-all">
-              <Award className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 flex items-center justify-center transition-all duration-500 group-hover:scale-110 group-hover:drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">
+              <CertLogo className="w-9 h-9" />
             </div>
-            <span className="font-bold text-lg hidden sm:inline tracking-tight">CertFinder</span>
+            <span className="font-black text-xl hidden sm:inline tracking-tighter bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">CertFinder</span>
           </Link>
 
           {/* Desktop Navigation */}

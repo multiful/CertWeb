@@ -264,7 +264,7 @@ export function CertListPage() {
           <Badge className="bg-blue-600/10 text-blue-400 border-blue-500/20 px-3 py-1">Certification Directory</Badge>
           <h1 className="text-4xl font-bold text-white tracking-tight">자격증 탐색</h1>
           <p className="text-slate-400 max-w-lg">
-            대한민국 600여 종류의 국가 기술 및 전문 자격증 데이터를 검색하고<br />
+            대한민국 1000여 종류의 국가 기술 및 전문 자격증 데이터를 검색하고<br />
             실시간 합격률과 난이도를 비교 분석하세요.
           </p>
         </div>

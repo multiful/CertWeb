@@ -106,7 +106,7 @@ export function HomePage() {
 
             <div className="flex items-center justify-center lg:justify-start gap-8 pt-8 text-slate-500 text-sm font-medium">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> 1,200+ 자격증 데이터
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> 1,000+ 자격증 데이터
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" /> 실시간 합격률 분석

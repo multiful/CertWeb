@@ -56,7 +56,7 @@ export function MyPage() {
 
             const major = user?.user_metadata?.detail_major;
             if (major) {
-                const recRes = await getRecommendations(major, 4);
+                const recRes = await getRecommendations(major, 20);
                 setRecommendations(recRes.items || []);
             }
         } catch (err: any) {
@@ -379,7 +379,7 @@ export function MyPage() {
                                         </div>
                                     </div>
 
-                                    <div className="space-y-4">
+                                    <div className="space-y-4 max-h-[460px] overflow-y-auto pr-2 custom-scrollbar">
                                         {recommendations.length > 0 ? (
                                             recommendations.map((item) => (
                                                 <div
@@ -430,7 +430,7 @@ export function MyPage() {
                         <div className="p-8 rounded-[3rem] bg-gradient-to-br from-blue-600/20 to-indigo-600/10 border border-blue-500/20 space-y-6 relative overflow-hidden group">
                             <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl -mr-16 -mt-16 group-hover:bg-blue-500/30 transition-all duration-1000" />
                             <h3 className="text-white font-black tracking-tight leading-tight text-xl relative z-10">더 정교한 실시간 데이터가 필요하신가요?</h3>
-                            <p className="text-slate-400 text-sm leading-relaxed relative z-10 opacity-80">전국 600여개 자격증의<br />실시간 합격률 트렌드를 분석하세요.</p>
+                            <p className="text-slate-400 text-sm leading-relaxed relative z-10 opacity-80">전국 1000여개 자격증의<br />실시간 합격률 트렌드를 분석하세요.</p>
                             <Button
                                 variant="outline"
                                 className="w-full rounded-2xl border-blue-500/30 bg-blue-500/10 text-blue-400 font-black text-xs uppercase tracking-widest hover:bg-blue-500/20 hover:text-white transition-all relative z-10"
