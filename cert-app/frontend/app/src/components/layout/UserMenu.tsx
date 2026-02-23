@@ -55,17 +55,21 @@ export function UserMenu() {
         if (!email) return toast.error('이메일을 입력해주세요.');
         setLoading(true);
         try {
-            // Use Supabase native OTP sending
-            const { error } = await supabase.auth.signInWithOtp({
-                email,
-                options: {
-                    shouldCreateUser: true,
-                }
+            // 1. Check duplicate email via our backend first
+            const checkRes = await fetch(`${API_BASE}/auth/email/send-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
             });
 
-            if (error) throw error;
+            const data = await checkRes.json();
 
-            toast.success('인증 코드가 발송되었습니다. (코드가 아닌 링크가 오면 Supabase 설정에서 전송 방식을 Token으로 바꿔야 합니다)');
+            if (!checkRes.ok) {
+                // This will show "이미 가입된 이메일입니다" from our backend
+                throw new Error(data.detail || '인증 코드 발송 실패');
+            }
+
+            toast.success('인증 코드가 발송되었습니다. 메일함(또는 스팸함)을 확인해주세요!');
             setSignupStep(2);
         } catch (error: any) {
             toast.error(error.message || '인증 코드 발송 실패');
@@ -317,15 +321,18 @@ export function UserMenu() {
                         {isSignUp ? (
                             <div className="space-y-6">
                                 <div className="space-y-2">
-                                    <Label className="text-slate-300 text-xs font-bold uppercase tracking-wider">이메일 인증</Label>
+                                    <Label htmlFor="signup-email-input" className="text-slate-300 text-xs font-bold uppercase tracking-wider">이메일 인증</Label>
                                     <div className="flex gap-2">
                                         <Input
+                                            id="signup-email-input"
+                                            name="email"
                                             type="email"
                                             placeholder="verified@example.com"
                                             value={email}
                                             onChange={(e) => setEmail(e.target.value)}
                                             disabled={signupStep > 1}
                                             className="bg-slate-900/50 border-slate-800 h-11 focus:ring-blue-500/20"
+                                            autoComplete="email"
                                         />
                                         {signupStep === 1 && (
                                             <Button
@@ -457,18 +464,47 @@ export function UserMenu() {
                             <form onSubmit={handleLogin} className="space-y-5">
                                 <div className="space-y-4">
                                     <div className="space-y-2">
-                                        <Label className="text-slate-300 text-xs font-bold uppercase tracking-wider">사용자 아이디</Label>
+                                        <Label htmlFor="login-userid" className="text-slate-300 text-xs font-bold uppercase tracking-wider">사용자 아이디</Label>
                                         <Input
+                                            id="login-userid"
+                                            name="username"
                                             placeholder="아이디를 입력하세요"
                                             value={userid}
                                             onChange={(e) => setUserid(e.target.value)}
                                             className="bg-slate-900/50 border-slate-800 h-12 focus:ring-blue-500/20"
+                                            autoComplete="username"
                                             required
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <Label className="text-slate-300 text-xs font-bold uppercase tracking-wider">비밀번호</Label>
+                                        <div className="flex justify-between items-center">
+                                            <Label htmlFor="login-password" className="text-slate-300 text-xs font-bold uppercase tracking-wider">비밀번호</Label>
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    const email = prompt('아이디를 찾으시려는 계정의 이메일을 입력해주세요.');
+                                                    if (email) {
+                                                        try {
+                                                            const res = await fetch(`${API_BASE}/auth/find-userid?email=${encodeURIComponent(email)}`);
+                                                            const data = await res.json();
+                                                            if (res.ok) {
+                                                                alert(`사용자님의 아이디는 [ ${data.userid} ] 입니다.`);
+                                                            } else {
+                                                                alert(data.detail || '아이디를 찾을 수 없습니다.');
+                                                            }
+                                                        } catch (e) {
+                                                            alert('아이디 찾기 요청 중 오류가 발생했습니다.');
+                                                        }
+                                                    }
+                                                }}
+                                                className="text-[10px] text-blue-400 hover:text-blue-300 font-bold uppercase tracking-tighter"
+                                            >
+                                                아이디 찾기
+                                            </button>
+                                        </div>
                                         <Input
+                                            id="login-password"
+                                            name="password"
                                             type="password"
                                             placeholder="비밀번호를 입력하세요"
                                             value={password}

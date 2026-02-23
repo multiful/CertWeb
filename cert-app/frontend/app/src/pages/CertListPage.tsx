@@ -293,12 +293,17 @@ export function CertListPage() {
       <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 space-y-8 backdrop-blur-sm">
         <form onSubmit={handleSearch} className="grid lg:grid-cols-12 gap-6 items-end">
           <div className="lg:col-span-4 space-y-3 relative">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+            <label
+              htmlFor="cert-search-input"
+              className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"
+            >
               <Search className="w-3 h-3" /> 자격증 명칭
             </label>
             <div className="relative z-20">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
               <Input
+                id="cert-search-input"
+                name="q"
                 placeholder="검색어를 입력하세요..."
                 value={inputValue}
                 onFocus={() => setShowSuggestions(true)}
@@ -332,7 +337,10 @@ export function CertListPage() {
           </div>
 
           <div className="lg:col-span-2 space-y-3">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+            <label
+              htmlFor="main-field-select"
+              className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"
+            >
               <Filter className="w-3 h-3" /> 분야
             </label>
             <Select

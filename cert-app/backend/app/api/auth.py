@@ -60,16 +60,22 @@ def _admin_delete_user(user_id: str):
 @router.post("/email/send-code")
 async def send_email_code(payload: EmailRequest, db: Session = Depends(get_db)):
     """[Sign-up Step 1] Send OTP to email."""
-    # Check if email already exists in our DB
+    # 1. Check if email already exists in our DB
+    # We use a case-insensitive check to be safe
     row = db.execute(
-        text("SELECT 1 FROM profiles WHERE email = :email"),
+        text("SELECT userid FROM profiles WHERE LOWER(email) = LOWER(:email)"),
         {"email": payload.email}
-    ).scalar()
+    ).mappings().first()
+    
     if row:
-        raise HTTPException(status_code=400, detail="이미 가입된 이메일입니다.")
+        # If user exists, we don't send OTP and inform them
+        raise HTTPException(
+            status_code=400, 
+            detail=f"이미 가입된 이메일입니다. (아이디: {row['userid']})"
+        )
 
     try:
-        # Supabase OTP
+        # 2. Supabase OTP - This sends the "Magic Link" template
         res = requests.post(
             f"{settings.SUPABASE_URL}/auth/v1/otp",
             headers={"apikey": settings.SUPABASE_ANON_KEY, "Content-Type": "application/json"},
@@ -84,6 +90,20 @@ async def send_email_code(payload: EmailRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=502, detail="인증 메일 발송 중 오류가 발생했습니다.")
 
     return {"message": "인증 코드가 발송되었습니다."}
+
+
+@router.get("/find-userid")
+async def find_userid(email: str = Query(..., description="Email to find userid"), db: Session = Depends(get_db)):
+    """Find user ID by email."""
+    row = db.execute(
+        text("SELECT userid FROM profiles WHERE LOWER(email) = LOWER(:email)"),
+        {"email": email}
+    ).mappings().first()
+    
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 이메일로 등록된 아이디가 없습니다.")
+    
+    return {"userid": row["userid"]}
 
 @router.post("/email/verify-code")
 async def verify_email_code(payload: EmailVerifyCodeRequest):

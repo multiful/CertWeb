@@ -59,9 +59,9 @@ async def get_certs(
     _: None = Depends(check_rate_limit)
 ):
     """Get certification list with filters and pagination."""
-    # Build cache key
+    # Build cache key (Bumped to v4 for data stability)
     cache_key = redis_client.make_cache_key(
-        "certs:list:v2",
+        "certs:list:v4",
         hash=redis_client.hash_query_params(
             q=q, main_field=main_field, ncs_large=ncs_large,
             qual_type=qual_type, managing_body=managing_body,
@@ -165,13 +165,26 @@ async def get_filter_options(
     _: None = Depends(check_rate_limit)
 ):
     """Get available filter options."""
-    cache_key = "certs:filter_options"
+    cache_key = "certs:filter_options:v4"
     
-    cached = redis_client.get(cache_key)
-    if cached:
-        return cached
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            if isinstance(cached, dict) and "qual_types" in cached:
+                return cached
+    except Exception as e:
+        logger.warning(f"Cache read failed for filter options: {e}")
     
     options = qualification_crud.get_filter_options(db)
+    
+    # Validation
+    if not options or not options.get("qual_types"):
+        # Emergency fallback if DB query returned nothing unexpected
+        logger.warning("DB returned empty filter options. Check data load.")
+
     redis_client.set(cache_key, options, get_cache_ttl("list"))
     
     return options
