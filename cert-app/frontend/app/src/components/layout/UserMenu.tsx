@@ -189,6 +189,50 @@ export function UserMenu() {
         }
     };
 
+    const handleForgotPassword = async () => {
+        const email = prompt('비밀번호를 재설정할 계정의 이메일을 입력해주세요.');
+        if (!email) return;
+
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/auth/password-reset`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                toast.success(data.message || '비밀번호 재설정 메일이 발송되었습니다.');
+            } else {
+                toast.error(data.detail || '요청 실패');
+            }
+        } catch (error) {
+            toast.error('비밀번호 재설정 요청 중 오류가 발생했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleFindUserId = async () => {
+        const email = prompt('아이디를 찾으시려는 계정의 이메일을 입력해주세요.');
+        if (!email) return;
+
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/auth/find-userid?email=${encodeURIComponent(email)}`);
+            const data = await res.json();
+            if (res.ok) {
+                alert(`사용자님의 아이디는 [ ${data.userid} ] 입니다.`);
+            } else {
+                alert(data.detail || '아이디를 찾을 수 없습니다.');
+            }
+        } catch (e) {
+            alert('아이디 찾기 요청 중 오류가 발생했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const getRedirectUrl = () => {
         const currentPath = window.location.pathname;
         // If on a specific cert detail page, redirect back there.
@@ -489,31 +533,7 @@ export function UserMenu() {
                                         />
                                     </div>
                                     <div className="space-y-2">
-                                        <div className="flex justify-between items-center">
-                                            <Label htmlFor="login-password" className="text-slate-300 text-xs font-bold uppercase tracking-wider">비밀번호</Label>
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    const email = prompt('아이디를 찾으시려는 계정의 이메일을 입력해주세요.');
-                                                    if (email) {
-                                                        try {
-                                                            const res = await fetch(`${API_BASE}/auth/find-userid?email=${encodeURIComponent(email)}`);
-                                                            const data = await res.json();
-                                                            if (res.ok) {
-                                                                alert(`사용자님의 아이디는 [ ${data.userid} ] 입니다.`);
-                                                            } else {
-                                                                alert(data.detail || '아이디를 찾을 수 없습니다.');
-                                                            }
-                                                        } catch (e) {
-                                                            alert('아이디 찾기 요청 중 오류가 발생했습니다.');
-                                                        }
-                                                    }
-                                                }}
-                                                className="text-[10px] text-blue-400 hover:text-blue-300 font-bold uppercase tracking-tighter"
-                                            >
-                                                아이디 찾기
-                                            </button>
-                                        </div>
+                                        <Label htmlFor="login-password" className="text-slate-300 text-xs font-bold uppercase tracking-wider">비밀번호</Label>
                                         <Input
                                             id="login-password"
                                             name="password"
@@ -566,6 +586,15 @@ export function UserMenu() {
 
                         <div className="pt-4 flex flex-col items-center gap-4">
                             <div className="w-full h-px bg-slate-800/50" />
+
+                            {!isSignUp && (
+                                <div className="flex items-center gap-6 text-xs text-slate-500 font-bold">
+                                    <button type="button" onClick={handleFindUserId} className="hover:text-slate-300 transition-colors">아이디 찾기</button>
+                                    <div className="w-px h-3 bg-slate-800" />
+                                    <button type="button" onClick={handleForgotPassword} className="hover:text-slate-300 transition-colors">비밀번호 찾기</button>
+                                </div>
+                            )}
+
                             <p className="text-sm text-slate-400">
                                 {isSignUp ? '이미 계정이 있으신가요?' : '아직 계정이 없으신가요?'}
                                 <button

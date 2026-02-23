@@ -20,7 +20,7 @@ import {
     DialogTrigger,
     DialogFooter,
 } from "@/components/ui/dialog";
-import { getFavorites, getRecentViewed, getRecommendations, updateProfile } from '@/lib/api';
+import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile } from '@/lib/api';
 import { toast } from 'sonner';
 
 // Re-importing missing icons (added Activity, Target)
@@ -34,6 +34,7 @@ export function MyPage() {
     const [favorites, setFavorites] = useState<any[]>([]);
     const [recentCerts, setRecentCerts] = useState<any[]>([]);
     const [recommendations, setRecommendations] = useState<any[]>([]);
+    const [profile, setProfile] = useState<any>(null);
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [nickname, setNickname] = useState('');
@@ -62,9 +63,12 @@ export function MyPage() {
 
                 const recentData = await getRecentViewed(token);
                 setRecentCerts(recentData);
+
+                const profileData = await getProfile(token);
+                setProfile(profileData);
             }
 
-            const major = user?.user_metadata?.detail_major;
+            const major = profile?.detail_major || user?.user_metadata?.detail_major;
             if (major) {
                 const recRes = await getRecommendations(major, 20);
                 setRecommendations(recRes.items || []);
@@ -147,7 +151,7 @@ export function MyPage() {
                             <div className="space-y-2">
                                 <div className="flex items-center justify-center md:justify-start gap-4 flex-wrap">
                                     <h1 className="text-5xl font-black tracking-tighter bg-gradient-to-r from-white via-blue-50 to-slate-400 bg-clip-text text-transparent">
-                                        {user.user_metadata?.nickname || user.user_metadata?.userid || user.email?.split('@')[0]}
+                                        {profile?.nickname || user.user_metadata?.nickname || user.user_metadata?.userid || user.email?.split('@')[0]}
                                     </h1>
                                     <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
                                         <DialogTrigger asChild>
@@ -252,7 +256,7 @@ export function MyPage() {
                                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Major</p>
                                     <div className="flex items-center gap-3">
                                         <School className="w-5 h-5 text-blue-400" />
-                                        <p className="text-lg font-bold text-slate-200">{user.user_metadata?.detail_major || '미설정'}</p>
+                                        <p className="text-lg font-bold text-slate-200">{profile?.detail_major || user.user_metadata?.detail_major || '미설정'}</p>
                                     </div>
                                 </div>
                                 <div className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-purple-500/30 transition-all duration-500">
@@ -260,7 +264,10 @@ export function MyPage() {
                                     <div className="flex items-center gap-3">
                                         <Award className="w-5 h-5 text-purple-400" />
                                         <p className="text-lg font-bold text-slate-200">
-                                            {user.user_metadata?.grade_year === 0 || !user.user_metadata?.grade_year ? 'None' : `${user.user_metadata.grade_year}학년`}
+                                            {(() => {
+                                                const gy = profile?.grade_year !== undefined ? profile.grade_year : user.user_metadata?.grade_year;
+                                                return gy === 0 || gy === null || gy === undefined ? 'None' : `${gy}학년`;
+                                            })()}
                                         </p>
                                     </div>
                                 </div>

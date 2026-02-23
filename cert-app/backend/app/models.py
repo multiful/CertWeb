@@ -32,6 +32,7 @@ class Qualification(Base):
     # Relationships
     stats = relationship("QualificationStats", back_populates="qualification", cascade="all, delete-orphan")
     major_mappings = relationship("MajorQualificationMap", back_populates="qualification", cascade="all, delete-orphan")
+    jobs = relationship("Job", secondary="qualification_job_map", back_populates="qualifications", viewonly=True)
     
     def __repr__(self):
         return f"<Qualification(id={self.qual_id}, name='{self.qual_name}')>"
@@ -164,7 +165,7 @@ class Job(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
-    qualifications = relationship("Qualification", secondary="qualification_job_map", viewonly=True)
+    qualifications = relationship("Qualification", secondary="qualification_job_map", back_populates="jobs", viewonly=True)
 
     def __repr__(self):
         return f"<Job(id={self.job_id}, name='{self.job_name}')>"

@@ -264,6 +264,13 @@ export async function checkFavorite(
   }
 }
 
+export async function getProfile(token: string): Promise<any> {
+  return await apiRequest<any>('/auth/profile', {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  });
+}
 export async function getRecentViewed(token: string): Promise<any[]> {
   try {
     return await apiRequest<any[]>('/certs/recent/viewed', {

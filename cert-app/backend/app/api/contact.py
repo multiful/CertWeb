@@ -30,10 +30,15 @@ def send_email_task(name: str, sender_email: str, subject: str, message: str):
         msg['Subject'] = f"[CertFinder 문의] {subject}"
         
         body = f"발신자: {name} ({sender_email})\n\n{message}"
-        msg.attach(MIMEText(body, 'plain'))
+        msg.attach(MIMEText(body, 'plain', 'utf-8'))
         
-        server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
-        server.starttls()
+        # Select appropriate SMTP class based on port
+        if settings.SMTP_PORT == 465:
+            server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT)
+        else:
+            server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT)
+            server.starttls()
+            
         server.login(settings.EMAIL_USER, settings.EMAIL_PASSWORD)
         server.send_message(msg)
         server.quit()

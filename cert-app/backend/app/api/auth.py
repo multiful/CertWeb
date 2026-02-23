@@ -282,10 +282,39 @@ async def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
         {"uid": payload.userid}
     ).mappings().first()
 
+    email = None
+    user_id = None
+    
     if not row:
-        raise HTTPException(status_code=400, detail="존재하지 않는 아이디입니다.")
+        # Fallback: Check Supabase Admin API to see if user exists but profile isn't synced
+        logger.info(f"Userid {payload.userid} not found in local DB. Checking Supabase Admin...")
+        try:
+            res_admin = requests.get(
+                f"{settings.SUPABASE_URL}/auth/v1/admin/users",
+                headers=_admin_headers(),
+                timeout=10
+            )
+            if res_admin.status_code == 200:
+                users = res_admin.json().get("users", [])
+                for u in users:
+                    if u.get("user_metadata", {}).get("userid") == payload.userid:
+                        email = u.get("email")
+                        user_id = u.get("id")
+                        # Sync to local DB
+                        db.execute(
+                            text("INSERT INTO profiles (id, email, userid) VALUES (:id, :email, :uid) ON CONFLICT (id) DO NOTHING"),
+                            {"id": user_id, "email": email, "uid": payload.userid}
+                        )
+                        db.commit()
+                        logger.info(f"Synced user {payload.userid} to local profiles.")
+                        break
+        except Exception as e:
+            logger.error(f"Supabase admin check failed: {e}")
 
-    email = row["email"]
+        if not email:
+            raise HTTPException(status_code=400, detail="존재하지 않는 아이디입니다.")
+    else:
+        email = row["email"]
 
     # 2) Authenticate with Supabase
     try:
@@ -308,7 +337,7 @@ async def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
 
     user_id = data.get("user", {}).get("id")
 
-    # 3) Ensure profile exists (fallback)
+    # 3) Final sync check
     try:
         db.execute(
             text("""
@@ -328,6 +357,27 @@ async def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
         user_id=user_id,
         expires_in=data.get("expires_in")
     )
+
+@router.post("/password-reset")
+async def request_password_reset(payload: EmailRequest):
+    """Request password reset via Supabase."""
+    try:
+        res = requests.post(
+            f"{settings.SUPABASE_URL}/auth/v1/recover",
+            headers={
+                "apikey": settings.SUPABASE_ANON_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"email": payload.email},
+            timeout=10
+        )
+        if res.status_code >= 400:
+            logger.error(f"Supabase recovery error: {res.text}")
+            raise HTTPException(status_code=res.status_code, detail="비밀번호 재설정 메일 발송 실패")
+        return {"message": "비밀번호 재설정 메일이 발송되었습니다."}
+    except Exception as e:
+        logger.error(f"Password reset error: {e}")
+        raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
 
 @router.patch("/profile")
 async def update_profile(
@@ -420,3 +470,34 @@ async def update_profile(
 
     db.commit()
     return {"message": "프로필이 업데이트되었습니다.", "updates": updates}
+
+@router.get("/profile")
+async def get_my_profile(
+    db: Session = Depends(get_db),
+    token_payload: dict = Depends(get_current_user_from_token)
+):
+    """Get current user's profile from local database."""
+    user_id = token_payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="인증 정보가 없습니다.")
+        
+    profile = db.execute(
+        text("SELECT * FROM profiles WHERE id = :id"),
+        {"id": user_id}
+    ).mappings().first()
+    
+    if not profile:
+        # Fallback: create empty profile if it doesn't exist
+        # This can happen if signup sync failed
+        email = token_payload.get("email")
+        db.execute(
+            text("INSERT INTO profiles (id, email) VALUES (:id, :email) ON CONFLICT (id) DO NOTHING"),
+            {"id": user_id, "email": email}
+        )
+        db.commit()
+        profile = db.execute(
+            text("SELECT * FROM profiles WHERE id = :id"),
+            {"id": user_id}
+        ).mappings().first()
+
+    return dict(profile) if profile else {}

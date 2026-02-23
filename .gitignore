@@ -38,6 +38,7 @@ ENV/
 *.sqlite3
 **/dataset/
 **/data/
+certs_*.csv
 frontend/public/uploads/
 
 # [Testing & Linting]

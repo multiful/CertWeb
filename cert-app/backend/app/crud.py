@@ -34,7 +34,8 @@ class QualificationCRUD:
         #     return data_loader.get_qual_with_stats(qual_id)
             
         return db.query(Qualification).options(
-            joinedload(Qualification.stats)
+            joinedload(Qualification.stats),
+            joinedload(Qualification.jobs)
         ).filter(Qualification.qual_id == qual_id).first()
     
     @staticmethod

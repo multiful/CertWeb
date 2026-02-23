@@ -485,7 +485,6 @@ export const mockApi = {
     page?: number;
     page_size?: number;
   }): Promise<QualificationListResponse> {
-    await delay(300); // Simulate network delay
 
     let items = [...certifications];
 
@@ -542,7 +541,6 @@ export const mockApi = {
   },
 
   async getCertificationDetail(qualId: number): Promise<QualificationDetail | null> {
-    await delay(200);
     const cert = certifications.find(c => c.qual_id === qualId);
     if (!cert) return null;
 
@@ -561,17 +559,14 @@ export const mockApi = {
   },
 
   async getCertificationStats(qualId: number): Promise<QualificationStatsListResponse> {
-    await delay(200);
     return statsData[qualId] || { qual_id: qualId, items: [] };
   },
 
   async getFilterOptions(): Promise<FilterOptions> {
-    await delay(100);
     return filterOptions;
   },
 
   async getRecommendations(major: string): Promise<RecommendationListResponse> {
-    await delay(400);
 
     // Try exact match first
     let result = recommendations[major];
@@ -592,7 +587,6 @@ export const mockApi = {
   },
 
   async getAvailableMajors(): Promise<string[]> {
-    await delay(100);
     return Object.keys(recommendations);
   },
 
@@ -605,7 +599,3 @@ export const mockApi = {
     };
   },
 };
-
-function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
