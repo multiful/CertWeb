@@ -31,35 +31,55 @@ async def get_favorites(
     user_id: str = Depends(get_current_user),
     _: None = Depends(check_rate_limit)
 ):
-    """Get user's favorites."""
-    cache_key = f"favorites:v2:{user_id}:{page}:{page_size}"
+    """Get user's favorites with optimized bulk stats."""
+    cache_key = f"favorites:v3:{user_id}:{page}:{page_size}"
     
-    cached = redis_client.get(cache_key)
-    if cached:
-        return UserFavoriteListResponse(**cached)
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return UserFavoriteListResponse(**cached)
+    except Exception as e:
+        logger.warning(f"Cache read failed for favorites: {e}")
     
     items, total = favorite_crud.get_by_user(db, user_id, page, page_size)
     
-    # Enrich qualifications with aggregated stats
-    from app.crud import get_qualification_aggregated_stats
+    # 1. Gather all qual_ids for bulk stats
+    qual_ids = [fav.qual_id for fav in items if fav.qual_id]
+    
+    # 2. Bulk fetch aggregated stats
+    from app.crud import get_qualification_aggregated_stats_bulk
     from app.schemas import QualificationListItemResponse
     
+    all_stats = {}
+    if qual_ids:
+        try:
+            all_stats = get_qualification_aggregated_stats_bulk(db, qual_ids)
+        except Exception as e:
+            logger.error(f"Bulk stats fetch failed: {e}")
+    
+    # 3. Build enriched items
     enriched_items = []
     for fav in items:
-        fav_dict = {
+        # Prepare base favorite data
+        fav_data = {
             "fav_id": fav.fav_id,
             "user_id": fav.user_id,
             "qual_id": fav.qual_id,
-            "created_at": fav.created_at
+            "created_at": fav.created_at,
+            "qualification": None
         }
         
         if fav.qualification:
+            # Map stats from our bulk fetch
+            stats = all_stats.get(fav.qual_id, {
+                "latest_pass_rate": None,
+                "avg_difficulty": None,
+                "total_candidates": 0
+            })
+            
             try:
-                # Get aggregated stats (pass_rate, difficulty, total_candidates)
-                stats = get_qualification_aggregated_stats(db, fav.qual_id)
-                logger.debug(f"Stats for qual_id={fav.qual_id}: {stats}")
-                
-                qual_data = {
+                # Create a reliable dict that matches QualificationListItemResponse
+                q_data = {
                     "qual_id": fav.qualification.qual_id,
                     "qual_name": fav.qualification.qual_name,
                     "qual_type": fav.qualification.qual_type,
@@ -70,25 +90,32 @@ async def get_favorites(
                     "is_active": fav.qualification.is_active,
                     "created_at": fav.qualification.created_at,
                     "updated_at": fav.qualification.updated_at,
-                    # Explicitly unpack stats so they are never lost
                     "latest_pass_rate": stats.get("latest_pass_rate"),
                     "avg_difficulty": stats.get("avg_difficulty"),
                     "total_candidates": stats.get("total_candidates"),
                 }
-                fav_dict["qualification"] = QualificationListItemResponse(**qual_data)
+                fav_data["qualification"] = QualificationListItemResponse(**q_data)
             except Exception as e:
-                logger.error(f"Failed to enrich favorite qual_id={fav.qual_id}: {e}")
-                # Still include the qualification, just without stats
-                fav_dict["qualification"] = fav.qualification
-        
-        enriched_items.append(fav_dict)
+                logger.error(f"Mapping error for favorite qual_id={fav.qual_id}: {e}")
+                # Fallback: create partial model from base data only to avoid 500 error
+                # UserFavoriteResponse expects QualificationListItemResponse, so we must return one
+                try:
+                    fav_data["qualification"] = QualificationListItemResponse.from_orm(fav.qualification)
+                except:
+                    fav_data["qualification"] = None # Last resort
+
+        enriched_items.append(fav_data)
     
     response = UserFavoriteListResponse(
         items=enriched_items,
         total=total
     )
     
-    redis_client.set(cache_key, response.model_dump(mode="json"), 300)
+    # Cache result defensively
+    try:
+        redis_client.set(cache_key, response.model_dump(mode="json"), 300)
+    except Exception as e:
+        logger.warning(f"Cache write failed for favorites: {e}")
     
     return response
 
