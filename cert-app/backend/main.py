@@ -105,7 +105,6 @@ app.add_middleware(
         "https://cert-web-sand.vercel.app",
         "https://cert-web-multifuls-projects.vercel.app",
     ],
-    allow_origin_regex=r"https?://.*", # Be more flexible for local dev if needed
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
