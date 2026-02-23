@@ -1,7 +1,0 @@
-Profiles columns: RMKeyView(['id', 'userid', 'name', 'email', 'birth_date', 'department', 'grade_year', 'detail_major', 'created_at', 'updated_at'])
-Profile row: (UUID('efd7bf41-31c6-4cde-bb0b-c48576c7d2d3'), 'kdk990901', '김동규', 'rlaehdrb9268@g.hongik.ac.kr', '990901', None, None, '컴퓨터공학', datetime.datetime(2026, 2, 14, 5, 18, 0, 317514, tzinfo=datetime.timezone.utc), None)
-
-Favorites columns: RMKeyView(['fav_id', 'user_id', 'qual_id', 'created_at'])
-Favorite row: (2, 'kdk990901', 806, datetime.datetime(2026, 2, 16, 19, 15, 9, 771972, tzinfo=datetime.timezone.utc))
-Favorite row: (3, 'kdk990901', 1018, datetime.datetime(2026, 2, 17, 13, 10, 33, 495175, tzinfo=datetime.timezone.utc))
-Favorite row: (4, 'dcbb0f78-83fb-4d81-8edf-226dccc68b37', 1002, datetime.datetime(2026, 2, 20, 14, 53, 6, 113629, tzinfo=datetime.timezone.utc))

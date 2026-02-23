@@ -1,8 +1,0 @@
-Testing userid: '1234567'
-  Caught error: (psycopg2.errors.CheckViolation) new row for relation "profiles" violates check constraint "chk_user...
-Testing userid: '12345678'
-  Success!
-Testing userid: '123456789'
-  Caught error: (psycopg2.errors.StringDataRightTruncation) value too long for type character(8)
-
-[SQL: INSERT INTO ...
