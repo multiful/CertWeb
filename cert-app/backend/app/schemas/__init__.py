@@ -235,6 +235,11 @@ class MajorListResponse(PaginatedResponse):
     items: List[MajorResponse]
 
 
+class AvailableMajorsResponse(BaseModel):
+    """Available majors list response."""
+    majors: List[str]
+
+
 # ============== Request Schemas ==============
 
 class QualificationCreate(QualificationBase):

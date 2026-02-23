@@ -20,14 +20,19 @@ async def get_jobs(
     _: None = Depends(check_rate_limit)
 ):
     """Search for jobs and their outlook/salary info."""
-    cache_key = redis_client.make_cache_key(
-        "jobs:list",
-        hash=redis_client.hash_query_params(q=q, page=page, page_size=page_size)
-    )
+    cache_key = f"jobs:list:v2:{q}:{page}:{page_size}"
     
-    cached = redis_client.get(cache_key)
-    if cached:
-        return cached
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            
+            if isinstance(cached, list):
+                return cached
+    except Exception:
+        pass
 
     items, _ = job_crud.get_list(db, q, page, page_size)
     
@@ -44,11 +49,19 @@ async def get_job(
     _: None = Depends(check_rate_limit)
 ):
     """Get detailed information for a specific job."""
-    cache_key = f"jobs:detail:{job_id}"
+    cache_key = f"jobs:detail:v2:{job_id}"
     
-    cached = redis_client.get(cache_key)
-    if cached:
-        return cached
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            
+            if isinstance(cached, dict):
+                return cached
+    except Exception:
+        pass
 
     job = job_crud.get_by_id(db, job_id)
     if not job:

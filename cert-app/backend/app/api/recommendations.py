@@ -10,7 +10,8 @@ from app.schemas import (
     RecommendationListResponse,
     RecommendationResponse,
     JobCertificationRecommendationResponse,
-    RelatedJobResponse
+    RelatedJobResponse,
+    AvailableMajorsResponse
 )
 from app.crud import major_map_crud, stats_crud
 from app.redis_client import redis_client
@@ -230,6 +231,7 @@ async def get_my_recommendations(
 
 @router.get(
     "/majors",
+    response_model=AvailableMajorsResponse,
     summary="Get available majors",
     description="Get list of all available majors for recommendations."
 )
