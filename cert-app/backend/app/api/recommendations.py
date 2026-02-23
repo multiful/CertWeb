@@ -75,16 +75,24 @@ async def get_recommendations(
 ):
     """Get certification recommendations for a major."""
     cache_key = redis_client.make_cache_key(
-        "recs",
+        "recs:v2",
         major=major.lower().strip(),
         limit=limit
     )
     
     # Try cache
-    cached = redis_client.get(cache_key)
-    if cached:
-        logger.debug(f"Cache hit for recommendations: {major}")
-        return RecommendationListResponse(**cached)
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            
+            if isinstance(cached, dict):
+                logger.debug(f"Cache hit for recommendations: {major}")
+                return RecommendationListResponse(**cached)
+    except Exception as e:
+        logger.warning(f"Cache read failed for recommendations: {e}")
     
     # Get mappings from database
     search_major = major.strip()

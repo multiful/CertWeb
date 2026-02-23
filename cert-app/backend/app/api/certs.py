@@ -193,17 +193,25 @@ async def get_cert_detail(
     cache_key = f"certs:detail:{qual_id}"
     
     # Try cache
-    cached = redis_client.get(cache_key)
-    if cached:
-        logger.debug(f"Cache hit for cert detail: {qual_id}")
-        # Increment trending traffic
-        redis_client.increment_trending("trending_certs", str(qual_id), amount=1.0)
-        
-        # Store in recent for user
-        if user_id:
-            redis_client.push_recent(f"user:{user_id}:recent_certs", str(qual_id))
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
             
-        return QualificationDetailResponse(**cached)
+            if isinstance(cached, dict):
+                logger.debug(f"Cache hit for cert detail: {qual_id}")
+                # Increment trending traffic
+                redis_client.increment_trending("trending_certs", str(qual_id), amount=1.0)
+                
+                # Store in recent for user
+                if user_id:
+                    redis_client.push_recent(f"user:{user_id}:recent_certs", str(qual_id))
+                    
+                return QualificationDetailResponse(**cached)
+    except Exception as e:
+        logger.warning(f"Cache read failed for cert detail: {e}")
     
     # Get from database
     qual = qualification_crud.get_with_stats(db, qual_id)
@@ -298,10 +306,18 @@ async def get_cert_stats(
     )
     
     # Try cache
-    cached = redis_client.get(cache_key)
-    if cached:
-        logger.debug(f"Cache hit for cert stats: {qual_id}")
-        return QualificationStatsListResponse(**cached)
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            
+            if isinstance(cached, dict):
+                logger.debug(f"Cache hit for cert stats: {qual_id}")
+                return QualificationStatsListResponse(**cached)
+    except Exception as e:
+        logger.warning(f"Cache read failed for cert stats: {e}")
     
     # Check if qualification exists
     qual = qualification_crud.get_by_id(db, qual_id)
@@ -351,9 +367,18 @@ async def get_cert_trends(
         start_year=start_year
     )
     
-    cached = redis_client.get(cache_key)
-    if cached:
-        return [PassRateTrendResponse(**row) for row in cached]
+    # Try cache
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            
+            if isinstance(cached, list):
+                return [PassRateTrendResponse(**row) for row in cached]
+    except Exception as e:
+        logger.warning(f"Cache read failed for cert trends: {e}")
 
     query = text("""
         SELECT 
