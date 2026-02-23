@@ -317,7 +317,7 @@ export function CertListPage() {
                 <div className="p-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-950/20 border-b border-slate-800">
                   추천 검색어 ({data.items.length})
                 </div>
-                {data.items.slice(0, 10).map((cert) => (
+                {(data?.items || []).slice(0, 10).map((cert) => (
                   <div
                     key={cert.qual_id}
                     className="px-4 py-2.5 hover:bg-slate-800 cursor-pointer text-slate-200 border-b border-slate-800/50 last:border-0 flex items-center justify-between group/item transition-colors"
@@ -344,7 +344,7 @@ export function CertListPage() {
               </SelectTrigger>
               <SelectContent className="bg-slate-900 border-slate-800 text-white max-h-[300px]">
                 <SelectItem value={ALL_FIELDS}>전체 분야</SelectItem>
-                {filters?.main_fields.map((f: string) => (
+                {(filters?.main_fields || []).map((f: string) => (
                   <SelectItem key={f} value={f}>{f}</SelectItem>
                 ))}
               </SelectContent>
@@ -449,7 +449,7 @@ export function CertListPage() {
           >
             전체
           </Badge>
-          {filters?.qual_types.map((t: string) => (
+          {(filters?.qual_types || []).map((t: string) => (
             <Badge
               key={t}
               variant={params.qual_type === t ? "secondary" : "outline"}
