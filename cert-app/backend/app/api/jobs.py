@@ -9,6 +9,8 @@ from app.schemas import JobResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
+from app.redis_client import redis_client
+
 @router.get("", response_model=List[JobResponse])
 async def get_jobs(
     q: Optional[str] = Query(None, description="Job name search"),
@@ -18,8 +20,22 @@ async def get_jobs(
     _: None = Depends(check_rate_limit)
 ):
     """Search for jobs and their outlook/salary info."""
+    cache_key = redis_client.make_cache_key(
+        "jobs:list",
+        hash=redis_client.hash_query_params(q=q, page=page, page_size=page_size)
+    )
+    
+    cached = redis_client.get(cache_key)
+    if cached:
+        return cached
+
     items, _ = job_crud.get_list(db, q, page, page_size)
-    return items
+    
+    # Store directly as lists of dicts
+    result = [JobResponse.model_validate(item).model_dump() for item in items]
+    redis_client.set(cache_key, result, 3600)  # cache for 1 hour
+    
+    return result
 
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
@@ -28,4 +44,21 @@ async def get_job(
     _: None = Depends(check_rate_limit)
 ):
     """Get detailed information for a specific job."""
-    return job_crud.get_by_id(db, job_id)
+    cache_key = f"jobs:detail:{job_id}"
+    
+    cached = redis_client.get(cache_key)
+    if cached:
+        return cached
+
+    job = job_crud.get_by_id(db, job_id)
+    if not job:
+        from fastapi import HTTPException, status
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found"
+        )
+        
+    result = JobResponse.model_validate(job).model_dump()
+    redis_client.set(cache_key, result, 3600)
+    
+    return result

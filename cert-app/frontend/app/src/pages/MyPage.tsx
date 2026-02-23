@@ -36,9 +36,17 @@ export function MyPage() {
     const [recommendations, setRecommendations] = useState<any[]>([]);
 
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-    const [nickname, setNickname] = useState(user?.user_metadata?.nickname || user?.user_metadata?.userid || '');
-    const [userMajor, setUserMajor] = useState(user?.user_metadata?.detail_major || '');
+    const [nickname, setNickname] = useState('');
+    const [userMajor, setUserMajor] = useState('');
     const [isUpdating, setIsUpdating] = useState(false);
+
+    // Sync state when dialog opens
+    useEffect(() => {
+        if (isSettingsOpen && user) {
+            setNickname(user.user_metadata?.nickname || user.user_metadata?.userid || '');
+            setUserMajor(user.user_metadata?.detail_major || '');
+        }
+    }, [isSettingsOpen, user]);
 
     // Major autocomplete
     const [showMajorSuggestions, setShowMajorSuggestions] = useState(false);

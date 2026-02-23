@@ -90,10 +90,21 @@ async def get_certs(
         page_size=page_size
     )
     
-    # Build response with aggregated stats
+    # Build response with aggregated stats in BULK (O(1) instead of N queries)
+    from app.crud import get_qualification_aggregated_stats_bulk
+    
+    qual_ids = [item.qual_id for item in items]
+    all_stats = get_qualification_aggregated_stats_bulk(db, qual_ids)
+    
     response_items = []
     for item in items:
-        stats = get_qualification_aggregated_stats(db, item.qual_id)
+        # Get pre-calculated stats from our bulk map
+        stats = all_stats.get(item.qual_id, {
+            "latest_pass_rate": None,
+            "avg_difficulty": None,
+            "total_candidates": 0
+        })
+        
         response_items.append(
             QualificationListItemResponse(
                 qual_id=item.qual_id,
@@ -119,6 +130,13 @@ async def get_certs(
         page_size=page_size,
         total_pages=total_pages
     )
+    
+    # Save the computed result to cache
+    try:
+        redis_client.set(cache_key, response.model_dump(), get_cache_ttl("list"))
+        logger.debug(f"Cached cert list for key: {cache_key}")
+    except Exception as e:
+        logger.warning(f"Failed to cache cert list: {e}")
     
     # If searching, increment trending for top results
     if q and response_items:
@@ -320,7 +338,15 @@ async def get_cert_trends(
     """
     current_year = date.today().year
     start_year = current_year - 3
+    cache_key = redis_client.make_cache_key(
+        f"certs:trends:{qual_id}",
+        start_year=start_year
+    )
     
+    cached = redis_client.get(cache_key)
+    if cached:
+        return [PassRateTrendResponse(**row) for row in cached]
+
     query = text("""
         SELECT 
             year,
@@ -354,7 +380,11 @@ async def get_cert_trends(
         """)
         results = db.execute(query_calc, {"qual_id": qual_id, "start_year": start_year}).mappings().all()
 
-    return [PassRateTrendResponse(**row) for row in results]
+    # Convert mapping rows to basic dicts for caching
+    dicts = [dict(row) for row in results]
+    redis_client.set(cache_key, dicts, get_cache_ttl("detail"))
+
+    return [PassRateTrendResponse(**row) for row in dicts]
 
 
 @router.get(

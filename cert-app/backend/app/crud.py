@@ -551,6 +551,96 @@ def get_qualification_aggregated_stats(
     }
 
 
+def get_qualification_aggregated_stats_bulk(db: Session, qual_ids: List[int]) -> dict:
+    """Get aggregated stats for multiple qualifications in bulk (fixes N+1)."""
+    if not qual_ids:
+        return {}
+
+    # 1. Get raw aggregated stats for all IDs
+    raw_stats_list = db.query(
+        QualificationStats.qual_id,
+        func.avg(QualificationStats.pass_rate).label("avg_pass_rate"),
+        func.avg(QualificationStats.difficulty_score).label("avg_diff"),
+        func.sum(QualificationStats.candidate_cnt).label("total_cands"),
+        func.count(QualificationStats.stat_id).label("num_records")
+    ).filter(QualificationStats.qual_id.in_(qual_ids)).group_by(QualificationStats.qual_id).all()
+
+    # Create a lookup map
+    stats_map = {s.qual_id: s for s in raw_stats_list}
+
+    # 2. Get latest pass rates for all IDs
+    # Highly efficient subquery to find the latest stat entry per qual_id
+    latest_sub = db.query(
+        QualificationStats.qual_id,
+        func.max(QualificationStats.year * 10 + QualificationStats.exam_round).label("latest_key")
+    ).filter(QualificationStats.qual_id.in_(qual_ids)).group_by(QualificationStats.qual_id).subquery()
+
+    latest_stats = db.query(QualificationStats).join(
+        latest_sub,
+        and_(
+            QualificationStats.qual_id == latest_sub.c.qual_id,
+            (QualificationStats.year * 10 + QualificationStats.exam_round) == latest_sub.c.latest_key
+        )
+    ).all()
+
+    latest_pass_rate_map = {s.qual_id: s.pass_rate for s in latest_stats}
+
+    # 3. Get metadata for level weighting
+    quals = db.query(Qualification).filter(Qualification.qual_id.in_(qual_ids)).all()
+    qual_metadata = {q.qual_id: q for q in quals}
+
+    # 4. Process all results
+    results = {}
+    PRIOR_DIFF = 6.5
+    C_THRESHOLD = 500
+    K_THRESHOLD = 3
+
+    for q_id in qual_ids:
+        raw = stats_map.get(q_id)
+        if not raw or not raw.num_records:
+            results[q_id] = {
+                "latest_pass_rate": None,
+                "avg_difficulty": None,
+                "total_candidates": 0,
+            }
+            continue
+
+        avg_pass_rate = raw.avg_pass_rate or 35.0
+        base_diff = max(1.0, min(10.0, (100 - avg_pass_rate) / 10.0))
+
+        total_cands = raw.total_cands or 0
+        num_records = raw.num_records or 0
+
+        conf_cands = min(1.0, total_cands / C_THRESHOLD)
+        conf_records = min(1.0, num_records / K_THRESHOLD)
+        confidence = (conf_cands + conf_records) / 2.0
+
+        qual = qual_metadata.get(q_id)
+        level_weight = 1.0
+        if qual:
+            if qual.qual_type == "국가기술자격":
+                if qual.grade_code in ["기술사", "기능장"]: level_weight = 1.3
+                elif qual.grade_code == "기사": level_weight = 1.15
+                elif qual.grade_code == "산업기사": level_weight = 1.05
+                elif qual.grade_code == "기능사": level_weight = 0.95
+            elif qual.qual_type == "국가전문자격":
+                level_weight = 1.22
+            elif qual.qual_type and "민간" in qual.qual_type:
+                level_weight = 0.85
+
+        base_diff *= level_weight
+        final_difficulty = (base_diff * confidence) + (PRIOR_DIFF * (1 - confidence))
+        final_difficulty = max(1.0, min(10.0, final_difficulty))
+
+        results[q_id] = {
+            "latest_pass_rate": latest_pass_rate_map.get(q_id),
+            "avg_difficulty": round(final_difficulty, 1),
+            "total_candidates": int(total_cands),
+        }
+
+    return results
+
+
 # ============== Job CRUD ==============
 
 class JobCRUD:
