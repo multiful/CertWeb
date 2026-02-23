@@ -23,26 +23,33 @@ class RedisClient:
     def _connect(self):
         """Connect to Redis."""
         try:
+            if not settings.REDIS_URL or "localhost" in settings.REDIS_URL:
+                if not settings.DEBUG:
+                    logger.warning("REDIS_URL is not set for production. Caching will be disabled.")
+                    self.client = None
+                    return
+
             self.client = redis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
+                socket_connect_timeout=2, # Faster timeout
+                socket_timeout=2,
                 health_check_interval=30,
             )
             self.client.ping()
             logger.info("Redis connection established")
         except Exception as e:
-            logger.error(f"Redis connection failed: {e}")
+            logger.error(f"Redis connection failed: {e}. Performance may be degraded.")
             self.client = None
-    
+
     def is_connected(self) -> bool:
-        """Check if Redis is connected."""
-        if not self.client:
+        """Check if Redis is connected safely."""
+        if self.client is None:
             return False
         try:
             return self.client.ping()
-        except:
+        except Exception:
+            self.client = None # Reset on failure
             return False
     
     def _serialize(self, value: Any) -> str:
