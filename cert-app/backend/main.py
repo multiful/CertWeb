@@ -11,7 +11,7 @@ import time
 from app.config import get_settings
 from app.database import check_database_connection
 from app.redis_client import redis_client
-from app.api import certs, recommendations, admin, favorites, jobs, auth, majors, ai_recommendations
+from app.api import certs, recommendations, admin, favorites, jobs, auth, majors, ai_recommendations, fast_certs
 from app.services.data_loader import data_loader
 
 # Configure logging
@@ -150,11 +150,13 @@ app.include_router(jobs.router, prefix=v1_prefix)
 app.include_router(auth.router, prefix=v1_prefix)
 app.include_router(majors.router, prefix=v1_prefix)
 app.include_router(ai_recommendations.router, prefix=v1_prefix)
+app.include_router(fast_certs.router, prefix=v1_prefix)
 
 
 # ============== Health Check ==============
 
 @app.get("/health", tags=["health"])
+@app.head("/health")
 async def health_check():
     """Health check endpoint."""
     db_status = "healthy" if check_database_connection() else "unhealthy"

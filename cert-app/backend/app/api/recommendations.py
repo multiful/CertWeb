@@ -90,16 +90,26 @@ async def get_recommendations(
     mappings = major_map_crud.get_by_major_with_stats(db, major, limit)
     
     if not mappings:
-        # Try case-insensitive search
-        all_majors = major_map_crud.get_majors_list(db)
-        matched_major = None
-        for m in all_majors:
-            if m.lower() == major.lower():
-                matched_major = m
-                break
-        
-        if matched_major:
+        from app.models import MajorQualificationMap
+        # Find the first major in MajorQualificationMap that contains the queried major
+        matched_map = db.query(MajorQualificationMap.major).filter(
+            MajorQualificationMap.major.ilike(f"%{major}%")
+        ).first()
+
+        if matched_map:
+            matched_major = matched_map[0]
             mappings = major_map_crud.get_by_major_with_stats(db, matched_major, limit)
+            major = matched_major # Update major name to the matched one for the response
+        else:
+            # Fallback if no ILIKE matches, try inverse
+            matched_map_inverse = db.query(MajorQualificationMap.major).filter(
+                text(f"'{major}' ILIKE '%' || major || '%'")
+            ).first()
+            if matched_map_inverse:
+                matched_major = matched_map_inverse[0]
+                mappings = major_map_crud.get_by_major_with_stats(db, matched_major, limit)
+                major = matched_major
+
     
     if not mappings:
         return RecommendationListResponse(

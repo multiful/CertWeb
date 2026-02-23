@@ -13,8 +13,10 @@ pydantic-settings==2.1.0
 email-validator==2.1.0
 pgvector
 
-# Redis
+# Redis & Streaming
 redis==5.0.1
+quixstreams
+orjson
 
 # HTTP Client
 httpx==0.26.0
