@@ -86,8 +86,11 @@ export function HomePage() {
               <form onSubmit={handleSearch} className="relative group flex-1 max-w-md">
                 <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl blur opacity-25 group-hover:opacity-50 transition duration-1000 group-hover:duration-200" />
                 <div className="relative">
+                  <label htmlFor="home-cert-search" className="sr-only">자격증 검색</label>
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 w-5 h-5" />
                   <input
+                    id="home-cert-search"
+                    name="q"
                     type="text"
                     placeholder="관심 있는 자격증을 검색하세요..."
                     value={search}

@@ -110,12 +110,13 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <footer className="border-t border-slate-800 mt-auto bg-slate-950/50">
         <div className="container mx-auto px-4 py-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 rounded-md bg-slate-800 flex items-center justify-center">
-                <Award className="w-4 h-4 text-slate-500" />
+            <Link to="/" className="flex items-center gap-2 group opacity-60 hover:opacity-100 transition-opacity">
+              <div className="relative">
+                <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full blur opacity-10 group-hover:opacity-30 transition duration-500"></div>
+                <CertLogo className="w-6 h-6" />
               </div>
-              <span className="text-slate-500 text-sm font-bold tracking-tight uppercase">CertFinder</span>
-            </div>
+              <span className="font-black text-sm tracking-tighter bg-gradient-to-r from-white/80 to-slate-500 bg-clip-text text-transparent uppercase">CertFinder</span>
+            </Link>
             <p className="text-slate-500 text-sm font-medium">
               2026 CertFinder 국가자격 통합 분석 시스템
             </p>

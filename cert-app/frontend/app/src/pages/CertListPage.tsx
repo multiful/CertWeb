@@ -347,7 +347,7 @@ export function CertListPage() {
               value={params.main_field || ALL_FIELDS}
               onValueChange={(val) => updateParam('main_field', val)}
             >
-              <SelectTrigger className="h-11 bg-black/20 border-slate-800 text-white rounded-xl">
+              <SelectTrigger id="main-field-select" className="h-11 bg-black/20 border-slate-800 text-white rounded-xl">
                 <SelectValue placeholder="전체 분야" />
               </SelectTrigger>
               <SelectContent className="bg-slate-900 border-slate-800 text-white max-h-[300px]">
@@ -360,7 +360,10 @@ export function CertListPage() {
           </div>
 
           <div className="lg:col-span-2 space-y-3">
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
+            <label
+              htmlFor="sort-select"
+              className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"
+            >
               <ArrowUpDown className="w-3 h-3" /> 정렬 기준
             </label>
             <div className="flex gap-2">
@@ -368,7 +371,7 @@ export function CertListPage() {
                 value={params.sort}
                 onValueChange={(val) => updateParam('sort', val as SortOption)}
               >
-                <SelectTrigger className="h-11 bg-black/20 border-slate-800 text-white rounded-xl text-xs sm:text-sm flex-1">
+                <SelectTrigger id="sort-select" className="h-11 bg-black/20 border-slate-800 text-white rounded-xl text-xs sm:text-sm flex-1">
                   <SelectValue placeholder="정렬" />
                 </SelectTrigger>
                 <SelectContent className="bg-slate-900 border-slate-800 text-white">
