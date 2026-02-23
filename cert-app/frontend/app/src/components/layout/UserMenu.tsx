@@ -234,8 +234,8 @@ export function UserMenu() {
                             <User className="w-5 h-5 text-blue-400" />
                         </div>
                         <div className="hidden sm:block text-left">
-                            <p className="text-sm font-semibold text-slate-100 truncate max-w-[120px]">
-                                {user.user_metadata?.userid || user.email?.split('@')[0]}
+                            <p className="text-sm font-semibold text-slate-100 truncate max-w-[120px] text-right">
+                                {user.user_metadata?.nickname || user.user_metadata?.userid || user.email?.split('@')[0]}
                             </p>
                             <p className="text-[10px] text-blue-400 font-medium tracking-wide">USER ACCOUNT</p>
                         </div>

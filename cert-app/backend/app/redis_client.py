@@ -1,5 +1,4 @@
-"""Redis client for caching and rate limiting."""
-import json
+import orjson
 import hashlib
 import logging
 from typing import Optional, Any, List
@@ -46,16 +45,18 @@ class RedisClient:
             return False
     
     def _serialize(self, value: Any) -> str:
-        """Serialize value to JSON string."""
-        if isinstance(value, (dict, list)):
-            return json.dumps(value, default=str)
-        return str(value)
+        """Serialize value to JSON string using high-performance orjson."""
+        try:
+            # orjson returns bytes, we decode to str for redis-py (if decode_responses=True)
+            return orjson.dumps(value, option=orjson.OPT_SERIALIZE_DATETIME).decode()
+        except Exception:
+            return str(value)
     
     def _deserialize(self, value: str) -> Any:
-        """Deserialize JSON string to value."""
+        """Deserialize JSON string to value using high-performance orjson."""
         try:
-            return json.loads(value)
-        except json.JSONDecodeError:
+            return orjson.loads(value)
+        except Exception:
             return value
     
     # ============== Cache Operations ==============
@@ -236,6 +237,25 @@ class RedisClient:
         except Exception as e:
             logger.error(f"Redis lrange error: {e}")
             return []
+
+    # ============== Pub/Sub Operations ==============
+
+    def publish(self, channel: str, message: Any) -> int:
+        """Publish a message to a channel."""
+        if not self.client:
+            return 0
+        try:
+            serialized = self._serialize(message)
+            return self.client.publish(channel, serialized)
+        except Exception as e:
+            logger.error(f"Redis publish error: {e}")
+            return 0
+
+    def get_pubsub(self):
+        """Get a pubsub instance."""
+        if not self.client:
+            return None
+        return self.client.pubsub()
     
     # ============== Cache Key Helpers ==============
     

@@ -30,6 +30,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     if (route === 'jobs' || route === 'job-detail') return '/jobs';
     if (route === 'recommendations') return '/recommendations';
     if (route === 'ai-recommendations') return '/ai-recommendations';
+    if (route === 'mypage') return '/mypage';
     return '/';
   }, [route]);
 
@@ -40,7 +41,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-10 h-10 flex items-center justify-center transition-all duration-500 group-hover:scale-110 group-hover:drop-shadow-[0_0_15px_rgba(59,130,246,0.6)]">
+            <div className="relative">
+              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-full blur opacity-20 group-hover:opacity-40 transition duration-500"></div>
               <CertLogo className="w-9 h-9" />
             </div>
             <span className="font-black text-xl hidden sm:inline tracking-tighter bg-gradient-to-r from-white to-slate-400 bg-clip-text text-transparent">CertFinder</span>

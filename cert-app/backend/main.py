@@ -43,14 +43,19 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Database connection: FAILED")
     
-    # Check Redis connection
+    # Sync Cache to Redis if connected
     try:
         if redis_client.is_connected():
-            logger.info("Redis connection: OK")
-        else:
-            logger.warning("Redis connection: FAILED - caching disabled")
+            from app.services.fast_sync_service import FastSyncService
+            from app.database import SessionLocal
+            db = SessionLocal()
+            try:
+                FastSyncService.sync_all_to_redis(db)
+            finally:
+                db.close()
+            logger.info("Initial Redis sync complete.")
     except Exception as e:
-        logger.warning(f"Redis connection: FAILED - {e}")
+        logger.warning(f"Initial Redis sync failed: {e}")
     
     yield
     

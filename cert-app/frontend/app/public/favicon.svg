@@ -1,0 +1,25 @@
+<svg
+  viewBox="0 0 100 100"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <defs>
+    <linearGradient id="shieldFaviconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#3b82f6" />
+      <stop offset="100%" stopColor="#6366f1" />
+    </linearGradient>
+  </defs>
+  <path
+    d="M50 12L22 25V50C22 66.5 34.5 81.5 50 86C65.5 81.5 78 66.5 78 50V25L50 12Z"
+    fill="url(#shieldFaviconGradient)"
+  />
+  <path
+    d="M38 48L46 56L62 40"
+    stroke="white"
+    strokeWidth="8"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  />
+  <circle cx="72" cy="72" r="14" fill="#0f172a" stroke="white" strokeWidth="3" />
+  <line x1="81" y1="81" x2="89" y2="89" stroke="white" strokeWidth="4" strokeLinecap="round" />
+</svg>

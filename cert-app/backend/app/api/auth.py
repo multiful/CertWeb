@@ -356,14 +356,24 @@ async def update_profile(
             {**local_updates, "id": user_id}
         )
     
-    # 3. Update Supabase metadata
+    # 3. Update Supabase metadata (Merge instead of replace)
     try:
-        requests.put(
+        # First, fetch current user to get existing metadata
+        user_res = requests.get(
             f"{settings.SUPABASE_URL}/auth/v1/admin/users/{user_id}",
             headers=_admin_headers(),
-            json={"user_metadata": updates},
             timeout=10
         )
+        if user_res.status_code == 200:
+            current_metadata = user_res.json().get("user_metadata", {})
+            merged_metadata = {**current_metadata, **updates}
+            
+            requests.put(
+                f"{settings.SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                headers=_admin_headers(),
+                json={"user_metadata": merged_metadata},
+                timeout=10
+            )
     except Exception as e:
         logger.warning(f"Failed to sync metadata to Supabase: {e}")
 

@@ -75,7 +75,7 @@ async def get_cert_fast(cert_id: int):
         payload = {"status": "success", "data": dict(row)}
         result_bytes = orjson.dumps(payload)
         
-        # 여기서 생성된 bytes 캐싱은 스트림 파이프라인(Quix)에서 담당하므로 생략하거나 최소 방어로 추가 가능
+        # 여기서 생성된 bytes 캐싱은 스트림 파이프라인(Redis Sync)에서 담당하므로 생략하거나 최소 방어로 추가 가능
         # 초경량 응답
         return Response(content=result_bytes, media_type="application/json")
     finally:
