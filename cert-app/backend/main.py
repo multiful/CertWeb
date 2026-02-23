@@ -46,6 +46,9 @@ async def lifespan(app: FastAPI):
     # Sync Cache to Redis if connected
     try:
         if redis_client.is_connected():
+            logger.info("FLUSHING REDIS CACHE ON STARTUP to fix TypeErrors...")
+            redis_client.flush_all()
+            
             from app.services.fast_sync_service import FastSyncService
             from app.database import SessionLocal
             db = SessionLocal()
@@ -54,8 +57,10 @@ async def lifespan(app: FastAPI):
             finally:
                 db.close()
             logger.info("Initial Redis sync complete.")
+        else:
+            logger.warning("Redis not connected on startup. Skipping flush.")
     except Exception as e:
-        logger.warning(f"Initial Redis sync failed: {e}")
+        logger.warning(f"Initial Redis setup failed: {e}")
     
     yield
     
@@ -92,14 +97,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add middleware
-from fastapi.middleware.gzip import GZipMiddleware
+# ============== Middleware Order (Last added is first to run) ==============
 
+# 4. GZip compression (Innermost)
+from fastapi.middleware.gzip import GZipMiddleware
 app.add_middleware(
     GZipMiddleware,
-    minimum_size=1000  # Only compress responses larger than 1KB
+    minimum_size=1000
 )
 
+# 3. Trusted Host (Safe but can stay)
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=["*"]
+)
+
+# 2. CORS (Must be near the top to handle OPTIONS effectively)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex="https://cert-web-.*\.vercel\.app",
@@ -110,32 +124,27 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         "https://cert-web-sand.vercel.app",
         "https://cert-web-multifuls-projects.vercel.app",
+        "https://cert-web-sand.vercel.app/", # Add trailing slash just in case
     ],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
-app.add_middleware(
-    TrustedHostMiddleware,
-    allowed_hosts=["*"],  # Configure for production
-)
-
-
-# Request timing middleware
+# 1. Custom HTTP Middleware (Outermost for process time)
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):
-    """Add processing time header to responses."""
+    # Special handle for OPTIONS to be ABSOLUTELY sure no 400 occurs
+    if request.method == "OPTIONS":
+        return await call_next(request)
+        
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
     
-    # Add rate limit headers if available
     if hasattr(request.state, "rate_limit_remaining"):
-        response.headers["X-RateLimit-Remaining"] = str(
-            request.state.rate_limit_remaining
-        )
+        response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
     
     return response
 

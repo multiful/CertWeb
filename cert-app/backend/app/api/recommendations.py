@@ -75,7 +75,7 @@ async def get_recommendations(
 ):
     """Get certification recommendations for a major."""
     cache_key = redis_client.make_cache_key(
-        "recs:v2",
+        "recs:v3",
         major=major.lower().strip(),
         limit=limit
     )
@@ -84,6 +84,7 @@ async def get_recommendations(
     try:
         cached = redis_client.get(cache_key)
         if cached:
+            # Robust mapping check to prevent TypeError
             if isinstance(cached, str):
                 import orjson
                 cached = orjson.loads(cached)
