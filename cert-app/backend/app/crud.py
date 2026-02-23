@@ -547,7 +547,7 @@ def get_qualification_aggregated_stats(
     return {
         "latest_pass_rate": latest_pass_rate,
         "avg_difficulty": round(final_difficulty, 1),
-        "total_candidates": int(total_cands),
+        "total_candidates": int(total_cands or 0),
     }
 
 
