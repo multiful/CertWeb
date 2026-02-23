@@ -313,7 +313,7 @@ export function HomePage() {
                 size="lg"
                 className="bg-white text-blue-600 hover:bg-blue-50 text-lg font-bold rounded-xl h-14 px-10 shadow-xl"
               >
-                전공별 자격증 추천받기
+                전공별 자격증 추천
               </Button>
               <Button
                 onClick={() => router.navigate('/jobs')}

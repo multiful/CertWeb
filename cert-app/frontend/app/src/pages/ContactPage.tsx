@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { useRouter } from '@/lib/router';
 import { toast } from 'sonner';
 
+import { sendContactEmail } from '@/lib/api';
+
 export function ContactPage() {
     const router = useRouter();
     const [isSubmitted, setIsSubmitted] = useState(false);
@@ -23,13 +25,16 @@ export function ContactPage() {
         e.preventDefault();
         setLoading(true);
 
-        // Simulate API call
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        console.log('Feedback submitted to rlaehdrb2485@naver.com:', formData);
-        setIsSubmitted(true);
-        setLoading(false);
-        toast.success('문의가 성공적으로 접수되었습니다.');
+        try {
+            await sendContactEmail(formData);
+            console.log('Feedback submitted to rlaehdrb2485@naver.com:', formData);
+            setIsSubmitted(true);
+            toast.success('문의가 성공적으로 접수되었습니다.');
+        } catch (error) {
+            toast.error('문의 접수에 실패했습니다. 잠시 후 다시 시도해주세요.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     if (isSubmitted) {

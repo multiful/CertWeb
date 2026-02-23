@@ -164,6 +164,8 @@ app.include_router(auth.router, prefix=v1_prefix)
 app.include_router(majors.router, prefix=v1_prefix)
 app.include_router(ai_recommendations.router, prefix=v1_prefix)
 app.include_router(fast_certs.router, prefix=v1_prefix)
+from app.api import contact
+app.include_router(contact.router, prefix=v1_prefix)
 
 
 # ============== Health Check ==============

@@ -14,7 +14,7 @@ const navItems: NavItem[] = [
   { path: '/', label: '홈', icon: <Home className="w-4 h-4" /> },
   { path: '/certs', label: '자격증 탐색', icon: <Search className="w-4 h-4" /> },
   { path: '/jobs', label: '진로 및 직무 매칭', icon: <Award className="w-4 h-4" /> },
-  { path: '/recommendations', label: '추천받기', icon: <ThumbsUp className="w-4 h-4" /> },
+  { path: '/recommendations', label: '전공 탐색', icon: <ThumbsUp className="w-4 h-4" /> },
   { path: '/ai-recommendations', label: 'AI 추천', icon: <BrainCircuit className="w-4 h-4" /> },
 ];
 

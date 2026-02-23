@@ -296,3 +296,12 @@ export async function checkUserId(userid: string): Promise<{ available: boolean,
     body: JSON.stringify({ userid })
   });
 }
+
+// ============== Contact / Feedback ==============
+export async function sendContactEmail(data: { name: string; email: string; subject: string; message: string }): Promise<void> {
+  await apiRequest('/contact', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+}

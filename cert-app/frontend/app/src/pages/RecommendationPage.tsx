@@ -111,7 +111,7 @@ export function RecommendationPage() {
             {loading ? (
               <Skeleton className="w-5 h-5 bg-purple-400/50" />
             ) : (
-              "추천받기"
+              "전공 탐색"
             )}
           </Button>
         </form>
