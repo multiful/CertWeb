@@ -76,7 +76,7 @@ async def get_recommendations(
 ):
     """Get certification recommendations for a major."""
     cache_key = redis_client.make_cache_key(
-        "recs:v3",
+        "recs:v5",
         major=major.lower().strip(),
         limit=limit
     )
@@ -84,15 +84,9 @@ async def get_recommendations(
     # Try cache
     try:
         cached = redis_client.get(cache_key)
-        if cached:
-            # Robust mapping check to prevent TypeError
-            if isinstance(cached, str):
-                import orjson
-                cached = orjson.loads(cached)
-            
-            if isinstance(cached, dict):
-                logger.debug(f"Cache hit for recommendations: {major}")
-                return RecommendationListResponse(**cached)
+        if cached and isinstance(cached, dict):
+            logger.debug(f"Cache hit for recommendations: {major}")
+            return RecommendationListResponse(**cached)
     except Exception as e:
         logger.warning(f"Cache read failed for recommendations: {e}")
     
@@ -240,18 +234,12 @@ async def get_available_majors(
     _: None = Depends(check_rate_limit)
 ):
     """Get list of available majors."""
-    cache_key = "recs:majors:v2"
+    cache_key = "recs:majors:v5"
     
     try:
         cached = redis_client.get(cache_key)
-        if cached:
-            # Robust list check
-            if isinstance(cached, str):
-                import orjson
-                cached = orjson.loads(cached)
-            
-            if isinstance(cached, list):
-                return {"majors": cached}
+        if cached and isinstance(cached, list):
+            return {"majors": cached}
     except Exception as e:
         logger.warning(f"Cache read failed for majors list: {e}")
     

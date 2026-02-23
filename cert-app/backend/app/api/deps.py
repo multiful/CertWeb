@@ -207,16 +207,39 @@ def get_current_user(
                 detail="Invalid token payload: missing sub"
             )
             
-        # Resolve UUID to readable userid from profiles table
-        # Following user's logic where user_favorites.user_id should be kdk990901
+        # Ensure profile exists (Social Login Support)
         profile = db.query(Profile).filter(Profile.id == uuid_sub).first()
+        if not profile:
+            # Create a shell profile from JWT data
+            email = payload.get("email")
+            # For social logins, we might have full_name or name in metadata
+            meta = payload.get("user_metadata", {})
+            name = meta.get("full_name") or meta.get("name")
+            
+            try:
+                profile = Profile(
+                    id=uuid_sub,
+                    email=email,
+                    name=name,
+                    nickname=name or email.split("@")[0] if email else "New User",
+                    userid=None # Let them set it later
+                )
+                db.add(profile)
+                db.commit()
+                db.refresh(profile)
+                logger.info(f"Auto-created profile for social user: {uuid_sub}")
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Failed to auto-create profile: {e}")
+        
         if profile and profile.userid:
             return profile.userid
             
-        return uuid_sub # Fallback to UUID if profile not found
+        return uuid_sub # Fallback to UUID if profile.userid is not yet set
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"JWT validation error: {e}")
-        # Return 401 for any token validation error (including key fetch failure)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",

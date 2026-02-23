@@ -59,9 +59,9 @@ async def get_certs(
     _: None = Depends(check_rate_limit)
 ):
     """Get certification list with filters and pagination."""
-    # Build cache key (Bumped to v4 for data stability)
+    # Build cache key (Bumped to v5 for data stability)
     cache_key = redis_client.make_cache_key(
-        "certs:list:v4",
+        "certs:list:v5",
         hash=redis_client.hash_query_params(
             q=q, main_field=main_field, ncs_large=ncs_large,
             qual_type=qual_type, managing_body=managing_body,
@@ -72,14 +72,9 @@ async def get_certs(
     # Try cache
     try:
         cached = redis_client.get(cache_key)
-        if cached:
-            if isinstance(cached, str):
-                import orjson
-                cached = orjson.loads(cached)
-            
-            if isinstance(cached, dict):
-                logger.debug("Cache hit for cert list")
-                return QualificationListResponse(**cached)
+        if cached and isinstance(cached, dict):
+            logger.debug("Cache hit for cert list")
+            return QualificationListResponse(**cached)
     except Exception as e:
         logger.warning(f"Cache read failed for cert list: {e}")
     
@@ -165,16 +160,12 @@ async def get_filter_options(
     _: None = Depends(check_rate_limit)
 ):
     """Get available filter options."""
-    cache_key = "certs:filter_options:v4"
+    cache_key = "certs:filter_options:v5"
     
     try:
         cached = redis_client.get(cache_key)
-        if cached:
-            if isinstance(cached, str):
-                import orjson
-                cached = orjson.loads(cached)
-            if isinstance(cached, dict) and "qual_types" in cached:
-                return cached
+        if cached and isinstance(cached, dict) and "qual_types" in cached:
+            return cached
     except Exception as e:
         logger.warning(f"Cache read failed for filter options: {e}")
     

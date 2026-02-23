@@ -20,17 +20,12 @@ async def get_jobs(
     _: None = Depends(check_rate_limit)
 ):
     """Search for jobs and their outlook/salary info."""
-    cache_key = f"jobs:list:v2:{q}:{page}:{page_size}"
+    cache_key = f"jobs:list:v5:{q}:{page}:{page_size}"
     
     try:
         cached = redis_client.get(cache_key)
-        if cached:
-            if isinstance(cached, str):
-                import orjson
-                cached = orjson.loads(cached)
-            
-            if isinstance(cached, list):
-                return cached
+        if cached and isinstance(cached, list):
+            return cached
     except Exception:
         pass
 
@@ -49,17 +44,12 @@ async def get_job(
     _: None = Depends(check_rate_limit)
 ):
     """Get detailed information for a specific job."""
-    cache_key = f"jobs:detail:v2:{job_id}"
+    cache_key = f"jobs:detail:v5:{job_id}"
     
     try:
         cached = redis_client.get(cache_key)
-        if cached:
-            if isinstance(cached, str):
-                import orjson
-                cached = orjson.loads(cached)
-            
-            if isinstance(cached, dict):
-                return cached
+        if cached and isinstance(cached, dict):
+            return cached
     except Exception:
         pass
 

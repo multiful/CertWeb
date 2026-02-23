@@ -365,15 +365,34 @@ async def update_profile(
     if not updates:
         return {"message": "변경 사항이 없습니다."}
 
-    # 2. Update local DB
+    # 2. Update local DB via Upsert
     local_fields = ["name", "nickname", "userid", "detail_major"]
     local_updates = {k: v for k, v in updates.items() if k in local_fields}
     
     if local_updates:
-        set_clause = ", ".join([f"{k} = :{k}" for k in local_updates.keys()])
+        # Prepare params for raw SQL upsert
+        upsert_params = {
+            "id": user_id,
+            **{f"u_{k}": v for k, v in local_updates.items()}
+        }
+        
+        # Build set clause for UPDATE part
+        set_parts = [f"{k} = :u_{k}" for k in local_updates.keys()]
+        set_clause = ", ".join(set_parts)
+        
+        # Build columns and values for INSERT part
+        cols = ["id"] + list(local_updates.keys())
+        vals = [":id"] + [f":u_{k}" for k in local_updates.keys()]
+        
         db.execute(
-            text(f"UPDATE profiles SET {set_clause}, updated_at = NOW() WHERE id = :id"),
-            {**local_updates, "id": user_id}
+            text(f"""
+                INSERT INTO profiles ({", ".join(cols)})
+                VALUES ({", ".join(vals)})
+                ON CONFLICT (id) DO UPDATE SET
+                    {set_clause},
+                    updated_at = NOW()
+            """),
+            upsert_params
         )
     
     # 3. Update Supabase metadata (Merge instead of replace)

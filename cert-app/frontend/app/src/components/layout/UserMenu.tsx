@@ -350,30 +350,35 @@ export function UserMenu() {
                                     <form onSubmit={handleSignupCompleteWithVerify} className="space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
                                         <div className="p-4 bg-slate-900/40 rounded-2xl border border-slate-800/50 space-y-4">
                                             <div className="space-y-2">
-                                                <Label className="text-slate-400 text-[11px] font-bold uppercase">인증 코드</Label>
+                                                <Label htmlFor="signup-otp" className="text-slate-400 text-[11px] font-bold uppercase">인증 코드</Label>
                                                 <Input
+                                                    id="signup-otp"
+                                                    name="one-time-code"
                                                     placeholder="숫자 코드 입력"
                                                     value={verificationCode}
                                                     onChange={(e) => setVerificationCode(e.target.value)}
                                                     className="bg-slate-950 border-slate-800 h-11 text-center tracking-[0.2em] font-mono text-xl"
+                                                    autoComplete="one-time-code"
                                                 />
                                             </div>
 
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="space-y-2">
-                                                    <Label className="text-slate-400 text-[11px] font-bold uppercase">이름</Label>
-                                                    <Input value={name} onChange={(e) => setName(e.target.value)} className="bg-slate-950 border-slate-800 h-11" required />
+                                                    <Label htmlFor="signup-name" className="text-slate-400 text-[11px] font-bold uppercase">이름</Label>
+                                                    <Input id="signup-name" name="name" value={name} onChange={(e) => setName(e.target.value)} className="bg-slate-950 border-slate-800 h-11" required autoComplete="name" />
                                                 </div>
                                                 <div className="space-y-2">
-                                                    <Label className="text-slate-400 text-[11px] font-bold uppercase">생년월일</Label>
-                                                    <Input placeholder="YYMMDD" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} className="bg-slate-950 border-slate-800 h-11" required />
+                                                    <Label htmlFor="signup-birth" className="text-slate-400 text-[11px] font-bold uppercase">생년월일</Label>
+                                                    <Input id="signup-birth" name="bday" placeholder="YYMMDD" value={birthDate} onChange={(e) => setBirthDate(e.target.value)} className="bg-slate-950 border-slate-800 h-11" required autoComplete="bday" />
                                                 </div>
                                             </div>
 
                                             <div className="space-y-2">
-                                                <Label className="text-slate-400 text-[11px] font-bold uppercase">아이디</Label>
+                                                <Label htmlFor="signup-userid" className="text-slate-400 text-[11px] font-bold uppercase">아이디</Label>
                                                 <div className="flex gap-2">
                                                     <Input
+                                                        id="signup-userid"
+                                                        name="username"
                                                         value={userid}
                                                         onChange={(e) => {
                                                             setUserid(e.target.value);
@@ -381,6 +386,7 @@ export function UserMenu() {
                                                         }}
                                                         className={`bg-slate-950 h-11 transition-all ${isIdAvailable === true ? 'border-green-500/50 focus-visible:ring-green-500/20' : isIdAvailable === false ? 'border-red-500/50 focus-visible:ring-red-500/20' : 'border-slate-800'}`}
                                                         required
+                                                        autoComplete="username"
                                                     />
                                                     <Button
                                                         type="button"
@@ -395,30 +401,35 @@ export function UserMenu() {
 
                                             <div className="grid grid-cols-2 gap-4">
                                                 <div className="space-y-2">
-                                                    <Label className="text-slate-400 text-[11px] font-bold uppercase">비밀번호</Label>
-                                                    <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-slate-950 border-slate-800 h-11" required />
+                                                    <Label htmlFor="signup-password" className="text-slate-400 text-[11px] font-bold uppercase">비밀번호</Label>
+                                                    <Input id="signup-password" name="new-password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="bg-slate-950 border-slate-800 h-11" required autoComplete="new-password" />
                                                 </div>
                                                 <div className="space-y-2 relative">
                                                     <div className="flex justify-between items-center">
-                                                        <Label className="text-slate-400 text-[11px] font-bold uppercase">비밀번호 확인</Label>
+                                                        <Label htmlFor="signup-password-confirm" className="text-slate-400 text-[11px] font-bold uppercase">비밀번호 확인</Label>
                                                         {password && passwordConfirm && password === passwordConfirm && (
                                                             <CheckCircle2 className="w-4 h-4 text-green-400 absolute right-3 top-[34px]" />
                                                         )}
                                                     </div>
                                                     <Input
+                                                        id="signup-password-confirm"
+                                                        name="new-password"
                                                         type="password"
                                                         value={passwordConfirm}
                                                         onChange={(e) => setPasswordConfirm(e.target.value)}
                                                         className={`bg-slate-950 h-11 transition-all pr-10 ${password && passwordConfirm && password === passwordConfirm ? 'border-green-500/50' : 'border-slate-800'}`}
                                                         required
+                                                        autoComplete="new-password"
                                                     />
                                                 </div>
                                             </div>
 
                                             <div className="space-y-2 relative">
-                                                <Label className="text-slate-400 text-[11px] font-bold uppercase">전공 (선택)</Label>
+                                                <Label htmlFor="signup-major" className="text-slate-400 text-[11px] font-bold uppercase">전공 (선택)</Label>
                                                 <div className="relative">
                                                     <Input
+                                                        id="signup-major"
+                                                        name="major"
                                                         value={major}
                                                         onChange={(e) => {
                                                             setMajor(e.target.value);
@@ -428,6 +439,7 @@ export function UserMenu() {
                                                         onBlur={() => setTimeout(() => setShowMajorSuggestions(false), 200)}
                                                         className="bg-slate-950 border-slate-800 h-11"
                                                         placeholder="예: 컴퓨터공학"
+                                                        autoComplete="off"
                                                     />
                                                     {showMajorSuggestions && major.length > 0 && (
                                                         <div className="absolute bottom-full left-0 right-0 mb-2 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-[100] max-h-48 overflow-y-auto">

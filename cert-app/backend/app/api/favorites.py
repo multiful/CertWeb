@@ -32,20 +32,12 @@ async def get_favorites(
     _: None = Depends(check_rate_limit)
 ):
     """Get user's favorites with optimized bulk stats."""
-    cache_key = f"favorites:v4:{user_id}:{page}:{page_size}"
+    cache_key = f"favorites:v5:{user_id}:{page}:{page_size}"
     
     try:
         cached = redis_client.get(cache_key)
-        if cached:
-            # Robust mapping check to prevent TypeError
-            if isinstance(cached, str):
-                import orjson
-                cached = orjson.loads(cached)
-            
-            if isinstance(cached, dict):
-                return UserFavoriteListResponse(**cached)
-            else:
-                logger.warning(f"Cached favorites for {user_id} is not a dict: {type(cached)}")
+        if cached and isinstance(cached, dict):
+            return UserFavoriteListResponse(**cached)
     except Exception as e:
         logger.warning(f"Cache read failed or invalid for favorites: {e}")
     

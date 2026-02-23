@@ -65,7 +65,9 @@ class RedisClient:
         try:
             return orjson.loads(value)
         except Exception:
-            return value
+            # If it's not JSON, it might be a raw string or corrupted
+            # Return None to signal it's not a valid cached object
+            return None
     
     # ============== Cache Operations ==============
     
