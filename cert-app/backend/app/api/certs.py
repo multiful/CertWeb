@@ -61,7 +61,7 @@ async def get_certs(
     """Get certification list with filters and pagination."""
     # Build cache key
     cache_key = redis_client.make_cache_key(
-        "certs:list",
+        "certs:list:v2",
         hash=redis_client.hash_query_params(
             q=q, main_field=main_field, ncs_large=ncs_large,
             qual_type=qual_type, managing_body=managing_body,
@@ -70,10 +70,18 @@ async def get_certs(
     )
     
     # Try cache
-    cached = redis_client.get(cache_key)
-    if cached:
-        logger.debug("Cache hit for cert list")
-        return QualificationListResponse(**cached)
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            if isinstance(cached, str):
+                import orjson
+                cached = orjson.loads(cached)
+            
+            if isinstance(cached, dict):
+                logger.debug("Cache hit for cert list")
+                return QualificationListResponse(**cached)
+    except Exception as e:
+        logger.warning(f"Cache read failed for cert list: {e}")
     
     # Get from database
     items, total = qualification_crud.get_list(
