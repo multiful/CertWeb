@@ -104,8 +104,11 @@ export function JobListPage() {
                         <div className="relative flex-1 group z-20">
                             <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl blur opacity-20 group-focus-within:opacity-40 transition" />
                             <div className="relative">
+                                <label htmlFor="job-search-input" className="sr-only">직무 검색</label>
                                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                                 <Input
+                                    id="job-search-input"
+                                    name="q"
                                     placeholder="어떤 직무를 고민하고 계신가요?"
                                     value={inputValue}
                                     onFocus={() => setShowSuggestions(true)}

@@ -90,8 +90,11 @@ export function RecommendationPage() {
       {/* Search Form with Custom Dropdown */}
       <div className="max-w-xl mx-auto relative group">
         <form onSubmit={handleSubmit} className="relative z-20">
+          <label htmlFor="major-search-input" className="sr-only">전공 검색</label>
           <GraduationCap className="absolute left-4 w-5 h-5 text-slate-400 z-10 top-1/2 -translate-y-1/2" />
           <Input
+            id="major-search-input"
+            name="major"
             type="text"
             placeholder="전공을 입력하세요 (예: 컴퓨터공학)"
             value={inputValue}

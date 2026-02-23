@@ -98,11 +98,13 @@ export function AiRecommendationPage() {
                     <div className="w-full max-w-md bg-slate-950/60 backdrop-blur-md border border-slate-800 p-6 rounded-2xl shadow-inner relative z-30">
                         <div className="space-y-5">
                             <div className="space-y-2 relative">
-                                <label className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                                <label htmlFor="major-input" className="text-sm font-bold text-slate-300 flex items-center gap-2">
                                     <GraduationCap className="w-4 h-4 text-blue-400" />
                                     나의 전공
                                 </label>
                                 <Input
+                                    id="major-input"
+                                    name="major"
                                     placeholder="예: 컴퓨터공학, 경영학"
                                     value={inputValue}
                                     onChange={(e) => {
@@ -133,11 +135,13 @@ export function AiRecommendationPage() {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                                <label htmlFor="career-interest" className="text-sm font-bold text-slate-300 flex items-center gap-2">
                                     <MessageSquare className="w-4 h-4 text-purple-400" />
                                     어떤 일을 하고 싶나요? (커리어 목표)
                                 </label>
                                 <textarea
+                                    id="career-interest"
+                                    name="interest"
                                     placeholder="예: 클라우드 보안 환경에서 일하고 싶어요. 데이터 분석을 금융에 적용하고 싶습니다."
                                     value={interest}
                                     onChange={(e) => setInterest(e.target.value)}
