@@ -182,13 +182,23 @@ export function UserMenu() {
         }
     };
 
+    const getRedirectUrl = () => {
+        const currentPath = window.location.pathname;
+        // If on a specific cert detail page, redirect back there.
+        if (currentPath.startsWith('/certs/')) {
+            return window.location.origin + currentPath;
+        }
+        // Otherwise, redirect to the home page or a default dashboard.
+        return window.location.origin;
+    };
+
     const handleGoogleLogin = async () => {
         setLoading(true);
         try {
             const { error } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
-                    redirectTo: window.location.origin,
+                    redirectTo: getRedirectUrl(),
                 }
             });
             if (error) throw error;

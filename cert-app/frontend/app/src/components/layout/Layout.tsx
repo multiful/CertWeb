@@ -115,6 +115,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
             <p className="text-slate-500 text-sm font-medium">
               2026 CertFinder 국가자격 통합 분석 시스템
             </p>
+            <div className="flex gap-4 text-xs font-bold text-slate-600">
+              <Link to="/privacy" className="hover:text-slate-400 cursor-pointer transition-colors">개인정보 처리방침</Link>
+              <Link to="/terms" className="hover:text-slate-400 cursor-pointer transition-colors">이용약관</Link>
+              <span className="hover:text-slate-400 cursor-pointer transition-colors">문의하기</span>
+            </div>
           </div>
         </div>
       </footer>

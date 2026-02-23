@@ -20,6 +20,11 @@ class Qualification(Base):
     grade_code = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True, index=True)
     
+    # Exam round details from CSV
+    written_cnt = Column(Integer, nullable=True, default=0)
+    practical_cnt = Column(Integer, nullable=True, default=0)
+    interview_cnt = Column(Integer, nullable=True, default=0)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     embedding = Column(Vector(1536))

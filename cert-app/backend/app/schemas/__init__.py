@@ -15,6 +15,11 @@ class QualificationBase(BaseModel):
     managing_body: Optional[str] = Field(None, max_length=200)
     grade_code: Optional[str] = Field(None, max_length=50)
     is_active: bool = True
+    
+    # Exam round counts
+    written_cnt: Optional[int] = 0
+    practical_cnt: Optional[int] = 0
+    interview_cnt: Optional[int] = 0
 
 
 class QualificationStatsBase(BaseModel):
@@ -147,12 +152,12 @@ class MajorQualificationMapResponse(MajorQualificationMapBase):
 
 
 class UserFavoriteResponse(BaseModel):
-    """User favorite response schema."""
+    """User favorite response schema with qualification stats."""
     fav_id: int
     user_id: str
     qual_id: int
     created_at: datetime
-    qualification: Optional[QualificationResponse] = None
+    qualification: Optional[QualificationListItemResponse] = None
     
     class Config:
         from_attributes = True

@@ -211,6 +211,9 @@ class DataLoader:
                     managing_body=row.get("비고") if "시험원" in (row.get("비고") or "") else None, 
                     grade_code=grade_name or grade_code,
                     is_active=True,
+                    written_cnt=self._clean_int(row.get("필기") or 0),
+                    practical_cnt=self._clean_int(row.get("실기") or 0),
+                    interview_cnt=self._clean_int(row.get("면접") or 0),
                     created_at=datetime.now(),
                     updated_at=datetime.now()
                 )

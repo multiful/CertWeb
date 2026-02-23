@@ -11,8 +11,10 @@ import {
     ExternalLink,
     LineChart,
     PieChart,
-    Users
+    Users,
+    Share2
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +90,26 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
         { subject: '전문성', A: job.professionalism || 0, fullMark: 100 },
         { subject: '평등', A: job.equality || 0, fullMark: 100 },
     ];
+
+    const handleShare = async () => {
+        const shareData = {
+            title: `CertFinder - ${job.job_name} 분석 리포트`,
+            text: `${job.job_name}의 연봉, 전망, 자격증 정보를 확인하세요!`,
+            url: window.location.href,
+        };
+
+        try {
+            if (navigator.share) {
+                await navigator.share(shareData);
+                toast.success('리포트가 공유되었습니다.');
+            } else {
+                await navigator.clipboard.writeText(window.location.href);
+                toast.success('링크가 클립보드에 복사되었습니다.');
+            }
+        } catch (err) {
+            console.error('Share failed:', err);
+        }
+    };
 
     return (
         <div className="container mx-auto px-4 py-8 space-y-8 max-w-7xl animate-in fade-in duration-500">
@@ -298,8 +320,12 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
                                 </div>
                             </div>
 
-                            <Button className="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl py-6 mt-4">
-                                데이터 리포트 공유하기
+                            <Button
+                                onClick={handleShare}
+                                className="w-full h-14 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl mt-6 flex items-center justify-center gap-2"
+                            >
+                                <Share2 className="w-5 h-5" />
+                                리포트 공유하기
                             </Button>
                         </CardContent>
                     </Card>

@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS qualification (
     managing_body VARCHAR(200),
     grade_code VARCHAR(50),
     is_active BOOLEAN DEFAULT TRUE,
+    written_cnt INTEGER DEFAULT 0,
+    practical_cnt INTEGER DEFAULT 0,
+    interview_cnt INTEGER DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE
 );

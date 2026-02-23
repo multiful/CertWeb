@@ -255,7 +255,7 @@ export function HomePage() {
                 <div
                   key={cert.qual_id}
                   onClick={() => router.navigate(`/certs/${cert.qual_id}`)}
-                  className="group relative p-6 bg-slate-900 border border-slate-800 rounded-2xl hover:border-blue-500/50 hover:bg-slate-900/80 transition-all cursor-pointer overflow-hidden shadow-lg"
+                  className="group relative p-6 bg-slate-900 border border-slate-800 rounded-2xl hover:border-blue-500/50 hover:bg-slate-900/80 transition-all cursor-pointer overflow-hidden shadow-lg card-hover-effect"
                 >
                   <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-bl from-blue-600/5 to-transparent rounded-bl-full group-hover:from-blue-600/10 transition-colors" />
 

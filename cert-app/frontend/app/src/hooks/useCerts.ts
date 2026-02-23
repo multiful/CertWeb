@@ -64,7 +64,7 @@ interface UseCertDetailReturn {
   error: Error | null;
 }
 
-export function useCertDetail(qualId: number | null): UseCertDetailReturn {
+export function useCertDetail(qualId: number | null, token?: string | null): UseCertDetailReturn {
   const [data, setData] = useState<QualificationDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
@@ -78,14 +78,15 @@ export function useCertDetail(qualId: number | null): UseCertDetailReturn {
     setLoading(true);
     setError(null);
 
-    getCertificationDetail(qualId)
+    getCertificationDetail(qualId, token)
       .then(setData)
       .catch((err) => setError(err instanceof Error ? err : new Error('Unknown error')))
       .finally(() => setLoading(false));
-  }, [qualId]);
+  }, [qualId, token]);
 
   return { data, loading, error };
 }
+
 
 interface UseCertStatsReturn {
   data: QualificationStatsListResponse | null;

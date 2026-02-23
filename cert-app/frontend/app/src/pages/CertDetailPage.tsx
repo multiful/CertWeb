@@ -46,10 +46,10 @@ import { checkFavorite, addFavorite, removeFavorite } from '@/lib/api';
 export function CertDetailPage({ id }: { id: string }) {
   const router = useRouter();
   const certId = parseInt(id, 10) || 0;
-  const { data: cert, loading: certLoading } = useCertDetail(certId);
+  const { user, token } = useAuth();
+  const { data: cert, loading: certLoading } = useCertDetail(certId, token);
   const { data: statsRes, loading: statsLoading } = useCertStats(certId);
   const [activeTab, setActiveTab] = useState('stats');
-  const { user, token } = useAuth();
   const [isBookmarked, setIsBookmarked] = useState(false);
 
   // Sync with API or LocalStorage on mount
@@ -125,21 +125,89 @@ export function CertDetailPage({ id }: { id: string }) {
 
   const stats = statsRes?.items || [];
 
+  // Multi-series Chart Data
+  const [visibleStages, setVisibleStages] = useState<string[]>(['필기', '실기', '면접']);
+
+  const getRoundName = (roundNum: number) => {
+    if (!cert) return `${roundNum}회차`;
+    const w = cert.written_cnt || 0;
+    const p = cert.practical_cnt || 0;
+    const i = cert.interview_cnt || 0;
+    if (w === 0 && p === 0 && i === 0) {
+      if (roundNum === 1) return "필기";
+      if (roundNum === 2) return "실기";
+      if (roundNum === 3) return "면접";
+      return "기타";
+    }
+    if (roundNum <= w) return "필기";
+    if (roundNum <= w + p) return "실기";
+    if (roundNum <= w + p + i) return "면접";
+    return "기타";
+  };
+
   const chartData = useMemo(() => {
     if (!stats || stats.length === 0) return [];
-    return [...stats]
-      .sort((a, b) => (a.year * 10 + a.exam_round) - (b.year * 10 + b.exam_round))
-      .map(s => ({
-        name: `${s.year % 100}.${s.exam_round}`,
-        passRate: s.pass_rate,
-        candidates: s.candidate_cnt
-      }));
-  }, [stats]);
+
+    // Group stats by year for multi-line comparison
+    const yearMap = new Map<number, any>();
+
+    // Sort chronologically first
+    const sortedStats = [...stats].sort((a, b) => (a.year * 10 + a.exam_round) - (b.year * 10 + b.exam_round));
+
+    sortedStats.forEach(s => {
+      if (!yearMap.has(s.year)) {
+        yearMap.set(s.year, { year: s.year, label: `${s.year % 100}년` });
+      }
+      const entry = yearMap.get(s.year);
+      const stage = getRoundName(s.exam_round);
+
+      if (stage === '필기') entry.written = s.pass_rate;
+      else if (stage === '실기') entry.practical = s.pass_rate;
+      else if (stage === '면접') entry.interview = s.pass_rate;
+    });
+
+    return Array.from(yearMap.values()).sort((a, b) => a.year - b.year);
+  }, [stats, cert]);
+
+  const hasStage = (stage: string) => {
+    if (!cert) return true;
+    if (stage === '필기') return (cert.written_cnt || 0) > 0 || stats.some(s => s.exam_round === 1);
+    if (stage === '실기') return (cert.practical_cnt || 0) > 0 || Array.from(new Set(stats.map(s => getRoundName(s.exam_round)))).includes('실기');
+    if (stage === '면접') return (cert.interview_cnt || 0) > 0 || Array.from(new Set(stats.map(s => getRoundName(s.exam_round)))).includes('면접');
+    return false;
+  };
+
+  const toggleStage = (stage: string) => {
+    setVisibleStages(prev =>
+      prev.includes(stage) ? prev.filter(s => s !== stage) : [...prev, stage]
+    );
+  };
+
 
   const latestStat = useMemo(() => {
     if (!stats || stats.length === 0) return null;
     return [...stats].sort((a, b) => (b.year * 10 + b.exam_round) - (a.year * 10 + a.exam_round))[0];
   }, [stats]);
+
+  const handleNativeShare = async () => {
+    const shareData = {
+      title: `CertFinder - ${cert?.qual_name}`,
+      text: `${cert?.qual_name}의 실시간 합격률과 난이도를 확인하세요!`,
+      url: window.location.href,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+      } else {
+        await navigator.clipboard.writeText(window.location.href);
+        toast.success("링크가 클립보드에 복사되었습니다.");
+      }
+    } catch (err) {
+      console.error('Share failed:', err);
+    }
+  };
+
 
   if (certLoading || statsLoading) {
     return (
@@ -233,7 +301,11 @@ export function CertDetailPage({ id }: { id: string }) {
               <Bookmark className={`w-4 h-4 ${isBookmarked ? 'fill-white' : ''}`} />
               {isBookmarked ? '관심 자격증 해제' : '관심 자격증 추가'}
             </Button>
-            <Button variant="outline" className="rounded-2xl h-12 w-12 p-0 border-slate-800 text-slate-400">
+            <Button
+              variant="outline"
+              onClick={handleNativeShare}
+              className="rounded-2xl h-12 w-12 p-0 border-slate-800 text-slate-400 hover:text-white hover:border-slate-600 transition-all"
+            >
               <Share2 className="w-4 h-4" />
             </Button>
           </div>
@@ -242,47 +314,62 @@ export function CertDetailPage({ id }: { id: string }) {
 
       {/* Main Stats Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {[
-          {
-            label: "최근 합격률",
-            value: (cert.latest_pass_rate !== null && cert.latest_pass_rate !== undefined) ? `${cert.latest_pass_rate}%` : (latestStat?.pass_rate ? `${latestStat.pass_rate}%` : "정보 없음"),
-            icon: Zap, color: "text-emerald-400", bg: "bg-emerald-400/5",
-            sub: latestStat ? `${latestStat.year}년 ${latestStat.exam_round}회차` : "최신 데이터"
-          },
-          {
-            label: "평균 합격률",
-            value: stats.length > 0 ? `${avgPassRate}%` : "정보 없음",
-            icon: TrendingUp, color: "text-blue-400", bg: "bg-blue-400/5",
-            sub: "전체 회차 평균"
-          },
-          {
-            label: "누적 응시자",
-            value: (cert.total_candidates ? cert.total_candidates.toLocaleString() : totalCandidates),
-            icon: Users, color: "text-indigo-400", bg: "bg-indigo-400/5",
-            sub: "최근 3개년 합계"
-          },
-          {
-            label: "권장 난이도",
-            value: (cert.avg_difficulty !== null && cert.avg_difficulty !== undefined) ? `${cert.avg_difficulty.toFixed(1)}/10` : "데이터 분석중",
-            icon: Target, color: "text-amber-400", bg: "bg-amber-400/5",
-            sub: "등급+합격률 기반"
-          },
-        ].map((stat, i) => (
-          <Card key={i} className="bg-slate-900/50 border-slate-800 overflow-hidden group">
-            <CardContent className="p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div className={`p-3 rounded-2xl ${stat.bg}`}>
-                  <stat.icon className={`w-5 h-5 ${stat.color}`} />
+        {(() => {
+          const latestVal = cert.latest_pass_rate ?? latestStat?.pass_rate ?? 0;
+          const avgVal = stats.length > 0 ? parseFloat(avgPassRate) : 0;
+
+          const getPassRateStyles = (rate: number) => {
+            if (rate === 0) return { color: "text-slate-400", bg: "bg-slate-400/5" };
+            if (rate < 30) return { color: "text-rose-500", bg: "bg-rose-500/5" };
+            if (rate < 60) return { color: "text-amber-400", bg: "bg-amber-400/5" };
+            return { color: "text-emerald-400", bg: "bg-emerald-400/5" };
+          };
+
+          const latestStyles = getPassRateStyles(latestVal);
+          const avgStyles = getPassRateStyles(avgVal);
+
+          return [
+            {
+              label: "최근 합격률",
+              value: (cert.latest_pass_rate !== null && cert.latest_pass_rate !== undefined) ? `${cert.latest_pass_rate}%` : (latestStat?.pass_rate ? `${latestStat.pass_rate}%` : "정보 없음"),
+              icon: Zap, ...latestStyles,
+              sub: latestStat ? `${latestStat.year}년 ${latestStat.exam_round}회차` : "최신 데이터"
+            },
+            {
+              label: "평균 합격률",
+              value: stats.length > 0 ? `${avgPassRate}%` : "정보 없음",
+              icon: TrendingUp, ...avgStyles,
+              sub: "전체 회차 평균"
+            },
+            {
+              label: "누적 응시자",
+              value: (cert.total_candidates ? cert.total_candidates.toLocaleString() : totalCandidates),
+              icon: Users, color: "text-indigo-400", bg: "bg-indigo-400/5",
+              sub: "최근 3개년 합계"
+            },
+            {
+              label: "권장 난이도",
+              value: (cert.avg_difficulty !== null && cert.avg_difficulty !== undefined) ? `${cert.avg_difficulty.toFixed(1)}/10` : "데이터 분석중",
+              icon: Target, color: "text-amber-400", bg: "bg-amber-400/5",
+              sub: "등급+합격률 기반"
+            },
+          ].map((stat, i) => (
+            <Card key={i} className="bg-slate-900/50 border-slate-800 overflow-hidden group hover:border-blue-500/30 transition-all duration-300">
+              <CardContent className="p-6">
+                <div className="flex justify-between items-start mb-4">
+                  <div className={`p-3 rounded-2xl ${stat.bg} transition-colors`}>
+                    <stat.icon className={`w-5 h-5 ${stat.color} transition-colors`} />
+                  </div>
+                  <Badge variant="secondary" className="text-[10px] text-slate-500 font-bold uppercase tracking-widest border-none bg-slate-950/50">{stat.sub}</Badge>
                 </div>
-                <Badge variant="secondary" className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{stat.sub}</Badge>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{stat.label}</p>
-                <p className="text-2xl font-black text-white">{stat.value}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{stat.label}</p>
+                  <p className="text-2xl font-black text-white tracking-tight">{stat.value}</p>
+                </div>
+              </CardContent>
+            </Card>
+          ));
+        })()}
       </div>
 
       {/* Main Content Tabs */}
@@ -308,27 +395,47 @@ export function CertDetailPage({ id }: { id: string }) {
                   <Badge variant="outline" className="border-blue-500/20 text-blue-400">Time-series Analysis</Badge>
                   <CardTitle className="text-3xl font-black text-white">합격률 변화 추이</CardTitle>
                 </div>
-                <div className="flex gap-4">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-blue-500" />
-                    <span className="text-xs font-bold text-slate-400">합격률 (%)</span>
-                  </div>
+                <div className="flex flex-wrap gap-4">
+                  {['필기', '실기', '면접'].map(stage => hasStage(stage) && (
+                    <button
+                      key={stage}
+                      onClick={() => toggleStage(stage)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl border transition-all ${visibleStages.includes(stage)
+                        ? stage === '필기' ? 'bg-blue-500/10 border-blue-500/50 text-blue-400'
+                          : stage === '실기' ? 'bg-emerald-500/10 border-emerald-500/50 text-emerald-400'
+                            : 'bg-amber-500/10 border-amber-500/50 text-amber-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-500 opacity-50'
+                        }`}
+                    >
+                      <div className={`w-2 h-2 rounded-full ${stage === '필기' ? 'bg-blue-500' : stage === '실기' ? 'bg-emerald-500' : 'bg-amber-500'
+                        }`} />
+                      <span className="text-xs font-bold">{stage}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             </CardHeader>
             <CardContent className="p-10">
-              <div className="h-[350px] w-full">
+              <div className="h-[400px] w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData}>
                     <defs>
-                      <linearGradient id="colorRate" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                      <linearGradient id="colorWritten" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
                         <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorPractical" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="colorInterview" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
                       </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                     <XAxis
-                      dataKey="name"
+                      dataKey="label"
                       stroke="#475569"
                       fontSize={11}
                       fontWeight={700}
@@ -343,24 +450,52 @@ export function CertDetailPage({ id }: { id: string }) {
                       tickLine={false}
                       axisLine={false}
                       dx={-10}
+                      domain={[0, 100]}
                     />
                     <RechartsTooltip
                       contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '16px', color: '#fff' }}
-                      itemStyle={{ color: '#3b82f6', fontWeight: 700 }}
                     />
-                    <Area
-                      type="monotone"
-                      dataKey="passRate"
-                      stroke="#3b82f6"
-                      strokeWidth={4}
-                      fillOpacity={1}
-                      fill="url(#colorRate)"
-                      animationDuration={1500}
-                    />
+                    {visibleStages.includes('필기') && (
+                      <Area
+                        type="monotone"
+                        dataKey="written"
+                        name="필기 합격률"
+                        stroke="#3b82f6"
+                        strokeWidth={3}
+                        fillOpacity={1}
+                        fill="url(#colorWritten)"
+                        animationDuration={1000}
+                      />
+                    )}
+                    {visibleStages.includes('실기') && (
+                      <Area
+                        type="monotone"
+                        dataKey="practical"
+                        name="실기 합격률"
+                        stroke="#10b981"
+                        strokeWidth={3}
+                        fillOpacity={1}
+                        fill="url(#colorPractical)"
+                        animationDuration={1200}
+                      />
+                    )}
+                    {visibleStages.includes('면접') && (
+                      <Area
+                        type="monotone"
+                        dataKey="interview"
+                        name="면접 합격률"
+                        stroke="#f59e0b"
+                        strokeWidth={3}
+                        fillOpacity={1}
+                        fill="url(#colorInterview)"
+                        animationDuration={1400}
+                      />
+                    )}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             </CardContent>
+
           </Card>
 
           <div className="grid md:grid-cols-2 gap-8">
@@ -369,24 +504,44 @@ export function CertDetailPage({ id }: { id: string }) {
                 <Calendar className="w-5 h-5 text-indigo-400" /> 상세 회차 정보
               </CardTitle>
               <div className="space-y-4">
-                {stats.slice(0, 5).map((s, i) => (
-                  <div key={i} className="flex items-center justify-between p-4 bg-slate-950/40 rounded-2xl border border-slate-800/50 hover:border-slate-700 transition-colors">
-                    <div className="space-y-1">
-                      <p className="text-sm font-bold text-white">{s.year}년 {s.exam_round}회차</p>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{s.exam_structure || "필기"}</p>
-                    </div>
-                    <div className="flex gap-6 text-right">
-                      <div>
-                        <p className="text-[10px] text-slate-600 font-bold uppercase mb-0.5">합격률</p>
-                        <p className="text-sm font-black text-emerald-400">{s.pass_rate}%</p>
+                {stats.slice(0, 10).map((s, i) => {
+                  const roundName = getRoundName(s.exam_round);
+                  const yearLabel = `${s.year}년 ${s.exam_round}차 시험 평균`;
+
+                  const passRateValue = s.pass_rate || 0;
+                  const getPassRateColor = (rate: number) => {
+                    if (rate < 30) return 'text-rose-500';
+                    if (rate < 60) return 'text-amber-400';
+                    return 'text-emerald-400';
+                  };
+
+                  return (
+                    <div key={i} className="flex items-center justify-between p-5 bg-slate-950/40 rounded-[1.5rem] border border-slate-800/50 hover:border-slate-700/80 hover:bg-slate-900/40 transition-all duration-300 group/item">
+                      <div className="space-y-1.5">
+                        <p className="text-sm font-bold text-white group-hover/item:text-blue-400 transition-colors">{yearLabel}</p>
+                        <div className="flex items-center gap-2">
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 border-slate-700 text-slate-500 font-bold uppercase tracking-wider">
+                            {roundName}
+                          </Badge>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-[10px] text-slate-600 font-bold uppercase mb-0.5">응시자</p>
-                        <p className="text-sm font-black text-white">{s.candidate_cnt?.toLocaleString()}</p>
+                      <div className="flex gap-8 text-right">
+                        <div>
+                          <p className="text-[10px] text-slate-600 font-bold uppercase mb-1 tracking-tighter">합격률</p>
+                          <p className={`text-base font-black ${getPassRateColor(passRateValue)}`}>
+                            {passRateValue}%
+                          </p>
+                        </div>
+                        <div className="hidden sm:block">
+                          <p className="text-[10px] text-slate-600 font-bold uppercase mb-1 tracking-tighter">응시자</p>
+                          <p className="text-base font-black text-slate-300">
+                            {s.candidate_cnt?.toLocaleString() || '-'}
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </Card>
 

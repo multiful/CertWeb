@@ -8,6 +8,8 @@ import { AiRecommendationPage } from '@/pages/AiRecommendationPage';
 import { JobListPage } from '@/pages/JobListPage';
 import { JobDetailPage } from '@/pages/JobDetailPage';
 import { MyPage } from '@/pages/MyPage';
+import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage';
+import { TermsOfServicePage } from '@/pages/TermsOfServicePage';
 import { Toaster } from '@/components/ui/sonner';
 import {
   getRouteFromPath,
@@ -58,6 +60,10 @@ function App() {
         return <JobDetailPage id={routeState.params?.jobId || ''} />;
       case 'mypage':
         return <MyPage />;
+      case 'privacy':
+        return <PrivacyPolicyPage />;
+      case 'terms':
+        return <TermsOfServicePage />;
       default:
         return <HomePage />;
     }

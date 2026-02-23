@@ -13,7 +13,7 @@ import {
   RefreshCw,
   Bookmark
 } from 'lucide-react';
-import { getFavorites, addFavorite, removeFavorite, getTrendingCerts } from '@/lib/api';
+import { getFavorites, addFavorite, removeFavorite, getTrendingCerts, getCertificationDetail } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
@@ -86,12 +86,43 @@ export function CertListPage() {
         try {
           const res = await getFavorites(token, 1, 1000);
           setFavoriteIds(res.items.map((f: any) => f.qual_id));
-          // Extract the qualification data from UserFavorite objects
-          const certs = res.items.map((f: any) => ({
-            ...(f.qualification || {}),
-            latest_pass_rate: f.qualification?.latest_pass_rate,
-            avg_difficulty: f.qualification?.avg_difficulty
-          }));
+
+          // Build initial certs from qualification field
+          let certs: any[] = res.items
+            .filter((f: any) => f.qualification)
+            .map((f: any) => ({ ...f.qualification }));
+
+          // For items where stats are still null (backend cache issue),
+          // fall back to fetching individual cert detail which is always reliable
+          const missingStats = certs.filter(
+            c => c.latest_pass_rate === null || c.latest_pass_rate === undefined
+          );
+
+          if (missingStats.length > 0) {
+            const detailResults = await Promise.allSettled(
+              missingStats.map(c => getCertificationDetail(c.qual_id, token))
+            );
+            const detailMap = new Map<number, any>();
+            detailResults.forEach((result, idx) => {
+              if (result.status === 'fulfilled' && result.value) {
+                detailMap.set(missingStats[idx].qual_id, result.value);
+              }
+            });
+            // Merge detail stats into certs
+            certs = certs.map(c => {
+              const detail = detailMap.get(c.qual_id);
+              if (detail) {
+                return {
+                  ...c,
+                  latest_pass_rate: detail.latest_pass_rate,
+                  avg_difficulty: detail.avg_difficulty,
+                  total_candidates: detail.total_candidates,
+                };
+              }
+              return c;
+            });
+          }
+
           setFavoritesItems(certs);
         } catch (err: any) {
           if (err.message && err.message.includes('401')) {
@@ -524,14 +555,14 @@ export function CertListPage() {
                           <p className="text-[10px] uppercase font-bold text-slate-600 tracking-wider">Pass Rate</p>
                           <p className="text-sm font-bold text-emerald-400 flex items-center gap-1">
                             <Zap className="w-3 h-3 fill-emerald-400" />
-                            {cert.latest_pass_rate ? `${cert.latest_pass_rate}%` : '정보 없음'}
+                            {(cert.latest_pass_rate !== null && cert.latest_pass_rate !== undefined) ? `${cert.latest_pass_rate}%` : '정보 없음'}
                           </p>
                         </div>
                         <div className="space-y-1">
                           <p className="text-[10px] uppercase font-bold text-slate-600 tracking-wider">Difficulty</p>
                           <p className="text-sm font-bold text-indigo-400 flex items-center gap-1">
                             <TrendingUp className="w-3 h-3" />
-                            {cert.avg_difficulty ? `${cert.avg_difficulty}/10` : '정보 없음'}
+                            {(cert.avg_difficulty !== null && cert.avg_difficulty !== undefined) ? `${cert.avg_difficulty}/10` : '정보 없음'}
                           </p>
                         </div>
                       </div>
@@ -551,11 +582,11 @@ export function CertListPage() {
                     <div className="flex gap-8 items-center">
                       <div className="text-right hidden sm:block">
                         <p className="text-[10px] uppercase font-bold text-slate-600 mb-0.5">최신 합격률</p>
-                        <p className="text-base font-bold text-emerald-400">{cert.latest_pass_rate}%</p>
+                        <p className="text-base font-bold text-emerald-400">{(cert.latest_pass_rate !== null && cert.latest_pass_rate !== undefined) ? `${cert.latest_pass_rate}%` : "정보 없음"}</p>
                       </div>
                       <div className="text-right hidden sm:block">
                         <p className="text-[10px] uppercase font-bold text-slate-600 mb-0.5">평균 난이도</p>
-                        <p className="text-base font-bold text-indigo-400">{cert.avg_difficulty}</p>
+                        <p className="text-base font-bold text-indigo-400">{(cert.avg_difficulty !== null && cert.avg_difficulty !== undefined) ? `${cert.avg_difficulty}` : "정보 없음"}</p>
                       </div>
                       <ChevronDown className="w-5 h-5 text-slate-700 -rotate-90 group-hover:text-blue-400 group-hover:translate-x-1 transition-all" />
                     </div>

@@ -9,6 +9,9 @@ export interface Qualification {
   managing_body: string | null;
   grade_code: string | null;
   is_active: boolean;
+  written_cnt?: number;
+  practical_cnt?: number;
+  interview_cnt?: number;
   created_at?: string;
   updated_at?: string;
 }
@@ -119,7 +122,8 @@ export interface UserFavorite {
   user_id: string;
   qual_id: number;
   created_at: string;
-  qualification?: Qualification;
+  // The backend enriches qualification with aggregated stats
+  qualification?: QualificationListItem;
 }
 
 export type SortOption = 'name' | 'pass_rate' | 'difficulty' | 'recent';

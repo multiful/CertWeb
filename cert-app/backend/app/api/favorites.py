@@ -13,8 +13,9 @@ router = APIRouter(prefix="/me/favorites", tags=["favorites"])
 
 
 def invalidate_favorites_cache(user_id: str):
-    """Invalidate user's favorites cache."""
-    redis_client.delete_pattern(f"favorites:{user_id}:*")
+    """Invalidate user's favorites cache (all versions)."""
+    # Match both the old pattern and the versioned v2 pattern
+    redis_client.delete_pattern(f"favorites:*{user_id}:*")
 
 
 @router.get(
@@ -31,7 +32,7 @@ async def get_favorites(
     _: None = Depends(check_rate_limit)
 ):
     """Get user's favorites."""
-    cache_key = f"favorites:{user_id}:{page}:{page_size}"
+    cache_key = f"favorites:v2:{user_id}:{page}:{page_size}"
     
     cached = redis_client.get(cache_key)
     if cached:
@@ -39,8 +40,51 @@ async def get_favorites(
     
     items, total = favorite_crud.get_by_user(db, user_id, page, page_size)
     
+    # Enrich qualifications with aggregated stats
+    from app.crud import get_qualification_aggregated_stats
+    from app.schemas import QualificationListItemResponse
+    
+    enriched_items = []
+    for fav in items:
+        fav_dict = {
+            "fav_id": fav.fav_id,
+            "user_id": fav.user_id,
+            "qual_id": fav.qual_id,
+            "created_at": fav.created_at
+        }
+        
+        if fav.qualification:
+            try:
+                # Get aggregated stats (pass_rate, difficulty, total_candidates)
+                stats = get_qualification_aggregated_stats(db, fav.qual_id)
+                logger.debug(f"Stats for qual_id={fav.qual_id}: {stats}")
+                
+                qual_data = {
+                    "qual_id": fav.qualification.qual_id,
+                    "qual_name": fav.qualification.qual_name,
+                    "qual_type": fav.qualification.qual_type,
+                    "main_field": fav.qualification.main_field,
+                    "ncs_large": fav.qualification.ncs_large,
+                    "managing_body": fav.qualification.managing_body,
+                    "grade_code": fav.qualification.grade_code,
+                    "is_active": fav.qualification.is_active,
+                    "created_at": fav.qualification.created_at,
+                    "updated_at": fav.qualification.updated_at,
+                    # Explicitly unpack stats so they are never lost
+                    "latest_pass_rate": stats.get("latest_pass_rate"),
+                    "avg_difficulty": stats.get("avg_difficulty"),
+                    "total_candidates": stats.get("total_candidates"),
+                }
+                fav_dict["qualification"] = QualificationListItemResponse(**qual_data)
+            except Exception as e:
+                logger.error(f"Failed to enrich favorite qual_id={fav.qual_id}: {e}")
+                # Still include the qualification, just without stats
+                fav_dict["qualification"] = fav.qualification
+        
+        enriched_items.append(fav_dict)
+    
     response = UserFavoriteListResponse(
-        items=items,
+        items=enriched_items,
         total=total
     )
     

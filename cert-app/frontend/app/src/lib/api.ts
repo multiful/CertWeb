@@ -73,10 +73,13 @@ export async function getCertifications(
 }
 
 export async function getCertificationDetail(
-  qualId: number
+  qualId: number,
+  token?: string | null
 ): Promise<QualificationDetail | null> {
   try {
-    return await apiRequest<QualificationDetail>(`/certs/${qualId}`);
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    return await apiRequest<QualificationDetail>(`/certs/${qualId}`, { headers });
   } catch {
     return mockApi.getCertificationDetail(qualId);
   }
