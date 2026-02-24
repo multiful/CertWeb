@@ -97,22 +97,65 @@ async def send_email_code(
     return {"message": "인증 코드가 발송되었습니다."}
 
 
-@router.get("/find-userid")
-async def find_userid(
-    email: str = Query(..., description="Email to find userid", max_length=320),
+@router.post("/find-userid/send-code")
+async def find_userid_send_code(
+    payload: EmailRequest,
     db: Session = Depends(get_db),
-    _: None = Depends(check_rate_limit),
+    _: None = Depends(check_auth_rate_limit),
 ):
-    """Find user ID by email."""
+    """[아이디 찾기 1단계] 해당 이메일로 인증 코드 발송. 이메일이 가입되어 있을 때만 발송."""
     row = db.execute(
         text("SELECT userid FROM profiles WHERE LOWER(email) = LOWER(:email)"),
-        {"email": email}
+        {"email": payload.email}
     ).mappings().first()
-    
     if not row:
-        raise HTTPException(status_code=404, detail="해당 이메일로 등록된 아이디가 없습니다.")
-    
-    return {"userid": row["userid"]}
+        raise HTTPException(status_code=404, detail="해당 이메일로 등록된 계정이 없습니다.")
+    try:
+        res = requests.post(
+            f"{settings.SUPABASE_URL}/auth/v1/otp",
+            headers={"apikey": settings.SUPABASE_ANON_KEY, "Content-Type": "application/json"},
+            json={"email": payload.email, "create_user": False},
+            timeout=10
+        )
+        if res.status_code >= 400:
+            logger.error("Find-userid OTP error: status=%s", res.status_code)
+            raise HTTPException(status_code=400, detail="인증 코드 발송에 실패했습니다. 잠시 후 다시 시도해 주세요.")
+        return {"message": "인증 코드가 발송되었습니다. 메일함(또는 스팸함)을 확인해 주세요."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Find-userid OTP send error: %s", e)
+        raise HTTPException(status_code=502, detail="인증 메일 발송 중 오류가 발생했습니다.")
+
+
+@router.post("/find-userid/verify")
+async def find_userid_verify(
+    payload: EmailVerifyCodeRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_auth_rate_limit),
+):
+    """[아이디 찾기 2단계] 인증 코드 검증 후 아이디 반환. 이메일 소유자만 아이디 확인 가능."""
+    try:
+        res = requests.post(
+            f"{settings.SUPABASE_URL}/auth/v1/verify",
+            headers={"apikey": settings.SUPABASE_ANON_KEY, "Content-Type": "application/json"},
+            json={"type": "email", "email": payload.email, "token": payload.code},
+            timeout=10
+        )
+        if res.status_code >= 400:
+            raise HTTPException(status_code=400, detail="인증 코드가 올바르지 않거나 만료되었습니다.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Find-userid verify error: %s", e)
+        raise HTTPException(status_code=502, detail="인증 확인 중 오류가 발생했습니다.")
+    row = db.execute(
+        text("SELECT userid FROM profiles WHERE LOWER(email) = LOWER(:email)"),
+        {"email": payload.email}
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=404, detail="해당 이메일로 등록된 계정이 없습니다.")
+    return {"userid": row["userid"], "message": "인증이 완료되었습니다."}
 
 @router.post("/email/verify-code")
 async def verify_email_code(

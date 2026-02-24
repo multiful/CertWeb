@@ -69,3 +69,13 @@ docker-compose.override.yml
 *.key
 *.crt
 !**/example.crt
+
+# [Cursor / Local IDE]
+.cursor/
+*.mdc
+
+# [Misc]
+*.tmp
+*.temp
+.env.backup
+.env.*.backup

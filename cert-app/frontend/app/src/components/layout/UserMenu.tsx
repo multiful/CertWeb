@@ -46,6 +46,15 @@ export function UserMenu() {
     const [verificationCode, setVerificationCode] = useState('');
     const [isIdAvailable, setIsIdAvailable] = useState<boolean | null>(null);
 
+    // 아이디 찾기: 0=닫힘, 1=이메일 입력, 2=인증코드 입력, 3=완료(아이디 표시)
+    const [findIdStep, setFindIdStep] = useState(0);
+    const [findIdEmail, setFindIdEmail] = useState('');
+    const [findIdCode, setFindIdCode] = useState('');
+    const [foundUserid, setFoundUserid] = useState<string | null>(null);
+    // 비밀번호 찾기 모달
+    const [forgotPwOpen, setForgotPwOpen] = useState(false);
+    const [forgotPwEmail, setForgotPwEmail] = useState('');
+
     const API_BASE = import.meta.env.VITE_API_BASE_URL ||
         (import.meta as any).env?.VITE_API_BASE_URL ||
         (import.meta as any).env?.NEXT_PUBLIC_API_URL ||
@@ -189,48 +198,102 @@ export function UserMenu() {
         }
     };
 
-    const handleForgotPassword = async () => {
-        const email = prompt('비밀번호를 재설정할 계정의 이메일을 입력해주세요.');
-        if (!email) return;
+    const handleForgotPasswordOpen = () => {
+        setForgotPwEmail('');
+        setForgotPwOpen(true);
+    };
 
+    const handleForgotPasswordSubmit = async () => {
+        if (!forgotPwEmail?.trim()) {
+            toast.error('이메일을 입력해 주세요.');
+            return;
+        }
         setLoading(true);
         try {
             const res = await fetch(`${API_BASE}/auth/password-reset`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email })
+                body: JSON.stringify({ email: forgotPwEmail.trim() })
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success(data.message || '비밀번호 재설정 메일이 발송되었습니다.');
+                toast.success(data.message || '비밀번호 재설정 메일이 발송되었습니다. 이메일 링크에서 비밀번호를 변경해 주세요.');
+                setForgotPwOpen(false);
             } else {
                 toast.error(data.detail || '요청 실패');
             }
-        } catch (error) {
+        } catch {
             toast.error('비밀번호 재설정 요청 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
     };
 
-    const handleFindUserId = async () => {
-        const email = prompt('아이디를 찾으시려는 계정의 이메일을 입력해주세요.');
-        if (!email) return;
+    const handleFindUserIdOpen = () => {
+        setFindIdStep(1);
+        setFindIdEmail('');
+        setFindIdCode('');
+        setFoundUserid(null);
+    };
 
+    const handleFindUserIdSendCode = async () => {
+        if (!findIdEmail?.trim()) {
+            toast.error('이메일을 입력해 주세요.');
+            return;
+        }
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE}/auth/find-userid?email=${encodeURIComponent(email)}`);
+            const res = await fetch(`${API_BASE}/auth/find-userid/send-code`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: findIdEmail.trim() })
+            });
             const data = await res.json();
             if (res.ok) {
-                alert(`사용자님의 아이디는 [ ${data.userid} ] 입니다.`);
+                toast.success(data.message || '인증 코드가 발송되었습니다.');
+                setFindIdStep(2);
             } else {
-                alert(data.detail || '아이디를 찾을 수 없습니다.');
+                toast.error(data.detail || '인증 코드 발송 실패');
             }
-        } catch (e) {
-            alert('아이디 찾기 요청 중 오류가 발생했습니다.');
+        } catch {
+            toast.error('아이디 찾기 요청 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleFindUserIdVerify = async () => {
+        if (!findIdCode?.trim()) {
+            toast.error('인증 코드를 입력해 주세요.');
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/auth/find-userid/verify`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email: findIdEmail.trim(), code: findIdCode.trim() })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setFoundUserid(data.userid ?? null);
+                setFindIdStep(3);
+                toast.success('인증이 완료되었습니다.');
+            } else {
+                toast.error(data.detail || '인증 코드가 올바르지 않거나 만료되었습니다.');
+            }
+        } catch {
+            toast.error('인증 확인 중 오류가 발생했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const closeFindId = () => {
+        setFindIdStep(0);
+        setFindIdEmail('');
+        setFindIdCode('');
+        setFoundUserid(null);
     };
 
     const getRedirectUrl = () => {
@@ -589,9 +652,9 @@ export function UserMenu() {
 
                             {!isSignUp && (
                                 <div className="flex items-center gap-6 text-xs text-slate-500 font-bold">
-                                    <button type="button" onClick={handleFindUserId} className="hover:text-slate-300 transition-colors">아이디 찾기</button>
+                                    <button type="button" onClick={handleFindUserIdOpen} className="hover:text-slate-300 transition-colors">아이디 찾기</button>
                                     <div className="w-px h-3 bg-slate-800" />
-                                    <button type="button" onClick={handleForgotPassword} className="hover:text-slate-300 transition-colors">비밀번호 찾기</button>
+                                    <button type="button" onClick={handleForgotPasswordOpen} className="hover:text-slate-300 transition-colors">비밀번호 찾기</button>
                                 </div>
                             )}
 
@@ -606,6 +669,110 @@ export function UserMenu() {
                                 </button>
                             </p>
                         </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* 아이디 찾기: 이메일 인증 2단계 */}
+            <Dialog open={findIdStep >= 1} onOpenChange={(open) => !open && closeFindId()}>
+                <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-md rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-white font-bold">아이디 찾기</DialogTitle>
+                        <DialogDescription className="text-slate-400 text-sm">
+                            {findIdStep === 1 && '가입 시 사용한 이메일을 입력하면 인증 코드를 보내드립니다.'}
+                            {findIdStep === 2 && '이메일로 받은 인증 코드 6자리를 입력해 주세요.'}
+                            {findIdStep === 3 && '인증이 완료되었습니다.'}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        {findIdStep === 1 && (
+                            <>
+                                <div className="space-y-2">
+                                    <Label className="text-slate-400">이메일</Label>
+                                    <Input
+                                        type="email"
+                                        value={findIdEmail}
+                                        onChange={(e) => setFindIdEmail(e.target.value)}
+                                        placeholder="example@email.com"
+                                        className="bg-slate-800 border-slate-700"
+                                        autoComplete="email"
+                                    />
+                                </div>
+                                <Button
+                                    className="w-full"
+                                    disabled={loading}
+                                    onClick={handleFindUserIdSendCode}
+                                >
+                                    {loading ? '발송 중...' : '인증 코드 발송'}
+                                </Button>
+                            </>
+                        )}
+                        {findIdStep === 2 && (
+                            <>
+                                <p className="text-xs text-slate-500">{findIdEmail}</p>
+                                <div className="space-y-2">
+                                    <Label className="text-slate-400">인증 코드</Label>
+                                    <Input
+                                        value={findIdCode}
+                                        onChange={(e) => setFindIdCode(e.target.value)}
+                                        placeholder="6자리 코드"
+                                        className="bg-slate-800 border-slate-700"
+                                        maxLength={6}
+                                        autoComplete="one-time-code"
+                                    />
+                                </div>
+                                <Button
+                                    className="w-full"
+                                    disabled={loading}
+                                    onClick={handleFindUserIdVerify}
+                                >
+                                    {loading ? '확인 중...' : '인증 후 아이디 보기'}
+                                </Button>
+                            </>
+                        )}
+                        {findIdStep === 3 && foundUserid && (
+                            <>
+                                <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700 text-center">
+                                    <p className="text-xs text-slate-500 mb-1">회원 아이디</p>
+                                    <p className="text-lg font-bold text-white">{foundUserid}</p>
+                                </div>
+                                <Button variant="outline" className="w-full" onClick={closeFindId}>
+                                    닫기
+                                </Button>
+                            </>
+                        )}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* 비밀번호 찾기: Supabase 재설정 메일 */}
+            <Dialog open={forgotPwOpen} onOpenChange={setForgotPwOpen}>
+                <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-md rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-white font-bold">비밀번호 찾기</DialogTitle>
+                        <DialogDescription className="text-slate-400 text-sm">
+                            가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내드립니다. 이메일 내 링크에서 새 비밀번호를 설정해 주세요.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <div className="space-y-2">
+                            <Label className="text-slate-400">이메일</Label>
+                            <Input
+                                type="email"
+                                value={forgotPwEmail}
+                                onChange={(e) => setForgotPwEmail(e.target.value)}
+                                placeholder="example@email.com"
+                                className="bg-slate-800 border-slate-700"
+                                autoComplete="email"
+                            />
+                        </div>
+                        <Button
+                            className="w-full"
+                            disabled={loading}
+                            onClick={handleForgotPasswordSubmit}
+                        >
+                            {loading ? '발송 중...' : '재설정 메일 발송'}
+                        </Button>
                     </div>
                 </DialogContent>
             </Dialog>

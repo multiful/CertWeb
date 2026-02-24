@@ -14,7 +14,7 @@
 |---|------|------|-----------|------|
 | 1 | **CORS 허용 도메인** | `main.py` → `CORS_ORIGINS`(쉼표 구분). 비어 있으면 기본값 사용. | ✅ 반영 | 기본: cert-web-sand.vercel.app, localhost:3000, 127.0.0.1:3000, 5173 |
 | 2 | **문의 수신 이메일** | `contact.py` → `CONTACT_EMAIL`. 없으면 fallback 사용. | ✅ 반영 | |
-| 3 | **Auth 전용 레이트 리밋** | `deps.check_auth_rate_limit` → send_code, verify_code, login, password_reset, signup_complete. 분당 횟수. | ✅ 반영 | `AUTH_RATE_LIMIT_REQUESTS=5`, `AUTH_RATE_LIMIT_WINDOW=60` |
+| 3 | **Auth 전용 레이트 리밋** | `deps.check_auth_rate_limit` → send_code, verify_code, login, password_reset, signup_complete, **find_userid_send_code, find_userid_verify**. 분당 횟수. | ✅ 반영 | `AUTH_RATE_LIMIT_REQUESTS=5`, `AUTH_RATE_LIMIT_WINDOW=60` |
 | 4 | **Supabase RLS 정책** | 대시보드 RLS 설정 여부 문서화. | ⚠️ 미설정 | 현재: **미설정**. 백엔드가 DATABASE_URL로 직접 접근하므로 Supabase 클라이언트로 직접 테이블 조회 시에만 RLS 영향. |
 
 ---
@@ -39,7 +39,9 @@
 | ✅ | CORS | **조치 완료** | `main.py`에서 `settings.CORS_ORIGINS`(쉼표 구분)로 읽음. 비어 있으면 기본값(cert-web-sand.vercel.app, localhost:3000/5173 등) 사용. |
 | ✅ | 인증 (JWT) | 통과 | `get_current_user_from_token`(auth 라우터)은 Supabase `/auth/v1/user`로 토큰 검증. `deps.get_current_user`는 JWKS(RS256/ES256) 또는 JWT_SECRET(HS256)으로 검증. 이중 검증 경로가 있으나 둘 다 유효. |
 | ✅ | 인가 (관리자) | 통과 | Admin API는 `X-Job-Secret` + `verify_job_secret`로 보호. `JOB_SECRET` 미설정 시 503 반환. |
-| ✅ | Auth 라우터 레이트 리밋 | **조치 완료** | `/auth/*` 전 구간 `check_rate_limit` + **Auth 전용** `check_auth_rate_limit`(분당 5회) 적용. send_code, verify_code, login, password_reset, signup_complete에 한해 더 낮은 한도 적용됨. |
+| ✅ | Auth 라우터 레이트 리밋 | **조치 완료** | `/auth/*` 전 구간 `check_rate_limit` + **Auth 전용** `check_auth_rate_limit`(분당 5회) 적용. send_code, verify_code, login, password_reset, signup_complete, **find-userid/send-code, find-userid/verify**에 한해 더 낮은 한도 적용됨. |
+| ✅ | 아이디 찾기 보안 | **조치 완료** | 이메일만으로 아이디 노출 제거. **2단계**: (1) `POST /auth/find-userid/send-code` → 해당 이메일이 가입되어 있을 때만 Supabase OTP 발송, (2) `POST /auth/find-userid/verify` → 인증 코드 검증 후에만 userid 반환. 이메일 소유자만 아이디 확인 가능. |
+| ✅ | 비밀번호 찾기 | **조치 완료** | Supabase `POST /auth/v1/recover` 사용. 재설정 링크가 이메일로 발송되며, 사용자가 링크에서 새 비밀번호 설정. 프론트: 이메일 입력 모달 → `POST /auth/password-reset` 호출. |
 
 **수정 제안 (완료)**
 

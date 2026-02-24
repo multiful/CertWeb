@@ -12,7 +12,8 @@ import {
     LineChart,
     PieChart,
     Users,
-    Share2
+    Share2,
+    Shield
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -302,6 +303,12 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
                                         <LineChart className="w-4 h-4 text-blue-500" /> 발전 가능성
                                     </div>
                                     <div className="text-white font-black">{job.development}%</div>
+                                </div>
+                                <div className="flex justify-between items-center group">
+                                    <div className="flex items-center gap-2 text-slate-400 text-xs font-bold">
+                                        <Shield className="w-4 h-4 text-amber-500" /> 안정성 지수
+                                    </div>
+                                    <div className="text-white font-black">{job.stability ?? 0}%</div>
                                 </div>
                                 <div className="flex justify-between items-center group">
                                     <div className="flex items-center gap-2 text-slate-400 text-xs font-bold">
