@@ -96,6 +96,7 @@ export function RecommendationPage() {
             id="major-search-input"
             name="major"
             type="text"
+            autoComplete="off"
             placeholder="전공을 입력하세요 (예: 컴퓨터공학)"
             value={inputValue}
             onFocus={() => setShowSuggestions(true)}
