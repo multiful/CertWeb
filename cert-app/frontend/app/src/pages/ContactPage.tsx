@@ -27,7 +27,6 @@ export function ContactPage() {
 
         try {
             await sendContactEmail(formData);
-            console.log('Feedback submitted to rlaehdrb2485@naver.com:', formData);
             setIsSubmitted(true);
             toast.success('문의가 성공적으로 접수되었습니다.');
         } catch (error) {

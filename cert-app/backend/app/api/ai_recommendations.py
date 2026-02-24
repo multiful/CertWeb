@@ -1,9 +1,10 @@
+import asyncio
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from typing import List, Optional
-from app.api.deps import get_db_session
-from app.utils.ai import get_embedding
+from app.api.deps import get_db_session, check_rate_limit, get_current_user
+from app.utils.ai import get_embedding_async
 import numpy as np
 
 router = APIRouter(prefix="/recommendations/ai", tags=["ai-recommendations"])
@@ -12,13 +13,15 @@ router = APIRouter(prefix="/recommendations/ai", tags=["ai-recommendations"])
 async def semantic_search(
     query: str = Query(..., description="Semantic search query (e.g., 'Cloud security career')"),
     limit: int = Query(10, ge=1, le=50),
-    db: Session = Depends(get_db_session)
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_rate_limit),
+    user_id: str = Depends(get_current_user),
 ):
     """
-    Perform semantic search using pgvector and OpenAI embeddings.
+    Perform semantic search using pgvector and OpenAI embeddings. 로그인 사용자 전용.
     """
     # 1. Embed user query using OpenAI
-    query_vector = get_embedding(query)
+    query_vector = await get_embedding_async(query)
     
     # 2. Perform vector search using cosine similarity
     # <=> is the cosine distance operator in pgvector
@@ -54,10 +57,12 @@ async def hybrid_recommendation(
     major: str = Query(..., description="User's major"),
     interest: Optional[str] = Query(None, description="Specific interests or career goals"),
     limit: int = Query(5, ge=1, le=20),
-    db: Session = Depends(get_db_session)
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_rate_limit),
+    user_id: str = Depends(get_current_user),
 ):
     """
-    Combines Major-based mapping with Semantic search (Hybrid Search).
+    Combines Major-based mapping with Semantic search (Hybrid Search). 로그인 사용자 전용.
     """
     # 1. Fetch certifications traditionally mapped to this major
     major_sql = text("""
@@ -70,10 +75,13 @@ async def hybrid_recommendation(
     """)
     major_results = db.execute(major_sql, {"major": major}).fetchall()
     
-    # 2. Global Semantic Search for Interest
-    interest_vector = get_embedding(interest or major) # Use major if interest is empty
+    # 2 & 3. Global Semantic Search + Major vector — 병렬 임베딩 호출
+    interest_vector, major_vector = await asyncio.gather(
+        get_embedding_async(interest or major),
+        get_embedding_async(major),
+    )
     global_semantic_sql = text("""
-        SELECT qual_id, qual_name, 
+        SELECT qual_id, qual_name,
                1 - (embedding <=> :vec) as similarity
         FROM qualification
         WHERE embedding IS NOT NULL
@@ -82,9 +90,8 @@ async def hybrid_recommendation(
     """)
     global_results = db.execute(global_semantic_sql, {"vec": str(interest_vector)}).fetchall()
 
-    # 3. Dynamic Major Relevance (Semantic match between Major Name and Qualification)
+    # Dynamic Major Relevance (Semantic match between Major Name and Qualification)
     # This prevents the "0 or 90" problem by providing a continuous score
-    major_vector = get_embedding(major)
     major_sim_sql = text("""
         SELECT qual_id, 1 - (embedding <=> :vec) as major_sim
         FROM qualification

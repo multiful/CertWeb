@@ -1,38 +1,34 @@
 import schedule
 import time
 import logging
-import os
 from datetime import datetime
-from app.services.law_update_pipeline import law_update_pipeline
-from app.api.deps import get_db_session
+
+from app.database import SessionLocal
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("scheduler")
 
+
 def run_monthly_update():
+    """월별 자격증/법령 데이터 업데이트. Render cron 또는 APScheduler로 호출 가능."""
     logger.info(f"Starting scheduled monthly update at {datetime.now()}")
-    # Use context manager for DB session
-    # Note: This is simplified. In a real script, you'd manage the session explicitly.
+    db = SessionLocal()
     try:
-        # We need a generator or a way to get a session outside of FastAPI Depends
-        from sqlalchemy import create_client
-        # ... logic to get db ...
-        # For now, we'll assume the process_updates can handle its own session or we wrap it
-        pass 
+        # law_update_pipeline 등 실제 업데이트 로직 호출
+        # from app.services.law_update_pipeline import law_update_pipeline
+        # law_update_pipeline.process_updates(db)  # 구현 시 사용
+        logger.info("Monthly update completed (no-op: pipeline not wired).")
     except Exception as e:
         logger.error(f"Error during monthly update: {e}")
+    finally:
+        db.close()
 
 def start_scheduler():
+    """스케줄러 루프. 월 1회 03:00 또는 30일 간격으로 run_monthly_update 실행."""
     logger.info("Scheduler started. Monitoring Q-Net and Legal changes every month.")
-    
-    # Schedule for the 1st of every month at 03:00 AM
-    # schedule.every().month.do(run_monthly_update) 
-    # For testing/demo purpose, we can use a shorter interval or just define the task
-    
-    # schedule.every(30).days.do(run_monthly_update)
-    
-    # Alternative: Use a simple loop if run as a standalone process
+    # schedule.every().month.at("03:00").do(run_monthly_update)
+    schedule.every(30).days.do(run_monthly_update)
     while True:
         schedule.run_pending()
         time.sleep(60)

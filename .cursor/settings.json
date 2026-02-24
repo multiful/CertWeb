@@ -1,0 +1,19 @@
+{
+  "plugins": {
+    "vercel": {
+      "enabled": true
+    },
+    "clerk": {
+      "enabled": true
+    },
+    "superpowers": {
+      "enabled": true
+    },
+    "sentry": {
+      "enabled": true
+    },
+    "prisma": {
+      "enabled": true
+    }
+  }
+}

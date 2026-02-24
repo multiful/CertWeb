@@ -90,7 +90,16 @@ export function useRouter() {
 
     useEffect(() => {
         const unsubscribe = RouterContext.subscribe(setRouteState);
-        return () => { unsubscribe(); };
+        const handlePopState = () => {
+            const state = getRouteFromPath(window.location.pathname, window.location.search);
+            RouterContext.currentRoute = state;
+            RouterContext.listeners.forEach((l) => l(state));
+        };
+        window.addEventListener('popstate', handlePopState);
+        return () => {
+            unsubscribe();
+            window.removeEventListener('popstate', handlePopState);
+        };
     }, []);
 
     const navigate = useCallback((path: string) => {

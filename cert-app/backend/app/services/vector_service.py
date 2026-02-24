@@ -1,23 +1,17 @@
-from openai import OpenAI
-import os
 from typing import List, Optional, Dict
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 import json
 
-class VectorService:
-    def __init__(self):
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "text-embedding-3-small"
+from app.utils.ai import get_embedding
 
-    def get_embedding(self, text_input: str) -> List[float]:
-        """Generate embedding using OpenAI."""
-        text_input = text_input.replace("\n", " ")
-        return self.client.embeddings.create(input=[text_input], model=self.model).data[0].embedding
+
+class VectorService:
+    """벡터 저장/검색. OpenAI embedding은 app.utils.ai 싱글톤 사용."""
 
     def upsert_vector_data(self, db: Session, qual_id: int, name: str, content: str, metadata: Dict = None):
         """Insert or update vector data."""
-        embedding = self.get_embedding(content)
+        embedding = get_embedding(content)
         
         query = text("""
             INSERT INTO certificates_vectors (qual_id, name, content, embedding, metadata)
@@ -42,7 +36,7 @@ class VectorService:
 
     def similarity_search(self, db: Session, query_text: str, limit: int = 5) -> List[Dict]:
         """Perform vector similarity search."""
-        query_embedding = self.get_embedding(query_text)
+        query_embedding = get_embedding(query_text)
         
         # Cosine similarity search
         sql = text("""

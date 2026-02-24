@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     
-    # Security
-    JOB_SECRET: str = "change-this-in-production"
+    # Security (빈값이면 main.py startup 시 경고; .env에서 설정 필수)
+    JOB_SECRET: str = ""
     
     # Supabase (Optional)
     SUPABASE_URL: str = ""

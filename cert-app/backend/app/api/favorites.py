@@ -26,7 +26,7 @@ def invalidate_favorites_cache(user_id: str):
 )
 async def get_favorites(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=1000),
+    page_size: int = Query(20, ge=1, le=200),
     db: Session = Depends(get_db_session),
     user_id: str = Depends(get_current_user),
     _: None = Depends(check_rate_limit)

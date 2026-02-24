@@ -16,16 +16,15 @@ export function useAuth() {
         // Check active sessions and sets the user
         supabase.auth.getSession().then(({ data: { session } }: any) => {
             const currentUser = session?.user ?? null;
-            // Only update if ID is different to avoid object reference loop
-            setUser(prev => prev?.id === currentUser?.id ? prev : currentUser);
+            setUser(currentUser);
             setToken(session?.access_token ?? null);
             setLoading(false);
         });
 
-        // Listen for changes on auth state
+        // Listen for changes on auth state (refreshSession 시 metadata 갱신 반영)
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
             const currentUser = session?.user ?? null;
-            setUser(prev => prev?.id === currentUser?.id ? prev : currentUser);
+            setUser(currentUser);
             setToken(session?.access_token ?? null);
             setLoading(false);
         });

@@ -1,0 +1,13 @@
+---
+description: 
+alwaysApply: true
+---
+
+I am using uv for Python environment management. Always use `uv run` to execute scripts and `uv pip install` to add packages.
+
+- **Virtual environment:** `C:\Users\rlaeh\envs\fastapi\.venv`
+- **Python:** `C:\Users\rlaeh\envs\fastapi\.venv\Scripts\python.exe`
+- **uv (CLI):** uv is installed inside the venv. When the shell does not have uv on PATH (e.g. Cursor terminal without activating the venv), use the full path:
+  - **Windows:** `C:\Users\rlaeh\envs\fastapi\.venv\Scripts\uv.exe`
+  - Example: `& "C:\Users\rlaeh\envs\fastapi\.venv\Scripts\uv.exe" run uvicorn main:app --reload`
+  - Or activate the venv first: `& "C:\Users\rlaeh\envs\fastapi\.venv\Scripts\Activate.ps1"` then `uv run ...`

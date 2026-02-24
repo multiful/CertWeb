@@ -153,9 +153,10 @@ class RedisClient:
             tuple: (allowed, remaining, reset_after)
         """
         if not self.client:
-            # If Redis is down, allow the request
-            return True, max_requests, 0
-        
+            # Redis 장애 시 fail-closed: 레이트리밋 적용 불가이므로 요청 거부(429 유도)
+            logger.warning("Redis down: rate limit unavailable, rejecting request (fail-closed).")
+            return False, 0, window_seconds
+
         try:
             pipe = self.client.pipeline()
             now = datetime.utcnow().timestamp()

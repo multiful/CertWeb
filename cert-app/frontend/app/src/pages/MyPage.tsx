@@ -97,9 +97,9 @@ export function MyPage() {
             });
             toast.success('프로필이 업데이트되었습니다.');
             setIsSettingsOpen(false);
-            // Refresh local state or force reload
             await supabase.auth.refreshSession();
-            window.location.reload();
+            setProfile((p: any) => (p ? { ...p, nickname, detail_major: userMajor, grade_year: gradeYear ?? 0 } : p));
+            await loadData();
         } catch (err: any) {
             toast.error(err.message || '프로필 업데이트에 실패했습니다.');
         } finally {

@@ -30,6 +30,12 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting up...")
     
+    if not (settings.JOB_SECRET or settings.JOB_SECRET.strip()):
+        logger.warning(
+            "JOB_SECRET is not set. Set JOB_SECRET in .env for production. "
+            "Admin API (X-Job-Secret) will reject requests until configured."
+        )
+    
     # # Load CSV Data
     # try:
     #     data_loader.load_data()

@@ -1,13 +1,14 @@
-
 import logging
 from typing import List
 from sqlalchemy.orm import Session
 from app.models import Qualification
 from app.redis_client import redis_client
+from app.crud import get_qualification_aggregated_stats_bulk
 import orjson
 import time
 
 logger = logging.getLogger("fast_sync")
+
 
 class FastSyncService:
     """
@@ -19,7 +20,7 @@ class FastSyncService:
     def sync_all_to_redis(db: Session):
         """
         Synchronize all qualifications from Database to Redis in a single pipeline.
-        This provides O(1) read access for all certs with near-zero latency.
+        합격률·난이도·응시인원 통계를 포함하여 /certs/{id}/fast 응답에서 null이 나오지 않도록 함.
         """
         start_time = time.time()
         logger.info("Starting Full Synchronous Burst to Redis...")
@@ -31,16 +32,20 @@ class FastSyncService:
             logger.warning("No qualifications found to sync.")
             return
 
-        # 2. Open Redis Pipeline for batching commands
+        # 2. Bulk 조회: 합격률·난이도·응시인원 통계
+        qual_ids = [q.qual_id for q in quals]
+        stats_map = get_qualification_aggregated_stats_bulk(db, qual_ids)
+
+        # 3. Open Redis Pipeline for batching commands
         if not redis_client.client:
             logger.error("Redis client not initialized. Sync cancelled.")
             return
 
         pipe = redis_client.client.pipeline()
-        
         count = 0
         for q in quals:
-            # Prepare data (matching fastcert format used by Redis Worker and fast_certs api)
+            stats = stats_map.get(q.qual_id) or {}
+            # Prepare data (matching fastcert format + stats for /certs/{id}/fast)
             data = {
                 "qual_id": q.qual_id,
                 "qual_name": q.qual_name,
@@ -49,14 +54,12 @@ class FastSyncService:
                 "ncs_large": q.ncs_large,
                 "managing_body": q.managing_body,
                 "grade_code": q.grade_code,
-                "is_active": q.is_active
+                "is_active": q.is_active,
+                "latest_pass_rate": stats.get("latest_pass_rate"),
+                "avg_difficulty": stats.get("avg_difficulty"),
+                "total_candidates": stats.get("total_candidates", 0),
             }
-            
             payload = {"status": "success", "data": data}
-            
-            # Using orjson + bytes (no decoding) for maximum throughput
-            # Since our RedisClient uses decode_responses=True by default, 
-            # we send strings, but pipeline will bundle them.
             pipe.set(f"fastcert:{q.qual_id}", orjson.dumps(payload).decode())
             count += 1
 

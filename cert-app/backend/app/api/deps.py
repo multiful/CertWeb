@@ -22,12 +22,16 @@ def get_db_session(db: Session = Depends(get_db)) -> Session:
 
 def verify_job_secret(x_job_secret: Optional[str] = Header(None)) -> bool:
     """Verify job secret for admin endpoints."""
+    if not settings.JOB_SECRET or not settings.JOB_SECRET.strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JOB_SECRET not configured. Set in .env for admin API."
+        )
     if not x_job_secret:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing X-Job-Secret header"
         )
-    
     if x_job_secret != settings.JOB_SECRET:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -69,21 +73,34 @@ def check_rate_limit(request: Request) -> None:
 
 
 import base64
+import time
 from jose import jwt, JWTError
 from app.models import Profile
 
 import httpx
 from jose import jwk
 
-@lru_cache(maxsize=1)
+# JWKS TTL 캐시 (1시간). Supabase 키 로테이션 시 재시작 없이 신규 토큰 검증 가능.
+_JWKS_CACHE: dict = {"data": None, "ts": 0.0}
+_JWKS_TTL_SECONDS = 3600
+
+
 def _get_supabase_jwks(url: str) -> dict:
-    """Fetch and cache Supabase JWKS."""
+    """Fetch and cache Supabase JWKS with TTL."""
+    now = time.time()
+    if _JWKS_CACHE["data"] is not None and (now - _JWKS_CACHE["ts"]) < _JWKS_TTL_SECONDS:
+        return _JWKS_CACHE["data"]
     try:
         response = httpx.get(url, timeout=5)
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        _JWKS_CACHE["data"] = data
+        _JWKS_CACHE["ts"] = now
+        return data
     except Exception as e:
         logger.error(f"Failed to fetch JWKS from {url}: {e}")
+        if _JWKS_CACHE["data"] is not None:
+            return _JWKS_CACHE["data"]
         return {}
 
 def _decode_supabase_token(token: str) -> dict:
@@ -190,7 +207,11 @@ def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db_session)
 ) -> str:
-    """Get current user ID (readable userid) from JWT token (required)."""
+    """
+    Get current user ID from JWT token (required).
+    반환값: profile.userid가 있으면 userid(문자열), 없으면 uuid_sub.
+    favorites 등에서 user_id로 사용되므로 일관되게 동일 사용자에 대해 같은 값이 반환됨.
+    """
     if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

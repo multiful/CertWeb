@@ -1,11 +1,10 @@
 import os
 from typing import List, Dict
 import json
-from openai import OpenAI
+from app.utils.ai import client as openai_client
 from app.services.email_service import email_service
 from app.services.vector_service import vector_service
 from sqlalchemy.orm import Session
-from app.api.deps import get_db_session
 
 # Note: In a production environment, you would use PyPDF2 or Unstructured
 # For this script, we assume the content is extracted or provided via string if file is not readable
@@ -14,9 +13,12 @@ try:
 except ImportError:
     PyPDF2 = None
 
+
 class LawUpdatePipeline:
+    """법령/자격증 업데이트 파이프라인. OpenAI 클라이언트는 app.utils.ai 싱글톤 사용."""
+
     def __init__(self):
-        self.openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.openai_client = openai_client
 
     def extract_from_pdf(self, pdf_path: str) -> str:
         """Extract text from PDF."""
