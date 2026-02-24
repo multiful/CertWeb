@@ -72,6 +72,15 @@ CREATE TABLE IF NOT EXISTS user_favorites (
     UNIQUE(user_id, qual_id)
 );
 
+CREATE TABLE IF NOT EXISTS user_acquired_certs (
+    acq_id SERIAL PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    qual_id INTEGER NOT NULL REFERENCES qualification(qual_id) ON DELETE CASCADE,
+    acquired_at DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    UNIQUE(user_id, qual_id)
+);
+
 -- Create indexes
 CREATE INDEX IF NOT EXISTS idx_qual_name ON qualification(qual_name);
 CREATE INDEX IF NOT EXISTS idx_qual_type ON qualification(qual_type);
@@ -82,6 +91,8 @@ CREATE INDEX IF NOT EXISTS idx_stats_qual_id ON qualification_stats(qual_id);
 CREATE INDEX IF NOT EXISTS idx_stats_year ON qualification_stats(year);
 CREATE INDEX IF NOT EXISTS idx_major_map_major ON major_qualification_map(major);
 CREATE INDEX IF NOT EXISTS idx_favorites_user ON user_favorites(user_id);
+CREATE INDEX IF NOT EXISTS idx_acquired_certs_user ON user_acquired_certs(user_id);
+CREATE INDEX IF NOT EXISTS idx_acquired_certs_qual ON user_acquired_certs(qual_id);
 
 -- Insert sample data
 INSERT INTO qualification (qual_name, qual_type, main_field, ncs_large, managing_body, grade_code, is_active) VALUES

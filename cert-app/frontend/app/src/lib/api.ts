@@ -356,6 +356,48 @@ export async function updateProfile(
   });
 }
 
+// ============== Acquired Certs (취득 자격증) ==============
+export interface AcquiredCertItem {
+  acq_id: number;
+  user_id: string;
+  qual_id: number;
+  acquired_at: string | null;
+  created_at: string;
+  qualification?: { qual_id: number; qual_name: string; qual_type?: string; main_field?: string; [key: string]: unknown };
+}
+
+export async function getAcquiredCerts(
+  token: string,
+  page = 1,
+  pageSize = 100
+): Promise<{ items: AcquiredCertItem[]; total: number }> {
+  const res = await apiRequest<{ items: AcquiredCertItem[]; total: number }>(
+    `/me/acquired-certs?page=${page}&page_size=${pageSize}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return res;
+}
+
+export async function getAcquiredCertsCount(token: string): Promise<{ count: number }> {
+  return await apiRequest<{ count: number }>('/me/acquired-certs/count', {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function addAcquiredCert(qualId: number, token: string): Promise<AcquiredCertItem> {
+  return await apiRequest<AcquiredCertItem>(`/me/acquired-certs/${qualId}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function removeAcquiredCert(qualId: number, token: string): Promise<void> {
+  await apiRequest(`/me/acquired-certs/${qualId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
 export async function checkUserId(userid: string): Promise<{ available: boolean, message: string }> {
   return await apiRequest<{ available: boolean, message: string }>('/auth/check-userid', {
     method: 'POST',

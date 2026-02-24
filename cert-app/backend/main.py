@@ -11,7 +11,7 @@ import time
 from app.config import get_settings
 from app.database import check_database_connection
 from app.redis_client import redis_client
-from app.api import certs, recommendations, admin, favorites, jobs, auth, majors, ai_recommendations, fast_certs
+from app.api import certs, recommendations, admin, favorites, acquired_certs, jobs, auth, majors, ai_recommendations, fast_certs
 from app.services.data_loader import data_loader
 
 # Configure logging
@@ -175,6 +175,7 @@ app.include_router(certs.router, prefix=v1_prefix)
 app.include_router(recommendations.router, prefix=v1_prefix)
 app.include_router(admin.router, prefix=v1_prefix)
 app.include_router(favorites.router, prefix=v1_prefix)
+app.include_router(acquired_certs.router, prefix=v1_prefix)
 app.include_router(jobs.router, prefix=v1_prefix)
 app.include_router(auth.router, prefix=v1_prefix)
 app.include_router(majors.router, prefix=v1_prefix)

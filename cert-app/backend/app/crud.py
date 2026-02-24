@@ -4,7 +4,7 @@ from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, desc, asc, or_, and_
 
-from app.models import Qualification, QualificationStats, MajorQualificationMap, UserFavorite, Job, Major
+from app.models import Qualification, QualificationStats, MajorQualificationMap, UserFavorite, UserAcquiredCert, Job, Major
 from app.schemas import (
     QualificationCreate, QualificationUpdate,
     QualificationStatsCreate, QualificationStatsUpdate,
@@ -439,6 +439,67 @@ class UserFavoriteCRUD:
             return True
         return False
 
+
+# ============== User Acquired Certs CRUD ==============
+
+class AcquiredCertCRUD:
+    """CRUD for user acquired (earned) certifications."""
+
+    @staticmethod
+    def get_by_user(
+        db: Session,
+        user_id: str,
+        page: int = 1,
+        page_size: int = 100
+    ) -> tuple[List[UserAcquiredCert], int]:
+        """Get user's acquired certs."""
+        query = db.query(UserAcquiredCert).filter(UserAcquiredCert.user_id == user_id)
+        total = query.count()
+        offset = (page - 1) * page_size
+        items = query.options(
+            joinedload(UserAcquiredCert.qualification)
+        ).order_by(desc(UserAcquiredCert.created_at)).offset(offset).limit(page_size).all()
+        return items, total
+
+    @staticmethod
+    def count_by_user(db: Session, user_id: str) -> int:
+        """Count acquired certs for user."""
+        return db.query(UserAcquiredCert).filter(UserAcquiredCert.user_id == user_id).count()
+
+    @staticmethod
+    def get_by_user_and_qual(db: Session, user_id: str, qual_id: int) -> Optional[UserAcquiredCert]:
+        """Get one acquired cert record."""
+        return db.query(UserAcquiredCert).filter(
+            and_(
+                UserAcquiredCert.user_id == user_id,
+                UserAcquiredCert.qual_id == qual_id
+            )
+        ).first()
+
+    @staticmethod
+    def add(db: Session, user_id: str, qual_id: int, acquired_at=None) -> UserAcquiredCert:
+        """Add acquired cert."""
+        existing = AcquiredCertCRUD.get_by_user_and_qual(db, user_id, qual_id)
+        if existing:
+            return existing
+        obj = UserAcquiredCert(user_id=user_id, qual_id=qual_id, acquired_at=acquired_at)
+        db.add(obj)
+        db.commit()
+        db.refresh(obj)
+        return obj
+
+    @staticmethod
+    def remove(db: Session, user_id: str, qual_id: int) -> bool:
+        """Remove acquired cert."""
+        obj = AcquiredCertCRUD.get_by_user_and_qual(db, user_id, qual_id)
+        if obj:
+            db.delete(obj)
+            db.commit()
+            return True
+        return False
+
+
+acquired_cert_crud = AcquiredCertCRUD()
 
 # ============== Aggregated Stats ==============
 

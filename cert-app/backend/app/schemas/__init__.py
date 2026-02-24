@@ -1,7 +1,7 @@
 """Pydantic schemas for request/response validation."""
 from typing import Optional, List
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, date
 
 
 # ============== Base Schemas ==============
@@ -263,6 +263,25 @@ class RecommendationListResponse(BaseModel):
 class UserFavoriteListResponse(BaseModel):
     """User favorite list response."""
     items: List[UserFavoriteResponse]
+    total: int
+
+
+class UserAcquiredCertResponse(BaseModel):
+    """User acquired cert response."""
+    acq_id: int
+    user_id: str
+    qual_id: int
+    acquired_at: Optional[date] = None
+    created_at: datetime
+    qualification: Optional[QualificationListItemResponse] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserAcquiredCertListResponse(BaseModel):
+    """User acquired cert list response."""
+    items: List[UserAcquiredCertResponse]
     total: int
 
 

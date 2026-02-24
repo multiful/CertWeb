@@ -1,5 +1,5 @@
 """SQLAlchemy database models."""
-from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, ForeignKey, UniqueConstraint, Text
+from sqlalchemy import Column, Integer, String, Boolean, Float, DateTime, Date, ForeignKey, UniqueConstraint, Text
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
@@ -111,6 +111,24 @@ class UserFavorite(Base):
     
     def __repr__(self):
         return f"<UserFavorite(user_id='{self.user_id}', qual_id={self.qual_id})>"
+
+
+class UserAcquiredCert(Base):
+    """User acquired (earned) certification. Linked to profile via user_id (auth uid)."""
+    __tablename__ = "user_acquired_certs"
+
+    acq_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(String(255), nullable=False, index=True)
+    qual_id = Column(Integer, ForeignKey("qualification.qual_id", ondelete="CASCADE"), nullable=False, index=True)
+    acquired_at = Column(Date, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("user_id", "qual_id", name="uq_user_qual_acquired"),)
+
+    qualification = relationship("Qualification")
+
+    def __repr__(self):
+        return f"<UserAcquiredCert(user_id='{self.user_id}', qual_id={self.qual_id})>"
 
 
 class Profile(Base):

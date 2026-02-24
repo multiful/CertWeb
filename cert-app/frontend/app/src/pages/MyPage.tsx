@@ -4,8 +4,8 @@ import { useRouter } from '@/lib/router';
 import { useMajors } from '@/hooks/useRecommendations';
 import {
     User, Bookmark, History, ChevronRight,
-    Mail, School, Award, Sparkles,
-    Search, Settings
+    Mail, School, Award,
+    Search, Settings, PlusCircle, X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -20,7 +20,7 @@ import {
     DialogTrigger,
     DialogFooter,
 } from "@/components/ui/dialog";
-import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile } from '@/lib/api';
+import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile, getAcquiredCerts, getAcquiredCertsCount, addAcquiredCert, removeAcquiredCert, getQualifications } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
@@ -43,6 +43,12 @@ export function MyPage() {
     const [gradeYear, setGradeYear] = useState<number | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
     const [dataLoading, setDataLoading] = useState(true);
+    const [acquiredCerts, setAcquiredCerts] = useState<any[]>([]);
+    const [acquiredCount, setAcquiredCount] = useState(0);
+    const [isAcquiredDialogOpen, setIsAcquiredDialogOpen] = useState(false);
+    const [certSearchQuery, setCertSearchQuery] = useState('');
+    const [certSearchResults, setCertSearchResults] = useState<any[]>([]);
+    const [certSearchLoading, setCertSearchLoading] = useState(false);
 
     // Sync state when dialog opens
     useEffect(() => {
@@ -67,10 +73,11 @@ export function MyPage() {
                 return;
             }
 
-            const [favRes, recentData, profileData, recRes] = await Promise.all([
+            const [favRes, recentData, profileData, countRes, recRes] = await Promise.all([
                 getFavorites(token, 1, 5),
                 getRecentViewed(token),
                 getProfile(token),
+                getAcquiredCertsCount(token).catch(() => ({ count: 0 })),
                 majorFromUser
                     ? getRecommendations(majorFromUser, 20).catch(() => ({ items: [] as any[] }))
                     : Promise.resolve({ items: [] as any[] }),
@@ -79,6 +86,7 @@ export function MyPage() {
             setFavorites(favRes.items.map((f: any) => f.qualification));
             setRecentCerts(recentData);
             setProfile(profileData);
+            setAcquiredCount(countRes.count ?? 0);
 
             const finalMajor = profileData?.detail_major ?? majorFromUser;
             if (finalMajor && profileData?.detail_major !== majorFromUser) {
@@ -280,7 +288,7 @@ export function MyPage() {
                                 </p>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
                                 <div className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-blue-500/30 transition-all duration-500">
                                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Major</p>
                                     <div className="flex items-center gap-3">
@@ -300,27 +308,133 @@ export function MyPage() {
                                         </p>
                                     </div>
                                 </div>
-                                <div className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-emerald-500/30 transition-all duration-500">
+                                <div
+                                    className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-emerald-500/30 transition-all duration-500 cursor-pointer"
+                                    onClick={() => router.navigate('/certs?filter=bookmarks')}
+                                >
                                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Saved Certs</p>
                                     <div className="flex items-center gap-3">
                                         <Bookmark className="w-5 h-5 text-emerald-400" />
                                         <p className="text-lg font-bold text-slate-200">{favorites.length}개</p>
                                     </div>
                                 </div>
+                                <Dialog open={isAcquiredDialogOpen} onOpenChange={(open) => {
+                                    setIsAcquiredDialogOpen(open);
+                                    if (open && token) {
+                                        getAcquiredCerts(token, 1, 100).then((r) => {
+                                            setAcquiredCerts(r.items);
+                                            setAcquiredCount(r.total);
+                                        }).catch(() => setAcquiredCerts([]));
+                                    }
+                                    if (!open) setCertSearchQuery('');
+                                }}>
+                                    <div
+                                        className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-amber-500/30 transition-all duration-500 cursor-pointer"
+                                        onClick={() => setIsAcquiredDialogOpen(true)}
+                                    >
+                                        <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Acquired Certs</p>
+                                        <div className="flex items-center gap-3">
+                                            <Award className="w-5 h-5 text-amber-400" />
+                                            <p className="text-lg font-bold text-slate-200">{acquiredCount}개</p>
+                                        </div>
+                                    </div>
+                                    <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-lg rounded-[2rem] max-h-[85vh] flex flex-col">
+                                        <DialogHeader>
+                                            <DialogTitle className="text-xl font-black text-white">취득 자격증</DialogTitle>
+                                            <DialogDescription className="text-sm text-slate-400">
+                                                DB 자격증 목록에서 검색해 취득한 자격증을 추가하세요.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <div className="space-y-4 flex-1 overflow-hidden flex flex-col min-h-0">
+                                            <div>
+                                                <Label className="text-slate-400 text-xs font-bold uppercase">자격증 검색</Label>
+                                                <Input
+                                                    placeholder="자격증명 입력 (예: 정보처리기사)"
+                                                    value={certSearchQuery}
+                                                    onChange={(e) => {
+                                                        setCertSearchQuery(e.target.value);
+                                                        const q = e.target.value.trim();
+                                                        if (!q) {
+                                                            setCertSearchResults([]);
+                                                            return;
+                                                        }
+                                                        setCertSearchLoading(true);
+                                                        getQualifications({ q, page: 1, page_size: 15 }).then((res) => {
+                                                            setCertSearchResults(res.items || []);
+                                                        }).catch(() => setCertSearchResults([])).finally(() => setCertSearchLoading(false));
+                                                    }}
+                                                    className="mt-1.5 bg-slate-800 border-slate-700"
+                                                />
+                                            </div>
+                                            <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
+                                                {certSearchLoading && <p className="text-slate-500 text-sm">검색 중...</p>}
+                                                {certSearchQuery.trim() && certSearchResults.length > 0 && (
+                                                    <div className="space-y-1">
+                                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">검색 결과에서 추가</p>
+                                                        {certSearchResults.map((cert: any) => {
+                                                            const already = acquiredCerts.some((a: any) => a.qual_id === cert.qual_id);
+                                                            return (
+                                                                <div key={cert.qual_id} className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-800/50 border border-slate-700/50">
+                                                                    <span className="text-sm font-medium text-slate-200 truncate">{cert.qual_name}</span>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        className="rounded-lg h-8"
+                                                                        disabled={already}
+                                                                        onClick={async () => {
+                                                                            if (!token || already) return;
+                                                                            try {
+                                                                                await addAcquiredCert(cert.qual_id, token);
+                                                                                toast.success('추가되었습니다.');
+                                                                                const r = await getAcquiredCerts(token, 1, 100);
+                                                                                setAcquiredCerts(r.items);
+                                                                                setAcquiredCount(r.total);
+                                                                            } catch (e: any) {
+                                                                                toast.error(e?.message || '추가 실패');
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        {already ? '추가됨' : <><PlusCircle className="w-4 h-4 mr-1" />추가</>}
+                                                                    </Button>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                )}
+                                                <div className="space-y-1 pt-2 border-t border-slate-800">
+                                                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">내 취득 자격증 ({acquiredCerts.length})</p>
+                                                    {acquiredCerts.length === 0 ? (
+                                                        <p className="text-slate-500 text-sm py-2">추가된 자격증이 없습니다. 위에서 검색해 추가하세요.</p>
+                                                    ) : (
+                                                        acquiredCerts.map((a: any) => (
+                                                            <div key={a.acq_id} className="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-800/30 border border-slate-700/30">
+                                                                <span className="text-sm font-medium text-slate-200 truncate">{a.qualification?.qual_name ?? a.qual_id}</span>
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="ghost"
+                                                                    className="text-slate-500 hover:text-red-400 h-8 rounded-lg"
+                                                                    onClick={async () => {
+                                                                        if (!token) return;
+                                                                        try {
+                                                                            await removeAcquiredCert(a.qual_id, token);
+                                                                            setAcquiredCerts((prev: any[]) => prev.filter((x: any) => x.qual_id !== a.qual_id));
+                                                                            setAcquiredCount((c: number) => Math.max(0, c - 1));
+                                                                            toast.success('제거되었습니다.');
+                                                                        } catch (e: any) {
+                                                                            toast.error(e?.message || '제거 실패');
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <X className="w-4 h-4" />
+                                                                </Button>
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </DialogContent>
+                                </Dialog>
                             </div>
-                        </div>
-
-                        {/* Premium CTA */}
-                        <div className="md:self-start lg:pt-2">
-                            <Button
-                                onClick={() => router.navigate('/recommendations')}
-                                className="bg-white text-slate-950 hover:bg-blue-50 rounded-[2rem] px-8 py-8 h-auto font-black text-sm uppercase tracking-widest shadow-[0_20px_40px_rgba(255,255,255,0.1)] transition-all active:scale-95 flex items-center gap-4 group/btn overflow-hidden relative"
-                            >
-                                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full group-hover/btn:translate-x-full transition-transform duration-1000" />
-                                <Sparkles className="w-6 h-6 text-blue-600 animate-pulse" />
-                                <span>Career Report</span>
-                                <ChevronRight className="w-6 h-6 group-hover:translate-x-1 transition-transform" />
-                            </Button>
                         </div>
                     </div>
                 </div>
