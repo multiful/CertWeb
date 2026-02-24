@@ -34,6 +34,8 @@
 - **이메일 OTP 회원가입**: Supabase OTP 인증 기반 안전한 회원가입 플로우
 - **Google OAuth 로그인**: 구글 계정 로그인 지원 (자동 userid 발급, 생년월일 선택 사항)
 - **마이페이지**: 닉네임·전공·학년 수정, 즐겨찾기, 최근 조회, 맞춤 추천 대시보드
+- **취득 자격증 (Acquired Certs)**: DB 자격증 목록에서 검색해 내가 취득한 자격증을 등록·관리
+- **XP·레벨·티어 시스템**: 취득 자격증 난이도 기반 경험치(XP) 누적 → 9단계 레벨, Bronze/Silver/Gold/Platinum/Diamond 티어 + 레벨 게이지바 시각화
 - **계정 삭제 연쇄 처리**: `ON DELETE CASCADE`로 탈퇴 시 모든 프로필 데이터 자동 삭제
 
 ### 4. 📬 문의하기 (Contact)
@@ -134,8 +136,16 @@ OPENAI_API_KEY=sk-...
 
 ---
 
-## 🔧 최근 주요 업데이트 (v1.1)
+## 🔧 최근 주요 업데이트 (v1.2)
 
+### 취득 자격증 & XP·레벨·티어 시스템
+- ✅ **취득 자격증 (Acquired Certs)** — `user_acquired_certs` 테이블, `GET/POST/DELETE /me/acquired-certs` API, 마이페이지 모달에서 검색·추가·삭제
+- ✅ **난이도 기반 XP 계산** — `app/utils/xp.py`: 9.0~9.9(+12), 8.0~8.9(+8), 7.0~7.9(+5), 6.0~6.9(+2), 5.0~5.9(0), 4.0~4.9(-0.5), 3.0~3.9(-1.0), 1.0~2.9(-0.5) → 최소 0.5 XP 보장
+- ✅ **9단계 레벨·티어** — Lv1~2 Bronze, Lv3~4 Silver, Lv5~6 Gold, Lv7~8 Platinum, Lv9 Diamond (solved.ac 스타일 보석 색상)
+- ✅ **레벨 임계값** — 평균 난이도(5.0) 자격증 1개(5 XP)로 Lv2 Bronze 도달 가능 (0→5→15→35→70→120→190→290→430 XP)
+- ✅ **마이페이지 UI** — ACQUIRED CERTS 카드에 티어·레벨·XP 게이지바 표시; 우측 "내가 취득한 자격증" 섹션에 목록 + XP 뱃지; 백엔드 summary 미제공 시 프론트엔드 로컬 XP/티어 계산 폴백
+
+### 이전 (v1.1)
 - ✅ **Contact 이메일 라우터** 등록 및 Naver SMTP 연동 확인
 - ✅ **ON DELETE CASCADE** 적용 — 계정 삭제 시 profiles 자동 연쇄 삭제
 - ✅ **Google Auth** — 소셜 로그인 시 자동 userid 생성, 생년월일 선택 처리  

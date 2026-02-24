@@ -15,12 +15,18 @@
 2. **AI 기반 자격증 맞춤 추천 (Vector DB)**
    - **pgvector & Supabase**: 자격증 요약 텍스트 임베딩을 이용한 시맨틱 유사도 검색
    - **OpenAI API**: 사용자 전공과 관심사를 분석하여 가장 적합한 트랙 제안
-3. **인증 및 보안 (Auth & Security)**
+3. **취득 자격증 & XP·레벨·티어 시스템**
+   - **취득 자격증 (Acquired Certs)**: 사용자가 취득한 자격증을 DB 목록에서 검색해 등록·관리 (`user_acquired_certs` 테이블)
+   - **난이도 기반 XP**: `app/utils/xp.py` — 자격증 난이도(1.0~9.9) 구간별 가중치 적용, 최소 0.5 XP 보장
+   - **9단계 레벨·티어**: Lv1~2 Bronze, Lv3~4 Silver, Lv5~6 Gold, Lv7~8 Platinum, Lv9 Diamond (solved.ac 스타일 보석 색상)
+   - **레벨 게이지바**: 마이페이지 ACQUIRED CERTS 카드 및 "내가 취득한 자격증" 섹션에서 티어·XP·다음 레벨 진행률 시각화
+4. **인증 및 보안 (Auth & Security)**
    - **Professional Inactivity Session Management**: 1시간 이상 비활동 시 자동 로그아웃 구현
    - **Supabase Auth**: 안전한 JWT 기반 세션 관리 (자체 DB 연동 백업)
-4. **모던 UI/UX (Frontend)**
+5. **모던 UI/UX (Frontend)**
    - 최신 **React + Vite** 아키텍처 사용
    - **TailwindCSS + Shadcn UI** 조합으로 빠르고 직관적인 사용자 경험 제공
+   - 마이페이지: 취득 자격증 목록 + XP 뱃지, 백엔드 summary 미제공 시 프론트엔드 로컬 XP/티어 계산 폴백
 
 ---
 
@@ -52,20 +58,22 @@
 cert-app/
 ├── backend/                    # FastAPI 기반 백엔드 서비스
 │   ├── app/
-│   │   ├── api/                # API 라우터 (certs.py, fast_certs.py, auth.py 등)
+│   │   ├── api/                # API 라우터 (certs.py, fast_certs.py, auth.py, acquired_certs.py 등)
 │   │   ├── core/               # 인증 패스워드 로직 (보안)
-│   │   ├── models/             # SQLAlchemy 모델
+│   │   ├── models/             # SQLAlchemy 모델 (UserAcquiredCert 포함)
 │   │   ├── schemas/            # Pydantic 타입 검증 모델
 │   │   ├── services/           # 외부 연동(AI) 및 복잡한 비즈니스 로직
+│   │   ├── utils/              # XP 계산 등 유틸 (xp.py: calculate_cert_xp, 레벨/티어)
 │   │   └── redis_client.py     # 고성능 Redis 클라이언트
 │   ├── main.py                 # FastAPI 진입점
+│   ├── init.sql                # DB 스키마 (user_acquired_certs 테이블 포함)
 │   └── requirements.txt        # 파이썬 의존성
 ├── frontend/                   # React.js 기반 프론트엔드 서비스
 │   ├── app/src/
 │   │   ├── components/         # 프리미엄 UI 컴포넌트
 │   │   ├── hooks/              # 시스템 커스텀 훅 (ex: useAuth - 자동 세션 종료 포함)
-│   │   ├── pages/              # 렌더링용 페이지 뷰
-│   │   └── lib/                # API 클라이언트 및 라우터 정의
+│   │   ├── pages/              # MyPage(취득 자격증·티어·게이지바), CertDetail, Home 등
+│   │   └── lib/                # API 클라이언트 (getAcquiredCerts, getAcquiredCertsSummary 등)
 │   ├── package.json            # npm 의존성
 │   └── vite.config.ts          # Vite 설정
 └── docker-compose.yml          # 인프라 일괄 구동 스크립트
@@ -99,6 +107,22 @@ cd frontend/app
 npm install
 npm run dev
 ```
+
+---
+
+## 취득 자격증 API & XP·레벨 로직
+
+| 엔드포인트 | 설명 |
+|------------|------|
+| `GET /api/v1/me/acquired-certs` | 취득 자격증 목록 (페이지네이션, 각 항목에 `xp` 포함) |
+| `GET /api/v1/me/acquired-certs/count` | 취득 개수만 반환 |
+| `GET /api/v1/me/acquired-certs/summary` | total_xp, level, tier, current_level_xp, next_level_xp, cert_count |
+| `POST /api/v1/me/acquired-certs/{qual_id}` | 취득 자격증 추가 (이미 있으면 기존 항목 반환) |
+| `DELETE /api/v1/me/acquired-certs/{qual_id}` | 취득 자격증 제거 |
+
+**XP 계산** (`app/utils/xp.py`): 자격증 난이도(1.0~9.9) 구간별 가중치 → `난이도 + 보너스` (최소 0.5).  
+**레벨 임계값**: 0 → 5 → 15 → 35 → 70 → 120 → 190 → 290 → 430 XP (Lv1~9).  
+평균 난이도(5.0) 자격증 1개 ≈ 5 XP → Lv2 Bronze 도달.
 
 ---
 
