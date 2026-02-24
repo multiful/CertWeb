@@ -130,8 +130,8 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
             {/* Hero Card */}
             <div className="relative rounded-[2.5rem] bg-slate-900 border border-slate-800 overflow-hidden">
                 <div className="absolute top-0 right-0 w-[50%] h-full bg-gradient-to-l from-blue-600/10 via-indigo-600/5 to-transparent pointer-events-none" />
-                <div className="p-8 md:p-16 flex flex-col md:flex-row justify-between items-start md:items-center gap-8 relative z-10">
-                    <div className="space-y-6 flex-1">
+                <div className="p-8 md:p-16 relative z-10">
+                    <div className="space-y-6">
                         <div className="p-4 rounded-2xl bg-blue-600/10 border border-blue-500/20 w-fit">
                             <Briefcase className="w-10 h-10 text-blue-400" />
                         </div>
@@ -139,18 +139,6 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
                             <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight">
                                 {job.job_name}
                             </h1>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-12 bg-black/20 p-8 rounded-3xl border border-white/5 backdrop-blur-sm">
-                        <div className="text-center space-y-2">
-                            <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">Average Starting</div>
-                            <div className="text-2xl font-black text-white">{job.entry_salary || '협의'}</div>
-                        </div>
-                        <div className="w-px h-12 bg-slate-800"></div>
-                        <div className="text-center space-y-2">
-                            <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">Stability Score</div>
-                            <div className="text-2xl font-black text-blue-400">{job.stability || 0}/100</div>
                         </div>
                     </div>
                 </div>
@@ -181,7 +169,15 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
                                 <div className="flex flex-col sm:flex-row gap-6 items-start justify-between sm:gap-8">
                                     <div className="flex-1 min-w-0 w-full sm:min-w-0">
                                         <p className="text-slate-300 text-sm leading-relaxed break-words">
-                                            {job.salary_info ?? `${job.job_name}의 임금수준은 ${job.entry_salary ?? '협의'} 등으로 조회된다. (자료: 워크넷 직업정보)`}
+                                            {(() => {
+                                                const raw = job.salary_info ?? job.entry_salary ?? null;
+                                                if (raw?.trim()) {
+                                                    const alreadyFull = /임금수준은|하위\s*\(|평균\s*\(|상위\s*\(/.test(raw);
+                                                    if (alreadyFull) return raw;
+                                                    return `${job.job_name}의 임금수준은 ${raw} 등으로 조회된다. (자료: 워크넷 직업정보)`;
+                                                }
+                                                return `${job.job_name}의 임금 정보: 협의. (자료: 워크넷 직업정보)`;
+                                            })()}
                                         </p>
                                     </div>
                                     <div className="flex flex-col items-center sm:items-end shrink-0 space-y-1 sm:pl-4">
