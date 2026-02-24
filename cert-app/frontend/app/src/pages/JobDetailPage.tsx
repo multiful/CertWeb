@@ -139,13 +139,6 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
                             <h1 className="text-4xl md:text-5xl font-black text-white tracking-tight">
                                 {job.job_name}
                             </h1>
-                            <div className="flex flex-wrap gap-2">
-                                {(job.similar_jobs || "관련 직무 분석중").split(',').map((sj, idx) => (
-                                    <Badge key={idx} variant="secondary" className="bg-slate-800/50 text-slate-300 border-slate-700 text-xs">
-                                        {sj.trim()}
-                                    </Badge>
-                                ))}
-                            </div>
                         </div>
                     </div>
 
@@ -181,13 +174,22 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
                         </Card>
 
                         <Card className="bg-slate-900/50 border-slate-800 hover:border-slate-700 transition-colors">
-                            <CardContent className="p-8 space-y-6">
-                                <div className="flex items-center gap-3 text-amber-500 font-bold text-sm tracking-widest uppercase">
+                            <CardContent className="p-8">
+                                <div className="flex items-center gap-3 text-amber-500 font-bold text-sm tracking-widest uppercase mb-4">
                                     <DollarSign className="w-5 h-5" /> 임금 정보
                                 </div>
-                                <p className="text-slate-300 text-sm leading-snug whitespace-pre-line">
-                                    {job.salary_info || '상세 임금 정보를 불러오는 중입니다.'}
-                                </p>
+                                <div className="flex flex-col sm:flex-row gap-6 items-start justify-between">
+                                    <div className="flex-1 space-y-2">
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Average Starting</div>
+                                        <p className="text-slate-300 text-sm leading-snug whitespace-pre-line">
+                                            {job.salary_info ?? `${job.job_name}의 임금수준은 ${job.entry_salary ?? '협의'} 등으로 조회된다. (자료: 워크넷 직업정보)`}
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-col items-center sm:items-end shrink-0 space-y-1">
+                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Stability Score</div>
+                                        <div className="text-2xl font-black text-blue-400">{job.stability ?? 0}/100</div>
+                                    </div>
+                                </div>
                             </CardContent>
                         </Card>
                     </div>
