@@ -33,7 +33,7 @@ export function RecommendationPage() {
     submitted ? major : '',
     15
   );
-  const { majors: availableMajors, loading: majorsLoading } = useMajors();
+  const { majors: availableMajors } = useMajors();
   const { majors: popularMajorsFromApi, loading: popularMajorsLoading } = usePopularMajors(12);
 
   const filteredMajors = useMemo(() => {
