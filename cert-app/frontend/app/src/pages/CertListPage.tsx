@@ -84,7 +84,7 @@ export function CertListPage() {
       if (user && token) {
         setFavoritesLoading(true);
         try {
-          const res = await getFavorites(token, 1, 1000);
+          const res = await getFavorites(token, 1, 200);
           setFavoriteIds(res.items.map((f: any) => f.qual_id));
 
           // Build initial certs from qualification field

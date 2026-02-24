@@ -121,11 +121,20 @@ export async function getRecommendations(
   }
 }
 
+const trendingCache: { data: TrendingQualificationListResponse | null; ts: number } = { data: null, ts: 0 };
+const TRENDING_CACHE_TTL_MS = 2 * 60 * 1000;
+
 export async function getTrendingCerts(
   limit: number = 10
 ): Promise<TrendingQualificationListResponse> {
+  if (trendingCache.data && Date.now() - trendingCache.ts < TRENDING_CACHE_TTL_MS) {
+    return { ...trendingCache.data, items: trendingCache.data.items.slice(0, limit), total: Math.min(trendingCache.data.total, limit) };
+  }
   try {
-    return await apiRequest<TrendingQualificationListResponse>(`/certs/trending/now?limit=${limit}`);
+    const res = await apiRequest<TrendingQualificationListResponse>(`/certs/trending/now?limit=${limit}`);
+    trendingCache.data = res;
+    trendingCache.ts = Date.now();
+    return res;
   } catch {
     return { items: [], total: 0 };
   }
@@ -134,14 +143,20 @@ export async function getTrendingCerts(
 export async function getHybridRecommendations(
   major: string,
   interest?: string,
-  limit: number = 10
+  limit: number = 10,
+  token?: string | null
 ): Promise<HybridRecommendationResponse> {
   const query = new URLSearchParams();
   query.append('major', major);
   if (interest) query.append('interest', interest);
   query.append('limit', limit.toString());
 
-  return await apiRequest<HybridRecommendationResponse>(`/recommendations/ai/hybrid-recommendation?${query.toString()}`);
+  const headers: Record<string, string> = {};
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return await apiRequest<HybridRecommendationResponse>(
+    `/recommendations/ai/hybrid-recommendation?${query.toString()}`,
+    { headers }
+  );
 }
 
 export async function semanticSearch(

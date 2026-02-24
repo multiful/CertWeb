@@ -457,11 +457,16 @@ async def get_trending_certs(
                 )
             )
         return TrendingQualificationListResponse(items=items, total=len(items))
-    
+
+    from app.models import Qualification
+    qual_ids = [int(qid) for qid, _ in trending_data]
+    quals = db.query(Qualification).filter(Qualification.qual_id.in_(qual_ids)).all()
+    qual_map = {q.qual_id: q for q in quals}
+
     items = []
     for qual_id_str, score in trending_data:
         qual_id = int(qual_id_str)
-        qual = qualification_crud.get_by_id(db, qual_id)
+        qual = qual_map.get(qual_id)
         if qual:
             items.append(
                 TrendingQualificationResponse(
@@ -472,7 +477,7 @@ async def get_trending_certs(
                     score=score
                 )
             )
-            
+
     return TrendingQualificationListResponse(
         items=items,
         total=len(items)

@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getHybridRecommendations, getAvailableMajors } from '@/lib/api';
 import { useRouter } from '@/lib/router';
+import { useAuth } from '@/hooks/useAuth';
 import type { HybridRecommendationResponse } from '@/types';
 import { toast } from 'sonner';
 
@@ -34,6 +35,7 @@ export function AiRecommendationPage() {
     const [results, setResults] = useState<HybridRecommendationResponse | null>(null);
     const [, setError] = useState<Error | null>(null);
     const { navigate } = useRouter();
+    const { token } = useAuth();
 
     const [availableMajors, setAvailableMajors] = useState<string[]>([]);
 
@@ -52,11 +54,15 @@ export function AiRecommendationPage() {
             toast.error('전공을 선택하거나 입력해주세요.');
             return;
         }
+        if (!token) {
+            toast.error('AI 추천은 로그인 후 이용할 수 있습니다.');
+            return;
+        }
 
         setLoading(true);
         setError(null);
         try {
-            const res = await getHybridRecommendations(major, interest, 10);
+            const res = await getHybridRecommendations(major, interest, 10, token);
             setResults(res);
         } catch (err: any) {
             console.error(err);

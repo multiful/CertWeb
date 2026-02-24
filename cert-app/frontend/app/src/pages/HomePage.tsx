@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Search,
   Award,
@@ -22,9 +22,16 @@ export function HomePage() {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [trendingCerts, setTrendingCerts] = useState<TrendingQualification[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [hasRequestedTrending, setHasRequestedTrending] = useState(false);
+  const trendingSectionRef = useRef<HTMLElement>(null);
+  const fetchStartedRef = useRef(false);
 
-  const fetchTrendingData = async () => {
+  const fetchTrendingData = useCallback(async () => {
+    if (fetchStartedRef.current) return;
+    fetchStartedRef.current = true;
+    setHasRequestedTrending(true);
+    setLoading(true);
     try {
       const res = await getTrendingCerts(6);
       setTrendingCerts(res.items);
@@ -33,15 +40,20 @@ export function HomePage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchTrendingData();
-
-    // Refresh every 5 minutes (300,000 ms)
-    const interval = setInterval(fetchTrendingData, 300000);
-    return () => clearInterval(interval);
-  }, []);
+    const el = trendingSectionRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) fetchTrendingData();
+      },
+      { rootMargin: '120px', threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [fetchTrendingData]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -228,8 +240,8 @@ export function HomePage() {
         </div>
       </section>
 
-      {/* Top Certs Section */}
-      <section className="bg-slate-900/30 py-24 border-y border-slate-800/50">
+      {/* Top Certs Section - 데이터는 이 섹션이 뷰포트에 들어올 때 로드 */}
+      <section ref={trendingSectionRef} className="bg-slate-900/30 py-24 border-y border-slate-800/50">
         <div className="container mx-auto px-6">
           <div className="flex flex-col md:flex-row justify-between items-end gap-6 mb-12">
             <div className="space-y-4">
@@ -252,7 +264,7 @@ export function HomePage() {
                 <div key={i} className="h-48 rounded-2xl bg-slate-900/50 animate-pulse" />
               ))}
             </div>
-          ) : (
+          ) : trendingCerts.length > 0 ? (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               {trendingCerts.map((cert, index) => (
                 <div
@@ -288,11 +300,14 @@ export function HomePage() {
                   </div>
                 </div>
               ))}
-              {trendingCerts.length === 0 && !loading && (
-                <div className="col-span-full py-12 text-center text-slate-500 bg-slate-900/20 rounded-2xl border border-dashed border-slate-800">
-                  데이터 집계 중입니다... 자격증을 검색하거나 상세 페이지를 조회해보세요!
-                </div>
-              )}
+            </div>
+          ) : (
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="col-span-full py-12 text-center text-slate-500 bg-slate-900/20 rounded-2xl border border-dashed border-slate-800">
+                {hasRequestedTrending
+                  ? '데이터 집계 중입니다... 자격증을 검색하거나 상세 페이지를 조회해보세요!'
+                  : '스크롤하면 최근 주목받는 자격증을 불러옵니다.'}
+              </div>
             </div>
           )}
         </div>
