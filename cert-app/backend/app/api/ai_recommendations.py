@@ -1,30 +1,39 @@
 import asyncio
-from fastapi import APIRouter, Depends, Query
+import logging
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
-from typing import List, Optional
+
 from app.api.deps import get_db_session, check_rate_limit, get_current_user
 from app.utils.ai import get_embedding_async
-import numpy as np
+from app.schemas import SemanticSearchResponse, SemanticSearchResultItem, HybridRecommendationResponse, HybridRecommendationItem
 
 router = APIRouter(prefix="/recommendations/ai", tags=["ai-recommendations"])
+logger = logging.getLogger(__name__)
 
-@router.get("/semantic-search")
+
+@router.get("/semantic-search", response_model=SemanticSearchResponse)
 async def semantic_search(
-    query: str = Query(..., description="Semantic search query (e.g., 'Cloud security career')"),
+    query: str = Query(..., min_length=1, max_length=500, description="Semantic search query"),
     limit: int = Query(10, ge=1, le=50),
     db: Session = Depends(get_db_session),
     _: None = Depends(check_rate_limit),
     user_id: str = Depends(get_current_user),
-):
+) -> SemanticSearchResponse:
     """
     Perform semantic search using pgvector and OpenAI embeddings. 로그인 사용자 전용.
     """
-    # 1. Embed user query using OpenAI
-    query_vector = await get_embedding_async(query)
-    
-    # 2. Perform vector search using cosine similarity
-    # <=> is the cosine distance operator in pgvector
+    try:
+        query_vector = await get_embedding_async(query)
+    except Exception as e:
+        logger.exception("semantic_search embedding failed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="임베딩 서비스를 일시적으로 사용할 수 없습니다.",
+        ) from e
+
     sql = text("""
         SELECT qual_id, qual_name, qual_type, main_field, managing_body,
                1 - (embedding <=> :vec) as similarity
@@ -33,38 +42,44 @@ async def semantic_search(
         ORDER BY embedding <=> :vec
         LIMIT :limit
     """)
-    
     results = db.execute(sql, {"vec": str(query_vector), "limit": limit}).fetchall()
-    
-    formatted = []
-    for r in results:
-        formatted.append({
-            "qual_id": r.qual_id,
-            "qual_name": r.qual_name,
-            "qual_type": r.qual_type,
-            "main_field": r.main_field,
-            "managing_body": r.managing_body,
-            "similarity_score": float(r.similarity)
-        })
-        
-    return {
-        "query": query,
-        "results": formatted
-    }
+    formatted = [
+        SemanticSearchResultItem(
+            qual_id=r.qual_id,
+            qual_name=r.qual_name,
+            qual_type=r.qual_type,
+            main_field=r.main_field,
+            managing_body=r.managing_body,
+            similarity_score=float(r.similarity),
+        )
+        for r in results
+    ]
+    return SemanticSearchResponse(query=query, results=formatted)
 
-@router.get("/hybrid-recommendation")
+@router.get("/hybrid-recommendation", response_model=HybridRecommendationResponse)
 async def hybrid_recommendation(
-    major: str = Query(..., description="User's major"),
-    interest: Optional[str] = Query(None, description="Specific interests or career goals"),
+    major: str = Query(..., min_length=1, max_length=200, description="User's major"),
+    interest: Optional[str] = Query(None, max_length=500, description="Specific interests or career goals"),
     limit: int = Query(5, ge=1, le=20),
     db: Session = Depends(get_db_session),
     _: None = Depends(check_rate_limit),
     user_id: str = Depends(get_current_user),
-):
+) -> HybridRecommendationResponse:
     """
     Combines Major-based mapping with Semantic search (Hybrid Search). 로그인 사용자 전용.
     """
-    # 1. Fetch certifications traditionally mapped to this major
+    try:
+        interest_vector, major_vector = await asyncio.gather(
+            get_embedding_async(interest or major),
+            get_embedding_async(major),
+        )
+    except Exception as e:
+        logger.exception("hybrid_recommendation embedding failed")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="임베딩 서비스를 일시적으로 사용할 수 없습니다.",
+        ) from e
+
     major_sql = text("""
         SELECT q.qual_id, q.qual_name, q.qual_type, q.main_field, mq.score as mapping_score, mq.reason
         FROM qualification q
@@ -74,12 +89,6 @@ async def hybrid_recommendation(
         LIMIT 50
     """)
     major_results = db.execute(major_sql, {"major": major}).fetchall()
-    
-    # 2 & 3. Global Semantic Search + Major vector — 병렬 임베딩 호출
-    interest_vector, major_vector = await asyncio.gather(
-        get_embedding_async(interest or major),
-        get_embedding_async(major),
-    )
     global_semantic_sql = text("""
         SELECT qual_id, qual_name,
                1 - (embedding <=> :vec) as similarity
@@ -147,20 +156,24 @@ async def hybrid_recommendation(
         
         # Format reason more nicely
         if c["major_score"] > 8.0 and c["semantic_similarity"] > 0.4:
-            c["reason"] = f"전공({major})과 매우 밀접하며, 관심사({interest})와도 높은 연관성을 보입니다."
+            c["reason"] = f"전공({major})과 매우 밀접하며, 관심사({interest or '입력'})와도 높은 연관성을 보입니다."
         elif c["major_score"] > 7.0:
             c["reason"] = f"전공 분야의 핵심 역량을 증명할 수 있는 주요 자격증입니다."
         elif c["semantic_similarity"] > 0.5:
-            c["reason"] = f"작성해주신 관심사({interest}) 분야에서 매우 인기 있는 전문 자격증입니다."
+            c["reason"] = f"작성해주신 관심사({interest or '입력'}) 분야에서 매우 인기 있는 전문 자격증입니다."
             
         final_results.append(c)
 
-    # Sort by hybrid score
-    sorted_results = sorted(final_results, key=lambda x: x['hybrid_score'], reverse=True)[:limit]
-
-    return {
-        "mode": "hybrid",
-        "major": major,
-        "interest": interest,
-        "results": sorted_results
-    }
+    sorted_results = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)[:limit]
+    items = [
+        HybridRecommendationItem(
+            qual_id=c["qual_id"],
+            qual_name=c["qual_name"],
+            major_score=c["major_score"],
+            reason=c["reason"],
+            semantic_similarity=c["semantic_similarity"],
+            hybrid_score=c["hybrid_score"],
+        )
+        for c in sorted_results
+    ]
+    return HybridRecommendationResponse(mode="hybrid", major=major, interest=interest, results=items)

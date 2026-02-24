@@ -196,6 +196,42 @@ class TrendingQualificationListResponse(BaseModel):
     total: int
 
 
+# ============== AI Recommendation Schemas ==============
+
+class SemanticSearchResultItem(BaseModel):
+    """Single result item for semantic search."""
+    qual_id: int
+    qual_name: str
+    qual_type: Optional[str] = None
+    main_field: Optional[str] = None
+    managing_body: Optional[str] = None
+    similarity_score: float
+
+
+class SemanticSearchResponse(BaseModel):
+    """Response for /recommendations/ai/semantic-search."""
+    query: str
+    results: List[SemanticSearchResultItem]
+
+
+class HybridRecommendationItem(BaseModel):
+    """Single item in hybrid recommendation results."""
+    qual_id: int
+    qual_name: str
+    major_score: float
+    reason: str
+    semantic_similarity: float
+    hybrid_score: float
+
+
+class HybridRecommendationResponse(BaseModel):
+    """Response for /recommendations/ai/hybrid-recommendation."""
+    mode: str = "hybrid"
+    major: str
+    interest: Optional[str] = None
+    results: List[HybridRecommendationItem]
+
+
 # ============== List Response Schemas ==============
 
 class PaginatedResponse(BaseModel):

@@ -48,8 +48,9 @@ class RedisClient:
             return False
         try:
             return self.client.ping()
-        except Exception:
-            self.client = None # Reset on failure
+        except Exception as e:
+            logger.warning("Redis ping failed, clearing client: %s", e)
+            self.client = None
             return False
     
     def _serialize(self, value: Any) -> str:
@@ -81,7 +82,7 @@ class RedisClient:
                 return self._deserialize(value)
             return None
         except Exception as e:
-            logger.error(f"Redis get error: {e}")
+            logger.warning("Redis get error key=%s type=%s: %s", key, type(e).__name__, e, exc_info=False)
             return None
     
     def set(
@@ -101,7 +102,7 @@ class RedisClient:
                 self.client.set(key, serialized)
             return True
         except Exception as e:
-            logger.error(f"Redis set error: {e}")
+            logger.warning("Redis set error key=%s type=%s: %s", key, type(e).__name__, e, exc_info=False)
             return False
     
     def delete(self, key: str) -> bool:
