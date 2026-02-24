@@ -181,6 +181,9 @@ export function MyPage() {
     // Major autocomplete
     const [showMajorSuggestions, setShowMajorSuggestions] = useState(false);
     const { majors: availableMajors } = useMajors();
+    const popularMajors = (availableMajors && availableMajors.length > 0)
+        ? availableMajors.slice(0, 8)
+        : ['컴퓨터공학', '정보통신공학', '전자공학', '경영학', '경제학', '심리학', '간호학', '교육학'];
 
     const loadData = async () => {
         setDataLoading(true);
@@ -375,6 +378,25 @@ export function MyPage() {
                                                                     }
                                                                 </div>
                                                             )}
+                                                        </div>
+                                                        {/* 인기 전공 태그 */}
+                                                        <div className="mt-3 space-y-1 px-1">
+                                                            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">인기 전공</p>
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {popularMajors.map((m) => (
+                                                                    <button
+                                                                        key={m}
+                                                                        type="button"
+                                                                        onClick={() => {
+                                                                            setUserMajor(m);
+                                                                            setShowMajorSuggestions(false);
+                                                                        }}
+                                                                        className="px-3 h-7 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-slate-300 hover:bg-slate-800 hover:text-blue-400 transition-colors"
+                                                                    >
+                                                                        {m}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
                                                         </div>
                                                     </div>
                                                     <div className="space-y-3">

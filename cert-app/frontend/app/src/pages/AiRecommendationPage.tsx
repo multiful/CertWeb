@@ -140,7 +140,7 @@ export function AiRecommendationPage() {
                                 )}
                             </div>
 
-                            <div className="space-y-2">
+                            <div className="space-y-3">
                                 <label htmlFor="career-interest" className="text-sm font-bold text-slate-300 flex items-center gap-2">
                                     <MessageSquare className="w-4 h-4 text-purple-400" />
                                     어떤 일을 하고 싶나요? (커리어 목표)
@@ -153,6 +153,11 @@ export function AiRecommendationPage() {
                                     onChange={(e) => setInterest(e.target.value)}
                                     className="w-full bg-slate-900/80 border-slate-700 rounded-lg p-3 text-sm h-28 focus:ring-purple-500/20 border outline-none text-white focus:border-purple-500 transition-all placeholder:text-slate-600 shadow-inner resize-none"
                                 />
+                                <p className="text-[11px] text-slate-500 leading-relaxed">
+                                    AI는 입력한 전공·커리어 목표뿐 아니라, 마이페이지에 저장된
+                                    <span className="font-semibold text-slate-300"> 학년, 학과, 관심 자격증, 취득 자격증, 난이도</span>
+                                    를 함께 고려해 현재 레벨에 맞는 자격증 난이도를 추천합니다.
+                                </p>
                             </div>
 
                             <Button
