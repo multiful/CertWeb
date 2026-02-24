@@ -11,3 +11,7 @@ I am using uv for Python environment management. Always use `uv run` to execute 
   - **Windows:** `C:\Users\rlaeh\envs\fastapi\.venv\Scripts\uv.exe`
   - Example: `& "C:\Users\rlaeh\envs\fastapi\.venv\Scripts\uv.exe" run uvicorn main:app --reload`
   - Or activate the venv first: `& "C:\Users\rlaeh\envs\fastapi\.venv\Scripts\Activate.ps1"` then `uv run ...`
+
+현재 프로젝트 루트는 Z:\cert-app으로 설정되어 있음.
+
+한글 경로 문제를 피하기 위해 모든 파일 참조는 Z: 드라이브를 기준으로 할 것.

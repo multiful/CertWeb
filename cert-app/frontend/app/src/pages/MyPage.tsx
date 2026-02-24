@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from '@/lib/router';
 import { useMajors } from '@/hooks/useRecommendations';
@@ -20,7 +20,8 @@ import {
     DialogTrigger,
     DialogFooter,
 } from "@/components/ui/dialog";
-import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile, getAcquiredCerts, getAcquiredCertsCount, addAcquiredCert, removeAcquiredCert, getCertifications } from '@/lib/api';
+import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile, getAcquiredCerts, addAcquiredCert, removeAcquiredCert, getCertifications, getAcquiredCertsSummary } from '@/lib/api';
+import type { AcquiredCertItem, AcquiredCertSummary } from '@/lib/api';
 import type { QualificationListResponse } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
@@ -29,6 +30,46 @@ import { toast } from 'sonner';
 const Target = ({ className }: { className?: string }) => (
     <svg className={className} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></svg>
 );
+
+// ─── 티어 정보 ─────────────────────────────────────────────────────────────
+const TIER_META: Record<string, { color: string; bg: string; border: string; gem: string }> = {
+    Bronze:   { color: '#a97241', bg: 'rgba(169,114,65,0.12)',  border: 'rgba(122,79,37,0.4)',   gem: '🥉' },
+    Silver:   { color: '#9da8b3', bg: 'rgba(157,168,179,0.10)', border: 'rgba(107,122,135,0.4)',  gem: '🥈' },
+    Gold:     { color: '#f5c518', bg: 'rgba(245,197,24,0.12)',  border: 'rgba(201,162,0,0.4)',    gem: '🥇' },
+    Platinum: { color: '#54e0c7', bg: 'rgba(84,224,199,0.10)',  border: 'rgba(42,184,160,0.4)',   gem: '💠' },
+    Diamond:  { color: '#b9f2ff', bg: 'rgba(185,242,255,0.10)', border: 'rgba(77,217,255,0.5)',   gem: '💎' },
+};
+
+function getTierMeta(tier: string | null | undefined) {
+    return TIER_META[tier ?? ''] ?? TIER_META['Bronze'];
+}
+
+function XpProgressBar({ summary }: { summary: AcquiredCertSummary }) {
+    const meta = getTierMeta(summary.tier);
+    const curXp = summary.total_xp - summary.current_level_xp;
+    const rangeXp = summary.next_level_xp != null
+        ? summary.next_level_xp - summary.current_level_xp
+        : 1;
+    const pct = summary.next_level_xp == null ? 100 : Math.min(100, Math.round((curXp / rangeXp) * 100));
+    return (
+        <div className="w-full space-y-1">
+            <div className="flex justify-between items-center">
+                <span className="text-[9px] font-bold uppercase tracking-widest" style={{ color: meta.color }}>
+                    {summary.tier} Lv.{summary.level}
+                </span>
+                <span className="text-[9px] text-slate-500 font-bold">
+                    {summary.next_level_xp == null ? 'MAX' : `${Math.round(summary.total_xp)} / ${summary.next_level_xp} XP`}
+                </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                <div
+                    className="h-full rounded-full transition-all duration-700"
+                    style={{ width: `${pct}%`, background: meta.color, boxShadow: `0 0 6px ${meta.color}` }}
+                />
+            </div>
+        </div>
+    );
+}
 
 export function MyPage() {
     const { user, token, loading: authLoading } = useAuth();
@@ -44,12 +85,36 @@ export function MyPage() {
     const [gradeYear, setGradeYear] = useState<number | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
     const [dataLoading, setDataLoading] = useState(true);
-    const [acquiredCerts, setAcquiredCerts] = useState<any[]>([]);
-    const [acquiredCount, setAcquiredCount] = useState(0);
+    const [acquiredCerts, setAcquiredCerts] = useState<AcquiredCertItem[]>([]);
+    const [xpSummary, setXpSummary] = useState<AcquiredCertSummary | null>(null);
     const [isAcquiredDialogOpen, setIsAcquiredDialogOpen] = useState(false);
     const [certSearchQuery, setCertSearchQuery] = useState('');
     const [certSearchResults, setCertSearchResults] = useState<any[]>([]);
     const [certSearchLoading, setCertSearchLoading] = useState(false);
+    const certSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // 디바운스 검색: 입력 멈춘 뒤 300ms 후에만 API 호출 (매 키 입력마다 요청하지 않음)
+    useEffect(() => {
+        if (!isAcquiredDialogOpen) return;
+        const q = certSearchQuery.trim();
+        if (q.length < 2) {
+            setCertSearchResults([]);
+            setCertSearchLoading(false);
+            return;
+        }
+        if (certSearchTimeoutRef.current) clearTimeout(certSearchTimeoutRef.current);
+        certSearchTimeoutRef.current = setTimeout(() => {
+            certSearchTimeoutRef.current = null;
+            setCertSearchLoading(true);
+            getCertifications({ q, page: 1, page_size: 15 })
+                .then((res: QualificationListResponse) => setCertSearchResults(res.items || []))
+                .catch(() => setCertSearchResults([]))
+                .finally(() => setCertSearchLoading(false));
+        }, 300);
+        return () => {
+            if (certSearchTimeoutRef.current) clearTimeout(certSearchTimeoutRef.current);
+        };
+    }, [certSearchQuery, isAcquiredDialogOpen]);
 
     // Sync state when dialog opens
     useEffect(() => {
@@ -74,11 +139,12 @@ export function MyPage() {
                 return;
             }
 
-            const [favRes, recentData, profileData, countRes, recRes] = await Promise.all([
+            const [favRes, recentData, profileData, acquiredRes, summaryRes, recRes] = await Promise.all([
                 getFavorites(token, 1, 5),
                 getRecentViewed(token),
                 getProfile(token),
-                getAcquiredCertsCount(token).catch(() => ({ count: 0 })),
+                getAcquiredCerts(token, 1, 200).catch(() => ({ items: [] as AcquiredCertItem[], total: 0 })),
+                getAcquiredCertsSummary(token).catch(() => null),
                 majorFromUser
                     ? getRecommendations(majorFromUser, 20).catch(() => ({ items: [] as any[] }))
                     : Promise.resolve({ items: [] as any[] }),
@@ -87,7 +153,8 @@ export function MyPage() {
             setFavorites(favRes.items.map((f: any) => f.qualification));
             setRecentCerts(recentData);
             setProfile(profileData);
-            setAcquiredCount(countRes.count ?? 0);
+            setAcquiredCerts(acquiredRes.items);
+            setXpSummary(summaryRes);
 
             const finalMajor = profileData?.detail_major ?? majorFromUser;
             if (finalMajor && profileData?.detail_major !== majorFromUser) {
@@ -321,51 +388,55 @@ export function MyPage() {
                                 </div>
                                 <Dialog open={isAcquiredDialogOpen} onOpenChange={(open) => {
                                     setIsAcquiredDialogOpen(open);
-                                    if (open && token) {
-                                        getAcquiredCerts(token, 1, 100).then((r) => {
-                                            setAcquiredCerts(r.items);
-                                            setAcquiredCount(r.total);
-                                        }).catch(() => setAcquiredCerts([]));
-                                    }
                                     if (!open) setCertSearchQuery('');
                                 }}>
                                     <div
-                                        className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 backdrop-blur-md flex flex-col gap-1 group/item hover:bg-white/[0.05] hover:border-amber-500/30 transition-all duration-500 cursor-pointer"
+                                        className="p-5 rounded-3xl backdrop-blur-md flex flex-col gap-2 group/item transition-all duration-500 cursor-pointer"
+                                        style={{
+                                            background: xpSummary ? getTierMeta(xpSummary.tier).bg : 'rgba(255,255,255,0.02)',
+                                            border: `1px solid ${xpSummary ? getTierMeta(xpSummary.tier).border : 'rgba(255,255,255,0.05)'}`,
+                                        }}
                                         onClick={() => setIsAcquiredDialogOpen(true)}
                                     >
-                                        <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Acquired Certs</p>
-                                        <div className="flex items-center gap-3">
-                                            <Award className="w-5 h-5 text-amber-400" />
-                                            <p className="text-lg font-bold text-slate-200">{acquiredCount}개</p>
+                                        <div className="flex items-center justify-between">
+                                            <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">Acquired Certs</p>
+                                            <span className="text-xs text-slate-500 font-bold">{acquiredCerts.length}개</span>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-2xl">{xpSummary ? getTierMeta(xpSummary.tier).gem : '🥉'}</span>
+                                            <div className="flex-1 min-w-0">
+                                                {xpSummary ? (
+                                                    <XpProgressBar summary={xpSummary} />
+                                                ) : (
+                                                    <p className="text-sm font-bold text-slate-400">자격증을 추가하세요</p>
+                                                )}
+                                            </div>
                                         </div>
                                     </div>
                                     <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-lg rounded-[2rem] max-h-[85vh] flex flex-col">
                                         <DialogHeader>
-                                            <DialogTitle className="text-xl font-black text-white">취득 자격증</DialogTitle>
+                                            <DialogTitle className="text-xl font-black text-white">취득 자격증 관리</DialogTitle>
                                             <DialogDescription className="text-sm text-slate-400">
                                                 DB 자격증 목록에서 검색해 취득한 자격증을 추가하세요.
+                                                {xpSummary && (
+                                                    <span className="ml-2 font-bold" style={{ color: getTierMeta(xpSummary.tier).color }}>
+                                                        {getTierMeta(xpSummary.tier).gem} {xpSummary.tier} Lv.{xpSummary.level} · {Math.round(xpSummary.total_xp)} XP
+                                                    </span>
+                                                )}
                                             </DialogDescription>
                                         </DialogHeader>
                                         <div className="space-y-4 flex-1 overflow-hidden flex flex-col min-h-0">
                                             <div>
                                                 <Label className="text-slate-400 text-xs font-bold uppercase">자격증 검색</Label>
                                                 <Input
-                                                    placeholder="자격증명 입력 (예: 정보처리기사)"
+                                                    placeholder="자격증명 2글자 이상 입력 (예: SQLD)"
                                                     value={certSearchQuery}
-                                                    onChange={(e) => {
-                                                        setCertSearchQuery(e.target.value);
-                                                        const q = e.target.value.trim();
-                                                        if (!q) {
-                                                            setCertSearchResults([]);
-                                                            return;
-                                                        }
-                                                        setCertSearchLoading(true);
-                                                        getCertifications({ q, page: 1, page_size: 15 }).then((res: QualificationListResponse) => {
-                                                            setCertSearchResults(res.items || []);
-                                                        }).catch(() => setCertSearchResults([])).finally(() => setCertSearchLoading(false));
-                                                    }}
+                                                    onChange={(e) => setCertSearchQuery(e.target.value)}
                                                     className="mt-1.5 bg-slate-800 border-slate-700"
                                                 />
+                                                {certSearchQuery.trim().length > 0 && certSearchQuery.trim().length < 2 && (
+                                                    <p className="text-[10px] text-slate-500 mt-1">2글자 이상 입력하면 검색됩니다.</p>
+                                                )}
                                             </div>
                                             <div className="flex-1 overflow-y-auto space-y-2 min-h-0">
                                                 {certSearchLoading && <p className="text-slate-500 text-sm">검색 중...</p>}
@@ -386,9 +457,12 @@ export function MyPage() {
                                                                             try {
                                                                                 await addAcquiredCert(cert.qual_id, token);
                                                                                 toast.success('추가되었습니다.');
-                                                                                const r = await getAcquiredCerts(token, 1, 100);
+                                                                                const [r, s] = await Promise.all([
+                                                                                    getAcquiredCerts(token, 1, 200),
+                                                                                    getAcquiredCertsSummary(token).catch(() => null),
+                                                                                ]);
                                                                                 setAcquiredCerts(r.items);
-                                                                                setAcquiredCount(r.total);
+                                                                                setXpSummary(s);
                                                                             } catch (e: any) {
                                                                                 toast.error(e?.message || '추가 실패');
                                                                             }
@@ -417,8 +491,12 @@ export function MyPage() {
                                                                         if (!token) return;
                                                                         try {
                                                                             await removeAcquiredCert(a.qual_id, token);
-                                                                            setAcquiredCerts((prev: any[]) => prev.filter((x: any) => x.qual_id !== a.qual_id));
-                                                                            setAcquiredCount((c: number) => Math.max(0, c - 1));
+                                                                            const [r, s] = await Promise.all([
+                                                                                getAcquiredCerts(token, 1, 200),
+                                                                                getAcquiredCertsSummary(token).catch(() => null),
+                                                                            ]);
+                                                                            setAcquiredCerts(r.items);
+                                                                            setXpSummary(s);
                                                                             toast.success('제거되었습니다.');
                                                                         } catch (e: any) {
                                                                             toast.error(e?.message || '제거 실패');
@@ -628,19 +706,115 @@ export function MyPage() {
                             </div>
                         </div>
 
-                        {/* Quick Analytics Card */}
-                        <div className="p-8 rounded-[3rem] bg-gradient-to-br from-blue-600/20 to-indigo-600/10 border border-blue-500/20 space-y-6 relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl -mr-16 -mt-16 group-hover:bg-blue-500/30 transition-all duration-1000" />
-                            <h3 className="text-white font-black tracking-tight leading-tight text-xl relative z-10">더 정교한 실시간 데이터가 필요하신가요?</h3>
-                            <p className="text-slate-400 text-sm leading-relaxed relative z-10 opacity-80">전국 1000여개 자격증의<br />실시간 합격률 트렌드를 분석하세요.</p>
-                            <Button
-                                variant="outline"
-                                className="w-full rounded-2xl border-blue-500/30 bg-blue-500/10 text-blue-400 font-black text-xs uppercase tracking-widest hover:bg-blue-500/20 hover:text-white transition-all relative z-10"
-                                onClick={() => router.navigate('/certs')}
-                            >
-                                Explorer Directory
-                            </Button>
-                        </div>
+                        {/* 내가 취득한 자격증 카드 */}
+                        {(() => {
+                            const tierMeta = getTierMeta(xpSummary?.tier ?? null);
+                            return (
+                                <div
+                                    className="rounded-[3rem] overflow-hidden"
+                                    style={{ background: `linear-gradient(160deg, ${tierMeta.bg} 0%, rgba(15,15,25,0.95) 100%)`, border: `1px solid ${tierMeta.border}` }}
+                                >
+                                    <div className="p-8 space-y-5">
+                                        {/* Header */}
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <span className="text-2xl">{tierMeta.gem}</span>
+                                                <div>
+                                                    <h3 className="text-white font-black tracking-tight text-base leading-tight">내가 취득한 자격증</h3>
+                                                    <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: tierMeta.color }}>
+                                                        {xpSummary ? `${xpSummary.tier} · Lv.${xpSummary.level}` : 'No Tier Yet'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-white"
+                                                onClick={() => setIsAcquiredDialogOpen(true)}
+                                            >
+                                                관리 +
+                                            </Button>
+                                        </div>
+
+                                        {/* XP 게이지 */}
+                                        {xpSummary && (
+                                            <div className="space-y-1.5">
+                                                <div className="h-2 rounded-full bg-slate-800/80 overflow-hidden">
+                                                    <div
+                                                        className="h-full rounded-full transition-all duration-700"
+                                                        style={{
+                                                            width: xpSummary.next_level_xp == null ? '100%' :
+                                                                `${Math.min(100, ((xpSummary.total_xp - xpSummary.current_level_xp) / (xpSummary.next_level_xp - xpSummary.current_level_xp)) * 100)}%`,
+                                                            background: `linear-gradient(90deg, ${tierMeta.color}99, ${tierMeta.color})`,
+                                                            boxShadow: `0 0 8px ${tierMeta.color}88`,
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div className="flex justify-between items-center">
+                                                    <span className="text-[10px] text-slate-500 font-bold">총 {Math.round(xpSummary.total_xp)} XP · {xpSummary.cert_count}개</span>
+                                                    <span className="text-[10px] font-bold" style={{ color: tierMeta.color }}>
+                                                        {xpSummary.next_level_xp == null ? 'MAX LEVEL' : `다음 Lv: ${xpSummary.next_level_xp} XP`}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* 취득 자격증 목록 */}
+                                        <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1 custom-scrollbar">
+                                            {dataLoading ? (
+                                                [1, 2].map((i) => (
+                                                    <div key={i} className="h-12 rounded-2xl bg-white/[0.03] border border-white/5 animate-pulse" />
+                                                ))
+                                            ) : acquiredCerts.length > 0 ? (
+                                                acquiredCerts.map((cert) => {
+                                                    const diff = (cert.qualification as any)?.avg_difficulty ?? null;
+                                                    const xp = cert.xp ?? 3;
+                                                    return (
+                                                        <div
+                                                            key={cert.acq_id}
+                                                            className="flex items-center justify-between px-4 py-3 rounded-2xl bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] transition-all group cursor-pointer"
+                                                            onClick={() => router.navigate(`/certs/${cert.qual_id}`)}
+                                                        >
+                                                            <div className="flex items-center gap-3 min-w-0">
+                                                                <Award className="w-4 h-4 flex-shrink-0" style={{ color: tierMeta.color }} />
+                                                                <span className="text-sm font-bold text-slate-200 truncate group-hover:text-white transition-colors">
+                                                                    {cert.qualification?.qual_name ?? `자격증 #${cert.qual_id}`}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex items-center gap-2 flex-shrink-0">
+                                                                {diff != null && (
+                                                                    <span className="text-[9px] font-bold text-slate-600 hidden sm:block">난이도 {diff}</span>
+                                                                )}
+                                                                <span
+                                                                    className="text-[10px] font-black px-2 py-0.5 rounded-full"
+                                                                    style={{ background: `${tierMeta.color}20`, color: tierMeta.color, border: `1px solid ${tierMeta.color}40` }}
+                                                                >
+                                                                    +{xp} XP
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })
+                                            ) : (
+                                                <div className="py-8 flex flex-col items-center gap-3 text-center">
+                                                    <span className="text-3xl opacity-30">🏆</span>
+                                                    <p className="text-slate-500 text-xs font-bold">아직 취득한 자격증이 없습니다.</p>
+                                                    <Button
+                                                        size="sm"
+                                                        variant="ghost"
+                                                        className="text-xs font-bold"
+                                                        style={{ color: tierMeta.color }}
+                                                        onClick={() => setIsAcquiredDialogOpen(true)}
+                                                    >
+                                                        + 자격증 추가하기
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </aside>
                 </div>
             </div>

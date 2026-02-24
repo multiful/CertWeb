@@ -273,6 +273,7 @@ class UserAcquiredCertResponse(BaseModel):
     qual_id: int
     acquired_at: Optional[date] = None
     created_at: datetime
+    xp: float = 3.0
     qualification: Optional[QualificationListItemResponse] = None
 
     class Config:

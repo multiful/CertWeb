@@ -363,7 +363,18 @@ export interface AcquiredCertItem {
   qual_id: number;
   acquired_at: string | null;
   created_at: string;
-  qualification?: { qual_id: number; qual_name: string; qual_type?: string; main_field?: string; [key: string]: unknown };
+  xp: number;
+  qualification?: { qual_id: number; qual_name: string; qual_type?: string; main_field?: string; avg_difficulty?: number; [key: string]: unknown };
+}
+
+export interface AcquiredCertSummary {
+  total_xp: number;
+  level: number;
+  tier: string;
+  tier_color: string;
+  current_level_xp: number;
+  next_level_xp: number | null;
+  cert_count: number;
 }
 
 export async function getAcquiredCerts(
@@ -394,6 +405,12 @@ export async function addAcquiredCert(qualId: number, token: string): Promise<Ac
 export async function removeAcquiredCert(qualId: number, token: string): Promise<void> {
   await apiRequest(`/me/acquired-certs/${qualId}`, {
     method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function getAcquiredCertsSummary(token: string): Promise<AcquiredCertSummary> {
+  return await apiRequest<AcquiredCertSummary>('/me/acquired-certs/summary', {
     headers: { Authorization: `Bearer ${token}` }
   });
 }
