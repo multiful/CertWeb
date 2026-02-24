@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useRecommendations, useMajors } from '@/hooks/useRecommendations';
+import { useRecommendations, useMajors, usePopularMajors } from '@/hooks/useRecommendations';
 import { useRouter } from '@/lib/router';
 
 const sampleMajors = [
@@ -34,6 +34,7 @@ export function RecommendationPage() {
     15
   );
   const { majors: availableMajors, loading: majorsLoading } = useMajors();
+  const { majors: popularMajorsFromApi } = usePopularMajors(12);
 
   const filteredMajors = useMemo(() => {
     const list = (availableMajors && availableMajors.length > 0) ? availableMajors : sampleMajors;
@@ -63,7 +64,12 @@ export function RecommendationPage() {
     navigate(`/certs/${qualId}`);
   };
 
-  const popularMajors = (availableMajors && availableMajors.length > 0) ? availableMajors.slice(0, 10) : sampleMajors;
+  const popularMajors =
+    popularMajorsFromApi.length > 0
+      ? popularMajorsFromApi
+      : (availableMajors && availableMajors.length > 0)
+        ? availableMajors.slice(0, 10)
+        : sampleMajors;
 
   return (
     <div className="space-y-8 pb-10">

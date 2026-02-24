@@ -274,6 +274,45 @@ async def get_available_majors(
 
 
 @router.get(
+    "/popular-majors",
+    response_model=AvailableMajorsResponse,
+    summary="Get popular majors by user count",
+    description="전공 기반 자격증 추천용. profiles.detail_major 집계 후 상위 N개 반환.",
+)
+async def get_popular_majors(
+    limit: int = Query(12, ge=1, le=20),
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_rate_limit),
+):
+    """사용자들이 설정한 전공(detail_major)을 카운팅해 인기 전공 목록 반환."""
+    cache_key = f"recs:popular_majors:v1:{limit}"
+    try:
+        cached = redis_client.get(cache_key)
+        if cached and isinstance(cached, list):
+            return {"majors": cached}
+    except Exception as e:
+        logger.warning("Cache read failed for popular majors: %s", e)
+
+    rows = db.execute(
+        text("""
+            SELECT detail_major AS major, COUNT(*) AS cnt
+            FROM profiles
+            WHERE detail_major IS NOT NULL AND TRIM(detail_major) != ''
+            GROUP BY detail_major
+            ORDER BY cnt DESC
+            LIMIT :limit
+        """),
+        {"limit": limit},
+    ).fetchall()
+    majors = [r["major"] for r in rows if r and r["major"]]
+    try:
+        redis_client.set(cache_key, majors, get_cache_ttl())
+    except Exception:
+        pass
+    return {"majors": majors}
+
+
+@router.get(
     "/jobs/{job_id}/certifications",
     response_model=list[JobCertificationRecommendationResponse],
     summary="Get certifications for a job",

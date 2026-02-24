@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import type { RecommendationListResponse } from '@/types';
-import { getRecommendations, getAvailableMajors } from '@/lib/api';
+import { getRecommendations, getAvailableMajors, getPopularMajors } from '@/lib/api';
 
 interface UseRecommendationsReturn {
   data: RecommendationListResponse | null;
@@ -53,6 +53,27 @@ export function useMajors(): UseMajorsReturn {
       .catch((err) => setError(err instanceof Error ? err : new Error('Unknown error')))
       .finally(() => setLoading(false));
   }, []);
+
+  return { majors, loading, error };
+}
+
+export function usePopularMajors(limit: number = 12): UseMajorsReturn {
+  const [majors, setMajors] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  useEffect(() => {
+    getPopularMajors(limit)
+      .then((data) => {
+        setMajors(data.majors || []);
+        setError(null);
+      })
+      .catch((err) => {
+        setMajors([]);
+        setError(err instanceof Error ? err : new Error('Unknown error'));
+      })
+      .finally(() => setLoading(false));
+  }, [limit]);
 
   return { majors, loading, error };
 }

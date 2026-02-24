@@ -220,6 +220,11 @@ export async function getAvailableMajors(): Promise<{ majors: string[] }> {
   }
 }
 
+/** 사용자 전공(detail_major) 집계 기반 인기 전공 목록 (상위 N개) */
+export async function getPopularMajors(limit: number = 12): Promise<{ majors: string[] }> {
+  return await apiRequest<{ majors: string[] }>(`/recommendations/popular-majors?limit=${limit}`);
+}
+
 // ============== Job APIs ==============
 
 export async function getJobs(
