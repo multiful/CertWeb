@@ -44,6 +44,59 @@ function getTierMeta(tier: string | null | undefined) {
     return TIER_META[tier ?? ''] ?? TIER_META['Bronze'];
 }
 
+// ─── 프론트엔드 XP 계산 (백엔드 미배포 상태에서도 동작하는 폴백) ────────────
+const LOCAL_LEVEL_THRESHOLDS = [0, 5, 15, 35, 70, 120, 190, 290, 430];
+
+function calcXpFromDiff(difficulty: number | null | undefined): number {
+    if (difficulty == null) return 3.0;
+    const d = Number(difficulty);
+    let bonus: number;
+    if (d >= 9.0)      bonus = 12.0;
+    else if (d >= 8.0) bonus = 8.0;
+    else if (d >= 7.0) bonus = 5.0;
+    else if (d >= 6.0) bonus = 2.0;
+    else if (d >= 5.0) bonus = 0.0;
+    else if (d >= 4.0) bonus = -0.5;
+    else if (d >= 3.0) bonus = -1.0;
+    else               bonus = -0.5;
+    return Math.max(0.5, Math.round((d + bonus) * 100) / 100);
+}
+
+function getLevelFromXp(xp: number): number {
+    let level = 1;
+    LOCAL_LEVEL_THRESHOLDS.forEach((threshold, i) => {
+        if (xp >= threshold) level = i + 1;
+    });
+    return Math.min(level, 9);
+}
+
+function getTierFromLevel(level: number): string {
+    if (level <= 2) return 'Bronze';
+    if (level <= 4) return 'Silver';
+    if (level <= 6) return 'Gold';
+    if (level <= 8) return 'Platinum';
+    return 'Diamond';
+}
+
+function computeLocalSummary(certs: AcquiredCertItem[]): AcquiredCertSummary | null {
+    if (certs.length === 0) return null;
+    const totalXp = certs.reduce((sum, cert) => {
+        const diff = (cert.qualification as any)?.avg_difficulty;
+        return sum + (diff != null ? calcXpFromDiff(diff) : (cert.xp && cert.xp !== 3 ? cert.xp : 3.0));
+    }, 0);
+    const level = getLevelFromXp(totalXp);
+    const tier = getTierFromLevel(level);
+    return {
+        total_xp: Math.round(totalXp * 100) / 100,
+        level,
+        tier,
+        tier_color: TIER_META[tier]?.color ?? '#a97241',
+        current_level_xp: LOCAL_LEVEL_THRESHOLDS[level - 1],
+        next_level_xp: level < 9 ? LOCAL_LEVEL_THRESHOLDS[level] : null,
+        cert_count: certs.length,
+    };
+}
+
 function XpProgressBar({ summary }: { summary: AcquiredCertSummary }) {
     const meta = getTierMeta(summary.tier);
     const curXp = summary.total_xp - summary.current_level_xp;
@@ -216,6 +269,9 @@ export function MyPage() {
     }
 
     if (!user) return null;
+
+    // 백엔드 summary가 없을 때 프론트에서 직접 계산한 폴백 사용
+    const effectiveSummary: AcquiredCertSummary | null = xpSummary ?? computeLocalSummary(acquiredCerts);
 
     const SkeletonCard = () => (
         <div className="p-6 rounded-[2rem] bg-slate-900/40 border border-slate-800/50 animate-pulse flex items-center justify-between">
@@ -393,8 +449,8 @@ export function MyPage() {
                                     <div
                                         className="p-5 rounded-3xl backdrop-blur-md flex flex-col gap-2 group/item transition-all duration-500 cursor-pointer"
                                         style={{
-                                            background: xpSummary ? getTierMeta(xpSummary.tier).bg : 'rgba(255,255,255,0.02)',
-                                            border: `1px solid ${xpSummary ? getTierMeta(xpSummary.tier).border : 'rgba(255,255,255,0.05)'}`,
+                                            background: effectiveSummary ? getTierMeta(effectiveSummary.tier).bg : 'rgba(255,255,255,0.02)',
+                                            border: `1px solid ${effectiveSummary ? getTierMeta(effectiveSummary.tier).border : 'rgba(255,255,255,0.05)'}`,
                                         }}
                                         onClick={() => setIsAcquiredDialogOpen(true)}
                                     >
@@ -403,10 +459,10 @@ export function MyPage() {
                                             <span className="text-xs text-slate-500 font-bold">{acquiredCerts.length}개</span>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <span className="text-2xl">{xpSummary ? getTierMeta(xpSummary.tier).gem : '🥉'}</span>
+                                            <span className="text-2xl">{effectiveSummary ? getTierMeta(effectiveSummary.tier).gem : '🥉'}</span>
                                             <div className="flex-1 min-w-0">
-                                                {xpSummary ? (
-                                                    <XpProgressBar summary={xpSummary} />
+                                                {effectiveSummary ? (
+                                                    <XpProgressBar summary={effectiveSummary} />
                                                 ) : (
                                                     <p className="text-sm font-bold text-slate-400">자격증을 추가하세요</p>
                                                 )}
@@ -418,9 +474,9 @@ export function MyPage() {
                                             <DialogTitle className="text-xl font-black text-white">취득 자격증 관리</DialogTitle>
                                             <DialogDescription className="text-sm text-slate-400">
                                                 DB 자격증 목록에서 검색해 취득한 자격증을 추가하세요.
-                                                {xpSummary && (
-                                                    <span className="ml-2 font-bold" style={{ color: getTierMeta(xpSummary.tier).color }}>
-                                                        {getTierMeta(xpSummary.tier).gem} {xpSummary.tier} Lv.{xpSummary.level} · {Math.round(xpSummary.total_xp)} XP
+                                                {effectiveSummary && (
+                                                    <span className="ml-2 font-bold" style={{ color: getTierMeta(effectiveSummary.tier).color }}>
+                                                        {getTierMeta(effectiveSummary.tier).gem} {effectiveSummary.tier} Lv.{effectiveSummary.level} · {Math.round(effectiveSummary.total_xp)} XP
                                                     </span>
                                                 )}
                                             </DialogDescription>
@@ -708,7 +764,7 @@ export function MyPage() {
 
                         {/* 내가 취득한 자격증 카드 */}
                         {(() => {
-                            const tierMeta = getTierMeta(xpSummary?.tier ?? null);
+                            const tierMeta = getTierMeta(effectiveSummary?.tier ?? null);
                             return (
                                 <div
                                     className="rounded-[3rem] overflow-hidden"
@@ -718,11 +774,11 @@ export function MyPage() {
                                         {/* Header */}
                                         <div className="flex items-center justify-between">
                                             <div className="flex items-center gap-3">
-                                                <span className="text-2xl">{tierMeta.gem}</span>
+                                                <span className="text-2xl">{effectiveSummary ? tierMeta.gem : '🥉'}</span>
                                                 <div>
                                                     <h3 className="text-white font-black tracking-tight text-base leading-tight">내가 취득한 자격증</h3>
                                                     <p className="text-[10px] font-bold uppercase tracking-widest" style={{ color: tierMeta.color }}>
-                                                        {xpSummary ? `${xpSummary.tier} · Lv.${xpSummary.level}` : 'No Tier Yet'}
+                                                        {effectiveSummary ? `${effectiveSummary.tier} · Lv.${effectiveSummary.level}` : 'Bronze · Lv.1'}
                                                     </p>
                                                 </div>
                                             </div>
@@ -736,27 +792,29 @@ export function MyPage() {
                                             </Button>
                                         </div>
 
-                                        {/* XP 게이지 */}
-                                        {xpSummary && (
+                                        {/* XP 게이지 - 항상 표시 */}
+                                        {effectiveSummary ? (
                                             <div className="space-y-1.5">
                                                 <div className="h-2 rounded-full bg-slate-800/80 overflow-hidden">
                                                     <div
                                                         className="h-full rounded-full transition-all duration-700"
                                                         style={{
-                                                            width: xpSummary.next_level_xp == null ? '100%' :
-                                                                `${Math.min(100, ((xpSummary.total_xp - xpSummary.current_level_xp) / (xpSummary.next_level_xp - xpSummary.current_level_xp)) * 100)}%`,
+                                                            width: effectiveSummary.next_level_xp == null ? '100%' :
+                                                                `${Math.min(100, ((effectiveSummary.total_xp - effectiveSummary.current_level_xp) / (effectiveSummary.next_level_xp - effectiveSummary.current_level_xp)) * 100)}%`,
                                                             background: `linear-gradient(90deg, ${tierMeta.color}99, ${tierMeta.color})`,
                                                             boxShadow: `0 0 8px ${tierMeta.color}88`,
                                                         }}
                                                     />
                                                 </div>
                                                 <div className="flex justify-between items-center">
-                                                    <span className="text-[10px] text-slate-500 font-bold">총 {Math.round(xpSummary.total_xp)} XP · {xpSummary.cert_count}개</span>
+                                                    <span className="text-[10px] text-slate-500 font-bold">총 {Math.round(effectiveSummary.total_xp)} XP · {effectiveSummary.cert_count}개</span>
                                                     <span className="text-[10px] font-bold" style={{ color: tierMeta.color }}>
-                                                        {xpSummary.next_level_xp == null ? 'MAX LEVEL' : `다음 Lv: ${xpSummary.next_level_xp} XP`}
+                                                        {effectiveSummary.next_level_xp == null ? 'MAX LEVEL' : `다음 Lv: ${effectiveSummary.next_level_xp} XP`}
                                                     </span>
                                                 </div>
                                             </div>
+                                        ) : (
+                                            <div className="h-2 rounded-full bg-slate-800/80" />
                                         )}
 
                                         {/* 취득 자격증 목록 */}
@@ -768,7 +826,8 @@ export function MyPage() {
                                             ) : acquiredCerts.length > 0 ? (
                                                 acquiredCerts.map((cert) => {
                                                     const diff = (cert.qualification as any)?.avg_difficulty ?? null;
-                                                    const xp = cert.xp ?? 3;
+                                                    // avg_difficulty가 있으면 프론트에서 직접 계산 (백엔드 미배포 폴백)
+                                                    const xp = diff != null ? calcXpFromDiff(diff) : (cert.xp && cert.xp !== 3 ? cert.xp : 3.0);
                                                     return (
                                                         <div
                                                             key={cert.acq_id}
