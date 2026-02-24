@@ -1,4 +1,3 @@
-
 /** API client for backend communication with Mock fallback */
 
 import type {
@@ -22,21 +21,67 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ||
   (import.meta as any).env?.NEXT_PUBLIC_API_URL ||
   'https://certweb-xzpx.onrender.com/api/v1';
 
-async function apiRequest<T>(path: string, options?: RequestInit, retries = 2): Promise<T> {
+/** 요청 타임아웃 (ms). 실무에서는 15~30초 권장 */
+const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+/** 재시도 횟수 (네트워크/5xx만). 4xx는 재시도 안 함 */
+const MAX_RETRIES = 2;
+/** 재시도 대기: 지수 백오프 (1초, 2초) */
+const RETRY_DELAY_MS = 1000;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** 4xx/5xx 응답 본문에서 detail 추출 (서버 메시지 노출) */
+async function getErrorDetail(response: Response): Promise<string> {
   try {
-    const response = await fetch(`${BASE_URL}${path}`, options);
+    const body = await response.json();
+    if (body && typeof body.detail === 'string') return body.detail;
+    if (body && Array.isArray(body.detail)) return body.detail.map((d: any) => d.msg || d).join('; ');
+    if (body && typeof body.message === 'string') return body.message;
+  } catch {
+    /* ignore */
+  }
+  return response.statusText || `HTTP ${response.status}`;
+}
+
+async function apiRequest<T>(
+  path: string,
+  options?: RequestInit,
+  retries = MAX_RETRIES
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+  const init: RequestInit = {
+    ...options,
+    signal: options?.signal ?? controller.signal,
+    headers: { ...options?.headers },
+  };
+
+  try {
+    const response = await fetch(`${BASE_URL}${path}`, init);
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      throw new Error(`API Error: ${response.status} ${response.statusText}`);
+      const detail = await getErrorDetail(response);
+      const err = new Error(detail || `API Error: ${response.status}`);
+      (err as any).status = response.status;
+      throw err;
     }
     return await response.json();
   } catch (error: any) {
-    if (error.name === 'TypeError' && retries > 0) {
-      console.warn(`[Network Retry] Failed to fetch ${path}. Retrying... (${retries} attempts left)`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
+    clearTimeout(timeoutId);
+    const isNetworkOr5xx =
+      error.name === 'TypeError' ||
+      error.name === 'AbortError' ||
+      (error.status >= 500 && retries > 0);
+    if (isNetworkOr5xx && retries > 0) {
+      const delay = RETRY_DELAY_MS * (MAX_RETRIES - retries + 1);
+      console.warn(`[API Retry] ${path} in ${delay}ms (${retries} left)`);
+      await sleep(delay);
       return apiRequest<T>(path, options, retries - 1);
     }
-
-    if (error.message && error.message.includes('401')) {
+    if (error.status === 401) {
       console.warn(`API Request 401 for ${path}`);
     } else {
       console.error(`API Request failed for ${path}:`, error);
@@ -326,4 +371,27 @@ export async function sendContactEmail(data: { name: string; email: string; subj
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
+}
+
+// ============== Stream / SSE (향후 AI 스트리밍 응답용) ==============
+/** SSE 이벤트 스트림 구독. 백엔드에서 EventSource/SSE 엔드포인트 추가 시 사용 */
+export function createSSEClient(
+  path: string,
+  options: { token?: string | null; onMessage: (data: unknown) => void; onError?: (err: Event) => void }
+): () => void {
+  const url = `${BASE_URL}${path}`;
+  const eventSource = new EventSource(url);
+  eventSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      options.onMessage(data);
+    } catch {
+      options.onMessage(e.data);
+    }
+  };
+  eventSource.onerror = (e) => {
+    options.onError?.(e);
+    eventSource.close();
+  };
+  return () => eventSource.close();
 }

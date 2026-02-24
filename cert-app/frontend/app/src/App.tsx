@@ -1,22 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { Layout } from '@/components/layout/Layout';
-import { HomePage } from '@/pages/HomePage';
-import { CertListPage } from '@/pages/CertListPage';
-import { CertDetailPage } from '@/pages/CertDetailPage';
-import { RecommendationPage } from '@/pages/RecommendationPage';
-import { AiRecommendationPage } from '@/pages/AiRecommendationPage';
-import { JobListPage } from '@/pages/JobListPage';
-import { JobDetailPage } from '@/pages/JobDetailPage';
-import { MyPage } from '@/pages/MyPage';
-import { PrivacyPolicyPage } from '@/pages/PrivacyPolicyPage';
-import { TermsOfServicePage } from '@/pages/TermsOfServicePage';
-import { ContactPage } from '@/pages/ContactPage';
 import { Toaster } from '@/components/ui/sonner';
-import {
-  getRouteFromPath,
-  RouterContext,
-} from '@/lib/router';
+import { getRouteFromPath, RouterContext } from '@/lib/router';
 import type { RouteState } from '@/lib/router';
+
+const HomePage = lazy(() => import('@/pages/HomePage').then(m => ({ default: m.HomePage })));
+const CertListPage = lazy(() => import('@/pages/CertListPage').then(m => ({ default: m.CertListPage })));
+const CertDetailPage = lazy(() => import('@/pages/CertDetailPage').then(m => ({ default: m.CertDetailPage })));
+const RecommendationPage = lazy(() => import('@/pages/RecommendationPage').then(m => ({ default: m.RecommendationPage })));
+const AiRecommendationPage = lazy(() => import('@/pages/AiRecommendationPage').then(m => ({ default: m.AiRecommendationPage })));
+const JobListPage = lazy(() => import('@/pages/JobListPage').then(m => ({ default: m.JobListPage })));
+const JobDetailPage = lazy(() => import('@/pages/JobDetailPage').then(m => ({ default: m.JobDetailPage })));
+const MyPage = lazy(() => import('@/pages/MyPage').then(m => ({ default: m.MyPage })));
+const PrivacyPolicyPage = lazy(() => import('@/pages/PrivacyPolicyPage').then(m => ({ default: m.PrivacyPolicyPage })));
+const TermsOfServicePage = lazy(() => import('@/pages/TermsOfServicePage').then(m => ({ default: m.TermsOfServicePage })));
+const ContactPage = lazy(() => import('@/pages/ContactPage').then(m => ({ default: m.ContactPage })));
 
 
 function App() {
@@ -72,10 +70,18 @@ function App() {
     }
   }, [routeState]);
 
+  const fallback = (
+    <div className="min-h-[60vh] flex items-center justify-center bg-slate-950">
+      <div className="w-10 h-10 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+    </div>
+  );
+
   return (
     <Layout>
       <div key={RouterContext.getCurrentPath()}>
-        {renderPage}
+        <Suspense fallback={fallback}>
+          {renderPage}
+        </Suspense>
       </div>
       <Toaster />
     </Layout>
