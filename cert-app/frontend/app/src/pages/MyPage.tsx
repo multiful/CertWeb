@@ -42,6 +42,7 @@ export function MyPage() {
     const [userMajor, setUserMajor] = useState('');
     const [gradeYear, setGradeYear] = useState<number | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [dataLoading, setDataLoading] = useState(true);
 
     // Sync state when dialog opens
     useEffect(() => {
@@ -57,30 +58,39 @@ export function MyPage() {
     const { majors: availableMajors } = useMajors();
 
     const loadData = async () => {
+        setDataLoading(true);
         try {
-            let fetchedMajor = user?.user_metadata?.detail_major;
+            const majorFromUser = user?.user_metadata?.detail_major;
 
-            if (token) {
-                const favRes = await getFavorites(token, 1, 5);
-                setFavorites(favRes.items.map((f: any) => f.qualification));
-
-                const recentData = await getRecentViewed(token);
-                setRecentCerts(recentData);
-
-                const profileData = await getProfile(token);
-                setProfile(profileData);
-                // Use freshly fetched profile data (not stale state)
-                if (profileData?.detail_major) {
-                    fetchedMajor = profileData.detail_major;
-                }
+            if (!token) {
+                setDataLoading(false);
+                return;
             }
 
-            if (fetchedMajor) {
-                const recRes = await getRecommendations(fetchedMajor, 20);
+            const [favRes, recentData, profileData, recRes] = await Promise.all([
+                getFavorites(token, 1, 5),
+                getRecentViewed(token),
+                getProfile(token),
+                majorFromUser
+                    ? getRecommendations(majorFromUser, 20).catch(() => ({ items: [] as any[] }))
+                    : Promise.resolve({ items: [] as any[] }),
+            ]);
+
+            setFavorites(favRes.items.map((f: any) => f.qualification));
+            setRecentCerts(recentData);
+            setProfile(profileData);
+
+            const finalMajor = profileData?.detail_major ?? majorFromUser;
+            if (finalMajor && profileData?.detail_major !== majorFromUser) {
+                const recResFromProfile = await getRecommendations(finalMajor, 20);
+                setRecommendations(recResFromProfile.items || []);
+            } else {
                 setRecommendations(recRes.items || []);
             }
         } catch (err: any) {
             console.error('Failed to load mypage data:', err);
+        } finally {
+            setDataLoading(false);
         }
     };
 
@@ -130,6 +140,18 @@ export function MyPage() {
     }
 
     if (!user) return null;
+
+    const SkeletonCard = () => (
+        <div className="p-6 rounded-[2rem] bg-slate-900/40 border border-slate-800/50 animate-pulse flex items-center justify-between">
+            <div className="flex items-center gap-6">
+                <div className="w-14 h-14 rounded-2xl bg-slate-800" />
+                <div className="space-y-2">
+                    <div className="h-5 w-40 bg-slate-800 rounded" />
+                    <div className="h-3 w-24 bg-slate-800/80 rounded" />
+                </div>
+            </div>
+        </div>
+    );
 
     return (
         <div className="min-h-screen bg-slate-950 px-4 py-12">
@@ -328,7 +350,9 @@ export function MyPage() {
                             </div>
 
                             <div className="grid gap-4">
-                                {favorites.length > 0 ? (
+                                {dataLoading ? (
+                                    [1, 2].map((i) => <SkeletonCard key={i} />)
+                                ) : favorites.length > 0 ? (
                                     favorites.map((cert) => (
                                         <div
                                             key={cert.qual_id}
@@ -385,7 +409,9 @@ export function MyPage() {
                             </div>
 
                             <div className="grid gap-4">
-                                {recentCerts.length > 0 ? (
+                                {dataLoading ? (
+                                    [1, 2].map((i) => <SkeletonCard key={`recent-${i}`} />)
+                                ) : recentCerts.length > 0 ? (
                                     recentCerts.map((cert) => (
                                         <div
                                             key={cert.qual_id}
@@ -433,7 +459,15 @@ export function MyPage() {
                                     </div>
 
                                     <div className="space-y-4 max-h-[460px] overflow-y-auto pr-2 custom-scrollbar">
-                                        {recommendations.length > 0 ? (
+                                        {dataLoading ? (
+                                            [1, 2, 3, 4].map((i) => (
+                                                <div key={i} className="p-5 rounded-3xl bg-white/[0.02] border border-white/5 animate-pulse">
+                                                    <div className="h-4 w-16 bg-slate-800 rounded mb-3" />
+                                                    <div className="h-4 w-full bg-slate-800 rounded mb-1" />
+                                                    <div className="h-3 w-3/4 bg-slate-800/80 rounded" />
+                                                </div>
+                                            ))
+                                        ) : recommendations.length > 0 ? (
                                             recommendations.map((item) => (
                                                 <div
                                                     key={item.qual_id}
