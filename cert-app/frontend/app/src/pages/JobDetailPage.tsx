@@ -178,14 +178,13 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
                                 <div className="flex items-center gap-3 text-amber-500 font-bold text-sm tracking-widest uppercase mb-4">
                                     <DollarSign className="w-5 h-5" /> 임금 정보
                                 </div>
-                                <div className="flex flex-col sm:flex-row gap-6 items-start justify-between">
-                                    <div className="flex-1 space-y-2">
-                                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Average Starting</div>
-                                        <p className="text-slate-300 text-sm leading-snug whitespace-pre-line">
+                                <div className="flex flex-col sm:flex-row gap-6 items-start justify-between sm:gap-8">
+                                    <div className="flex-1 min-w-0 w-full sm:min-w-0">
+                                        <p className="text-slate-300 text-sm leading-relaxed break-words">
                                             {job.salary_info ?? `${job.job_name}의 임금수준은 ${job.entry_salary ?? '협의'} 등으로 조회된다. (자료: 워크넷 직업정보)`}
                                         </p>
                                     </div>
-                                    <div className="flex flex-col items-center sm:items-end shrink-0 space-y-1">
+                                    <div className="flex flex-col items-center sm:items-end shrink-0 space-y-1 sm:pl-4">
                                         <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Stability Score</div>
                                         <div className="text-2xl font-black text-blue-400">{job.stability ?? 0}/100</div>
                                     </div>
