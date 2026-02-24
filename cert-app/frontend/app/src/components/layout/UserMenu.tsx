@@ -517,7 +517,7 @@ export function UserMenu() {
                                 )}
                             </div>
                         ) : (
-                            <form onSubmit={handleLogin} className="space-y-5">
+                            <form onSubmit={handleLogin} className="space-y-5" autoComplete="off">
                                 <div className="space-y-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="login-userid" className="text-slate-300 text-xs font-bold uppercase tracking-wider">사용자 아이디</Label>
@@ -528,7 +528,7 @@ export function UserMenu() {
                                             value={userid}
                                             onChange={(e) => setUserid(e.target.value)}
                                             className="bg-slate-900/50 border-slate-800 h-12 focus:ring-blue-500/20"
-                                            autoComplete="username"
+                                            autoComplete="off"
                                             required
                                         />
                                     </div>
@@ -542,7 +542,7 @@ export function UserMenu() {
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                             className="bg-slate-900/50 border-slate-800 h-12 focus:ring-blue-500/20"
-                                            autoComplete="current-password"
+                                            autoComplete="off"
                                             required
                                         />
                                     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { Layout } from '@/components/layout/Layout';
 import { Toaster } from '@/components/ui/sonner';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { getRouteFromPath, RouterContext } from '@/lib/router';
 import type { RouteState } from '@/lib/router';
 
@@ -77,14 +78,16 @@ function App() {
   );
 
   return (
-    <Layout>
-      <div key={RouterContext.getCurrentPath()}>
-        <Suspense fallback={fallback}>
-          {renderPage}
-        </Suspense>
-      </div>
-      <Toaster />
-    </Layout>
+    <ErrorBoundary>
+      <Layout>
+        <div key={RouterContext.getCurrentPath()}>
+          <Suspense fallback={fallback}>
+            {renderPage}
+          </Suspense>
+        </div>
+        <Toaster />
+      </Layout>
+    </ErrorBoundary>
   );
 }
 
