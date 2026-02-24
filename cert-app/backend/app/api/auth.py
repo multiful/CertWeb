@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.database import get_db
 from app.config import get_settings
+from app.api.deps import check_rate_limit, check_auth_rate_limit
 from app.utils.auth import get_current_user_from_token
 from app.schemas.auth import (
     EmailRequest,
@@ -58,7 +59,11 @@ def _admin_delete_user(user_id: str):
         pass
 
 @router.post("/email/send-code")
-async def send_email_code(payload: EmailRequest, db: Session = Depends(get_db)):
+async def send_email_code(
+    payload: EmailRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_auth_rate_limit),
+):
     """[Sign-up Step 1] Send OTP to email."""
     # 1. Check if email already exists in our DB
     # We use a case-insensitive check to be safe
@@ -83,7 +88,7 @@ async def send_email_code(payload: EmailRequest, db: Session = Depends(get_db)):
             timeout=10
         )
         if res.status_code >= 400:
-            logger.error(f"Supabase OTP error: {res.text}")
+            logger.error("Supabase OTP error: status=%s", res.status_code)
             raise HTTPException(status_code=400, detail="인증 코드 발송 실패")
     except Exception as e:
         logger.error(f"OTP send error: {e}")
@@ -93,7 +98,11 @@ async def send_email_code(payload: EmailRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/find-userid")
-async def find_userid(email: str = Query(..., description="Email to find userid"), db: Session = Depends(get_db)):
+async def find_userid(
+    email: str = Query(..., description="Email to find userid", max_length=320),
+    db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit),
+):
     """Find user ID by email."""
     row = db.execute(
         text("SELECT userid FROM profiles WHERE LOWER(email) = LOWER(:email)"),
@@ -106,7 +115,10 @@ async def find_userid(email: str = Query(..., description="Email to find userid"
     return {"userid": row["userid"]}
 
 @router.post("/email/verify-code")
-async def verify_email_code(payload: EmailVerifyCodeRequest):
+async def verify_email_code(
+    payload: EmailVerifyCodeRequest,
+    _: None = Depends(check_auth_rate_limit),
+):
     """[Sign-up Step 2] Verify OTP code."""
     try:
         res = requests.post(
@@ -127,7 +139,11 @@ async def verify_email_code(payload: EmailVerifyCodeRequest):
     return {"success": True, "message": "이메일 인증이 완료되었습니다."}
 
 @router.post("/check-userid")
-async def check_userid(payload: UserIdCheckRequest, db: Session = Depends(get_db)):
+async def check_userid(
+    payload: UserIdCheckRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_rate_limit),
+):
     """Check if userid is already taken."""
     id_row = db.execute(
         text("SELECT 1 FROM profiles WHERE userid = :uid"),
@@ -140,9 +156,10 @@ async def check_userid(payload: UserIdCheckRequest, db: Session = Depends(get_db
 
 @router.post("/signup-complete", response_model=AuthSignupResponse, status_code=201)
 async def signup_complete(
-    payload: AuthSignupComplete, 
+    payload: AuthSignupComplete,
     db: Session = Depends(get_db),
-    token_payload: dict = Depends(get_current_user_from_token)
+    token_payload: dict = Depends(get_current_user_from_token),
+    _: None = Depends(check_auth_rate_limit),
 ):
     """[Sign-up Step 3] Complete registration and save profile."""
     # Security Check: Ensure the token belongs to the email being registered
@@ -189,7 +206,8 @@ async def signup_complete(
                 timeout=10
             )
             if up_res.status_code >= 400:
-                raise HTTPException(status_code=400, detail=f"Supabase 업데이트 실패: {up_res.text}")
+                logger.error("Supabase profile update failed: status=%s", up_res.status_code)
+                raise HTTPException(status_code=400, detail="Supabase 업데이트 실패")
         else:
             # Create user via Admin API
             create_res = requests.post(
@@ -211,7 +229,8 @@ async def signup_complete(
                 timeout=10
             )
             if create_res.status_code >= 400:
-                raise HTTPException(status_code=400, detail=f"Supabase 생성 실패: {create_res.text}")
+                logger.error("Supabase user create failed: status=%s", create_res.status_code)
+                raise HTTPException(status_code=400, detail="Supabase 생성 실패")
             
             data = create_res.json()
             user_id = data.get("id") or data.get("user", {}).get("id")
@@ -274,7 +293,11 @@ async def signup_complete(
     )
 
 @router.post("/login", response_model=AuthTokenResponse)
-async def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
+async def login(
+    payload: AuthLoginRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_auth_rate_limit),
+):
     """Login with userid and password."""
     # 1) Get email from local DB
     row = db.execute(
@@ -359,7 +382,10 @@ async def login(payload: AuthLoginRequest, db: Session = Depends(get_db)):
     )
 
 @router.post("/password-reset")
-async def request_password_reset(payload: EmailRequest):
+async def request_password_reset(
+    payload: EmailRequest,
+    _: None = Depends(check_auth_rate_limit),
+):
     """Request password reset via Supabase."""
     try:
         res = requests.post(
@@ -372,7 +398,7 @@ async def request_password_reset(payload: EmailRequest):
             timeout=10
         )
         if res.status_code >= 400:
-            logger.error(f"Supabase recovery error: {res.text}")
+            logger.error("Supabase recovery error: status=%s", res.status_code)
             raise HTTPException(status_code=res.status_code, detail="비밀번호 재설정 메일 발송 실패")
         return {"message": "비밀번호 재설정 메일이 발송되었습니다."}
     except Exception as e:
@@ -383,7 +409,8 @@ async def request_password_reset(payload: EmailRequest):
 async def update_profile(
     payload: UserProfileUpdate,
     db: Session = Depends(get_db),
-    token_payload: dict = Depends(get_current_user_from_token)
+    token_payload: dict = Depends(get_current_user_from_token),
+    _: None = Depends(check_rate_limit),
 ):
     """Update user profile (name, userid, major)."""
     user_id = token_payload.get("sub")
@@ -474,7 +501,8 @@ async def update_profile(
 @router.get("/profile")
 async def get_my_profile(
     db: Session = Depends(get_db),
-    token_payload: dict = Depends(get_current_user_from_token)
+    token_payload: dict = Depends(get_current_user_from_token),
+    _: None = Depends(check_rate_limit),
 ):
     """Get current user's profile from local database."""
     user_id = token_payload.get("sub")

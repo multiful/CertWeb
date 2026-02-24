@@ -72,6 +72,30 @@ def check_rate_limit(request: Request) -> None:
     request.state.rate_limit_remaining = remaining
 
 
+def check_auth_rate_limit(request: Request) -> None:
+    """Auth 전용 엄격 레이트 리밋 (send_code, login, password_reset 등). 분당 5회 등."""
+    client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+    if client_ip and "," in client_ip:
+        client_ip = client_ip.split(",")[0].strip()
+    key = f"rate_limit_auth:{client_ip}"
+    allowed, remaining, reset_after = redis_client.check_rate_limit(
+        key,
+        settings.AUTH_RATE_LIMIT_REQUESTS,
+        settings.AUTH_RATE_LIMIT_WINDOW,
+    )
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.",
+            headers={
+                "X-RateLimit-Limit": str(settings.AUTH_RATE_LIMIT_REQUESTS),
+                "X-RateLimit-Remaining": "0",
+                "Retry-After": str(reset_after),
+            },
+        )
+    request.state.rate_limit_remaining = remaining
+
+
 import base64
 import time
 from jose import jwt, JWTError

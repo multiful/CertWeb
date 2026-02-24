@@ -26,7 +26,7 @@ def send_email_task(name: str, sender_email: str, subject: str, message: str):
             
         msg = MIMEMultipart()
         msg['From'] = settings.EMAIL_USER
-        msg['To'] = "rlaehdrb2485@naver.com"
+        msg["To"] = settings.CONTACT_EMAIL or "rlaehdrb2485@naver.com"
         msg['Subject'] = f"[CertFinder 문의] {subject}"
         
         body = f"발신자: {name} ({sender_email})\n\n{message}"

@@ -120,19 +120,18 @@ app.add_middleware(
 )
 
 # 2. CORS (Must be near the top to handle OPTIONS effectively)
+_default_origins = [
+    "https://cert-web-sand.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()] if settings.CORS_ORIGINS else _default_origins
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"https://cert-.*\.vercel\.app",
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://cert-web-sand.vercel.app",
-        "https://cert-web-multifuls-projects.vercel.app",
-        "https://cert-a2t9d25bn-multifuls-projects.vercel.app",
-        "https://cert-web-sand.vercel.app/",
-    ],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],

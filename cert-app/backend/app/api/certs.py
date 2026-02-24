@@ -493,11 +493,15 @@ async def rag_search(
     limit: int = Query(5, ge=1, le=10),
     db: Session = Depends(get_db_session)
 ):
-    """Perform RAG search with traffic score boosting."""
+    """Perform RAG search with traffic score boosting. 단기 개선: match_threshold 적용으로 저관련 청크 제거."""
     from app.services.vector_service import vector_service
-    
-    # 1. Vector similarity search
-    vector_results = vector_service.similarity_search(db, q, limit=limit)
+    from app.config import get_settings
+    settings = get_settings()
+    # 1. Vector similarity search (match_threshold: 설정값 이상만 반환)
+    threshold = settings.RAG_MATCH_THRESHOLD if settings.RAG_MATCH_THRESHOLD > 0 else None
+    vector_results = vector_service.similarity_search(
+        db, q, limit=limit, match_threshold=threshold
+    )
     
     # 2. Traffic score fusion (Boost by Redis clicks)
     fusion_results = []

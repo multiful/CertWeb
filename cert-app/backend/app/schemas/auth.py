@@ -33,8 +33,8 @@ class AuthSignupResponse(BaseModel):
     message: str
 
 class AuthLoginRequest(BaseModel):
-    userid: str
-    password: str
+    userid: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=512)
 
 class AuthTokenResponse(BaseModel):
     access_token: str

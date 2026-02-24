@@ -38,7 +38,18 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_REQUESTS: int = 200
     RATE_LIMIT_WINDOW: int = 60  # seconds
-    
+    AUTH_RATE_LIMIT_REQUESTS: int = 5  # Auth 전용: 분당 횟수 (send_code, login 등)
+    AUTH_RATE_LIMIT_WINDOW: int = 60  # seconds
+
+    # CORS (쉼표 구분. 비어 있으면 기본값 사용)
+    CORS_ORIGINS: str = ""
+
+    # RAG: 유사도 임계값 (이하면 결과에서 제외). 0이면 미적용.
+    RAG_MATCH_THRESHOLD: float = 0.4
+
+    # 문의 수신 이메일 (contact API)
+    CONTACT_EMAIL: str = ""
+
     # Email (SMTP)
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
