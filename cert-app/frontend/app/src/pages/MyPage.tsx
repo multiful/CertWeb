@@ -4,7 +4,7 @@ import { useRouter } from '@/lib/router';
 import { useMajors } from '@/hooks/useRecommendations';
 import {
     User, Bookmark, History, ChevronRight,
-    Mail, School, Award,
+    Mail, School, Award, Sparkles,
     Search, Settings, PlusCircle, X
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,8 @@ import {
     DialogTrigger,
     DialogFooter,
 } from "@/components/ui/dialog";
-import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile, getAcquiredCerts, getAcquiredCertsCount, addAcquiredCert, removeAcquiredCert, getQualifications } from '@/lib/api';
+import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile, getAcquiredCerts, getAcquiredCertsCount, addAcquiredCert, removeAcquiredCert, getCertifications } from '@/lib/api';
+import type { QualificationListResponse } from '@/types';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
@@ -359,7 +360,7 @@ export function MyPage() {
                                                             return;
                                                         }
                                                         setCertSearchLoading(true);
-                                                        getQualifications({ q, page: 1, page_size: 15 }).then((res) => {
+                                                        getCertifications({ q, page: 1, page_size: 15 }).then((res: QualificationListResponse) => {
                                                             setCertSearchResults(res.items || []);
                                                         }).catch(() => setCertSearchResults([])).finally(() => setCertSearchLoading(false));
                                                     }}
