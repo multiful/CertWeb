@@ -34,7 +34,7 @@ export function RecommendationPage() {
     15
   );
   const { majors: availableMajors, loading: majorsLoading } = useMajors();
-  const { majors: popularMajorsFromApi } = usePopularMajors(12);
+  const { majors: popularMajorsFromApi, loading: popularMajorsLoading } = usePopularMajors(12);
 
   const filteredMajors = useMemo(() => {
     const list = (availableMajors && availableMajors.length > 0) ? availableMajors : sampleMajors;
@@ -64,12 +64,8 @@ export function RecommendationPage() {
     navigate(`/certs/${qualId}`);
   };
 
-  const popularMajors =
-    popularMajorsFromApi.length > 0
-      ? popularMajorsFromApi
-      : (availableMajors && availableMajors.length > 0)
-        ? availableMajors.slice(0, 10)
-        : sampleMajors;
+  // 인기 전공: 백엔드 /recommendations/popular-majors (profiles.detail_major 사용자 수 내림차순) 결과만 사용
+  const popularMajors = popularMajorsFromApi;
 
   return (
     <div className="space-y-8 pb-10">
@@ -152,13 +148,13 @@ export function RecommendationPage() {
       {/* Quick Major Tags */}
       {!submitted && (
         <div className="max-w-2xl mx-auto text-center">
-          <p className="text-sm text-slate-500 mb-4 font-medium uppercase tracking-wider">인기 전공</p>
+          <p className="text-sm text-slate-500 mb-4 font-medium uppercase tracking-wider">인기 전공 (사용자 설정 기준)</p>
           <div className="flex flex-wrap justify-center gap-2">
-            {majorsLoading ? (
+            {popularMajorsLoading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <Skeleton key={i} className="w-20 h-8 bg-slate-800 rounded-full" />
               ))
-            ) : (
+            ) : popularMajors.length > 0 ? (
               popularMajors.map((m) => (
                 <Button
                   key={m}
@@ -170,6 +166,23 @@ export function RecommendationPage() {
                   {m}
                 </Button>
               ))
+            ) : (
+              <>
+                <p className="text-slate-500 text-sm w-full mb-2">아직 사용자 설정 전공이 없어요. 위에서 전공을 검색해 보세요.</p>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {sampleMajors.map((m) => (
+                    <Button
+                      key={m}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleMajorClick(m)}
+                      className="rounded-full bg-slate-800/40 border-slate-700 text-slate-400 hover:bg-slate-800 hover:text-purple-400 h-8 text-sm px-4"
+                    >
+                      {m}
+                    </Button>
+                  ))}
+                </div>
+              </>
             )}
           </div>
         </div>

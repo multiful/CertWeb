@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from '@/lib/router';
-import { useMajors } from '@/hooks/useRecommendations';
+import { useMajors, usePopularMajors } from '@/hooks/useRecommendations';
 import {
     User, Bookmark, History, ChevronRight,
     Mail, School, Award, Sparkles,
@@ -137,6 +137,7 @@ export function MyPage() {
     const [userMajor, setUserMajor] = useState('');
     const [gradeYear, setGradeYear] = useState<number | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [nicknameError, setNicknameError] = useState<string | null>(null);
     const [dataLoading, setDataLoading] = useState(true);
     const [acquiredCerts, setAcquiredCerts] = useState<AcquiredCertItem[]>([]);
     const [xpSummary, setXpSummary] = useState<AcquiredCertSummary | null>(null);
@@ -181,8 +182,9 @@ export function MyPage() {
     // Major autocomplete
     const [showMajorSuggestions, setShowMajorSuggestions] = useState(false);
     const { majors: availableMajors } = useMajors();
-    const popularMajors = (availableMajors && availableMajors.length > 0)
-        ? availableMajors.slice(0, 8)
+    const { majors: popularMajorsFromApi } = usePopularMajors(8);
+    const popularMajors = popularMajorsFromApi.length > 0
+        ? popularMajorsFromApi
         : ['컴퓨터공학', '정보통신공학', '전자공학', '경영학', '경제학', '심리학', '간호학', '교육학'];
 
     const loadData = async () => {
@@ -230,6 +232,7 @@ export function MyPage() {
         e.preventDefault();
         if (!token) return;
 
+        setNicknameError(null);
         setIsUpdating(true);
         try {
             await updateProfile(token, {
@@ -243,7 +246,9 @@ export function MyPage() {
             setProfile((p: any) => (p ? { ...p, nickname, detail_major: userMajor, grade_year: gradeYear ?? 0 } : p));
             await loadData();
         } catch (err: any) {
-            toast.error(err.message || '프로필 업데이트에 실패했습니다.');
+            const msg = err?.message || '프로필 업데이트에 실패했습니다.';
+            if (msg.includes('중복')) setNicknameError('중복입니다.');
+            toast.error(msg);
         } finally {
             setIsUpdating(false);
         }
@@ -317,7 +322,7 @@ export function MyPage() {
                                     <h1 className="text-5xl font-black tracking-tighter bg-gradient-to-r from-white via-blue-50 to-slate-400 bg-clip-text text-transparent">
                                         {profile?.nickname || user.user_metadata?.nickname || user.user_metadata?.userid || user.email?.split('@')[0]}
                                     </h1>
-                                    <Dialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen}>
+                                    <Dialog open={isSettingsOpen} onOpenChange={(open) => { setIsSettingsOpen(open); if (!open) setNicknameError(null); }}>
                                         <DialogTrigger asChild>
                                             <Button variant="ghost" size="icon" className="text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 rounded-full transition-all">
                                                 <Settings className="w-5 h-5" />
@@ -337,10 +342,16 @@ export function MyPage() {
                                                         <Input
                                                             id="nickname"
                                                             value={nickname}
-                                                            onChange={(e) => setNickname(e.target.value)}
-                                                            className="bg-slate-950 border-slate-800 rounded-2xl h-12 text-slate-200 focus:ring-blue-500/20"
+                                                            onChange={(e) => {
+                                                                setNickname(e.target.value);
+                                                                setNicknameError(null);
+                                                            }}
+                                                            className={`bg-slate-950 rounded-2xl h-12 text-slate-200 focus:ring-blue-500/20 ${nicknameError ? 'border-red-500/60 focus-visible:ring-red-500/30' : 'border-slate-800'}`}
                                                             placeholder="사용할 닉네임 입력"
                                                         />
+                                                        {nicknameError && (
+                                                            <p className="text-xs text-red-400 font-medium px-1 mt-1">{nicknameError}</p>
+                                                        )}
                                                     </div>
                                                     <div className="space-y-2 relative">
                                                         <Label htmlFor="major" className="text-xs font-bold text-slate-500 uppercase tracking-widest px-1">전공</Label>

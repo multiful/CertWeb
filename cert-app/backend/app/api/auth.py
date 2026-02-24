@@ -463,8 +463,15 @@ async def update_profile(
     if payload.name: 
         updates["name"] = payload.name
         updates["full_name"] = payload.name
-    if payload.nickname:
-        updates["nickname"] = payload.nickname
+    if payload.nickname is not None and str(payload.nickname).strip():
+        nick_val = str(payload.nickname).strip()
+        existing_nick = db.execute(
+            text("SELECT id FROM profiles WHERE TRIM(nickname) = :nick AND id != :id"),
+            {"nick": nick_val, "id": user_id}
+        ).scalar()
+        if existing_nick:
+            raise HTTPException(status_code=400, detail="중복입니다.")
+        updates["nickname"] = nick_val
     if payload.userid: 
         # Usually userid is not changed after signup, but if allowed:
         existing = db.execute(
