@@ -680,7 +680,7 @@ export function UserMenu() {
                         <DialogTitle className="text-white font-bold">아이디 찾기</DialogTitle>
                         <DialogDescription className="text-slate-400 text-sm">
                             {findIdStep === 1 && '가입 시 사용한 이메일을 입력하면 인증 코드를 보내드립니다.'}
-                            {findIdStep === 2 && '이메일로 받은 인증 코드 6자리를 입력해 주세요.'}
+                            {findIdStep === 2 && '이메일로 받은 인증 코드 8자리를 입력해 주세요.'}
                             {findIdStep === 3 && '인증이 완료되었습니다.'}
                         </DialogDescription>
                     </DialogHeader>
@@ -715,9 +715,9 @@ export function UserMenu() {
                                     <Input
                                         value={findIdCode}
                                         onChange={(e) => setFindIdCode(e.target.value)}
-                                        placeholder="6자리 코드"
+                                        placeholder="8자리 코드"
                                         className="bg-slate-800 border-slate-700"
-                                        maxLength={6}
+                                        maxLength={8}
                                         autoComplete="one-time-code"
                                     />
                                 </div>
