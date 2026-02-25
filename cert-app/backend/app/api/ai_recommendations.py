@@ -245,10 +245,21 @@ async def hybrid_recommendation(
             diff_lookup[qid] = s.get("avg_difficulty")
 
     # --- 4) Final Hybrid Scoring & Thresholding (난이도 반영) -----------------------
+    # interest가 입력된 경우: semantic_similarity 최솟값 적용 (전공 점수만으로 무관한 자격증이 뜨는 현상 방지)
+    interest_provided = bool(interest and interest.strip())
+    # interest 입력 시: 관심사 가중치 0.65 / 전공 0.35, 최소 semantic 0.15 이상
+    # interest 미입력 시: 전공 0.6 / 의미 0.4 (기본)
+    w_interest = 0.65 if interest_provided else 0.4
+    w_major = 0.35 if interest_provided else 0.6
+    min_semantic = 0.15 if interest_provided else 0.0
+
     final_results = []
     for cid, c in candidate_map.items():
-        # Minimum relevance: must have some major link OR high interest similarity
-        if c["major_score"] < 4.0 and c["semantic_similarity"] < 0.25:
+        # 관심사가 있을 때 semantic_similarity 최솟값 미달은 제외 (IEQ 등 무관한 자격증 필터링)
+        if interest_provided and c["semantic_similarity"] < min_semantic:
+            continue
+        # 최소 전공 연관성 OR 관심도 조건
+        if c["major_score"] < 3.0 and c["semantic_similarity"] < 0.20:
             continue
 
         # 난이도 기반 가중치
@@ -266,8 +277,8 @@ async def hybrid_recommendation(
             delta = abs(diff - target_difficulty)
             difficulty_factor *= max(0.75, 1.1 - (delta / 4.0))
 
-        # Hybrid Score = 0.6 * Interest + 0.4 * Major, 이후 난이도 가중치 적용
-        h_score = (c["semantic_similarity"] * 0.6) + (c["major_score"] / 10.0 * 0.4)
+        # Hybrid Score: interest 입력 여부에 따라 가중치 동적 조정 후 난이도 반영
+        h_score = (c["semantic_similarity"] * w_interest) + (c["major_score"] / 10.0 * w_major)
         h_score *= difficulty_factor
         c["hybrid_score"] = h_score
         
