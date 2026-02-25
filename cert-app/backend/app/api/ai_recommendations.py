@@ -1,10 +1,20 @@
 import asyncio
 import logging
+import re
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _is_valid_uuid(value: Optional[str]) -> bool:
+    return bool(value and _UUID_RE.match(value))
 
 from app.api.deps import get_db_session, check_rate_limit, get_current_user, get_optional_user
 from app.utils.ai import get_embedding_async
@@ -81,6 +91,17 @@ async def hybrid_recommendation(
     2026-02: 사용자 맥락(학년, 프로필 전공, 북마크/취득 자격증 난이도)을 반영해
     추천 난이도를 자동 조절한다.
     """
+    # 입력 정제 — 프론트엔드에서 줄바꿈(\n) 등 공백 문자가 붙어올 수 있음
+    major = major.strip()
+    interest = interest.strip() if interest else None
+    if not major:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="major는 비어있을 수 없습니다.")
+
+    # user_id가 UUID 형식이 아닌 경우(예: 구버전 username) 비로그인으로 처리
+    if user_id and not _is_valid_uuid(user_id):
+        logger.warning("hybrid_recommendation: non-UUID user_id ignored: %r", user_id)
+        user_id = None
+
     try:
         interest_vector, major_vector = await asyncio.gather(
             get_embedding_async(interest or major),
