@@ -1,5 +1,5 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
     Sparkles,
     Tag,
@@ -11,6 +11,7 @@ import {
     Info,
     Lock,
     LogIn,
+    RefreshCw,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +29,8 @@ const sampleMajors = [
     '건축학', '경영학', '회계학', '의학', '간호학', '데이터사이언스'
 ];
 
+const AI_CACHE_KEY = 'ai-rec-cache';
+
 export function AiRecommendationPage() {
     const [major, setMajor] = useState('');
     const [interest, setInterest] = useState('');
@@ -40,6 +43,21 @@ export function AiRecommendationPage() {
     const { token } = useAuth();
 
     const [availableMajors, setAvailableMajors] = useState<string[]>([]);
+
+    // 마운트 시 sessionStorage에서 이전 검색 상태 복원
+    useEffect(() => {
+        try {
+            const cached = sessionStorage.getItem(AI_CACHE_KEY);
+            if (cached) {
+                const { major: m, interest: i, results: r } = JSON.parse(cached);
+                if (m) { setMajor(m); setInputValue(m); }
+                if (i) setInterest(i);
+                if (r) setResults(r);
+            }
+        } catch {
+            // 캐시 파싱 실패 시 무시
+        }
+    }, []);
 
     React.useEffect(() => {
         getAvailableMajors().then(res => setAvailableMajors(res.majors)).catch(() => { });
@@ -62,12 +80,26 @@ export function AiRecommendationPage() {
         try {
             const res = await getHybridRecommendations(major, interest, 10, token);
             setResults(res);
+            // 결과를 sessionStorage에 캐싱 → 뒤로가기 시 재호출 없이 복원
+            try {
+                sessionStorage.setItem(AI_CACHE_KEY, JSON.stringify({ major, interest, results: res }));
+            } catch {
+                // storage 용량 초과 등 무시
+            }
         } catch (err: any) {
             console.error(err);
             toast.error('추천 결과를 가져오는데 실패했습니다.');
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleReset = () => {
+        setMajor('');
+        setInterest('');
+        setInputValue('');
+        setResults(null);
+        sessionStorage.removeItem(AI_CACHE_KEY);
     };
 
     const navigateToCert = (qualId: number) => {
@@ -181,7 +213,7 @@ export function AiRecommendationPage() {
 
             {results && (
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between flex-wrap gap-4">
                         <div className="space-y-1">
                             <h2 className="text-2xl font-bold text-white flex items-center gap-3">
                                 <Sparkles className="w-6 h-6 text-yellow-500" />
@@ -196,6 +228,15 @@ export function AiRecommendationPage() {
                                 )}
                             </p>
                         </div>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleReset}
+                            className="border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl"
+                        >
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            다시 검색
+                        </Button>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

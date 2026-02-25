@@ -63,6 +63,23 @@ export function CertListPage() {
   const { data: filters } = useFilterOptions();
   const [trendingCerts, setTrendingCerts] = useState<any[]>([]);
 
+  // params가 바뀔 때마다 URL을 replaceState로 동기화 → 뒤로가기 시 검색 상태 복원
+  useEffect(() => {
+    const urlParams = new URLSearchParams();
+    if (params.q) urlParams.set('q', params.q);
+    if (params.main_field) urlParams.set('main_field', params.main_field);
+    if (params.ncs_large) urlParams.set('ncs_large', params.ncs_large);
+    if (params.qual_type) urlParams.set('qual_type', params.qual_type);
+    if (params.managing_body) urlParams.set('managing_body', params.managing_body);
+    if (params.sort && params.sort !== 'name') urlParams.set('sort', params.sort);
+    if (params.sort_desc === false) urlParams.set('sort_desc', 'false');
+    if (isFavoritesOnly) urlParams.set('filter', 'bookmarks');
+    const newUrl = `/certs${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
+    if (newUrl !== window.location.pathname + window.location.search) {
+      window.history.replaceState(null, '', newUrl);
+    }
+  }, [params, isFavoritesOnly]);
+
   // Load trending certs
   useEffect(() => {
     async function loadTrending() {
@@ -76,7 +93,9 @@ export function CertListPage() {
     loadTrending();
   }, []);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [searchType, setSearchType] = useState<'name' | 'body'>('name');
+  const [searchType, setSearchType] = useState<'name' | 'body'>(
+    searchParams.get('managing_body') ? 'body' : 'name'
+  );
   const [inputValue, setInputValue] = useState(params.q || params.managing_body || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [favoritesItems, setFavoritesItems] = useState<any[]>([]);

@@ -32,7 +32,9 @@ export function JobListPage() {
     const router = useRouter();
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
-    const [searchQuery, setSearchQuery] = useState('');
+
+    const initialQ = new URL(window.location.href).searchParams.get('q') || '';
+    const [searchQuery, setSearchQuery] = useState(initialQ);
 
     useEffect(() => {
         const fetchJobs = async () => {
@@ -49,7 +51,17 @@ export function JobListPage() {
         fetchJobs();
     }, [searchQuery]);
 
-    const [inputValue, setInputValue] = useState('');
+    // searchQuery가 바뀔 때마다 URL을 replaceState로 동기화 → 뒤로가기 시 검색어 복원
+    useEffect(() => {
+        const urlParams = new URLSearchParams();
+        if (searchQuery) urlParams.set('q', searchQuery);
+        const newUrl = `/jobs${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
+        if (newUrl !== window.location.pathname + window.location.search) {
+            window.history.replaceState(null, '', newUrl);
+        }
+    }, [searchQuery]);
+
+    const [inputValue, setInputValue] = useState(initialQ);
     const [showSuggestions, setShowSuggestions] = useState(false);
 
     useEffect(() => {
