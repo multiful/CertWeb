@@ -1,5 +1,7 @@
 # 검토 커맨드: 서버가 떠 있는 상태에서 실행. 목록/트렌딩/최근본 API를 호출해
 # 서버 로그에 남는 SQL을 확인할 수 있음. (qual_id IN (...) 대신 = ANY(:ids) 사용 여부 확인)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 $base = "http://127.0.0.1:8000"
 $v1 = "$base/api/v1"
 
