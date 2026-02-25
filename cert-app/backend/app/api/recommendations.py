@@ -303,7 +303,7 @@ async def get_popular_majors(
             LIMIT :limit
         """),
         {"limit": limit},
-    ).fetchall()
+    ).mappings().fetchall()
     majors = [r["major"] for r in (rows or []) if r and r.get("major")]
     try:
         redis_client.set(cache_key, majors, get_cache_ttl())
