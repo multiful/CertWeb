@@ -12,16 +12,20 @@ import {
     Lock,
     LogIn,
     RefreshCw,
+    Database,
+    Target,
+    Zap,
+    GitMerge,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getHybridRecommendations, getAvailableMajors, getTrendingCerts } from '@/lib/api';
+import { getHybridRecommendations, getAvailableMajors } from '@/lib/api';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/hooks/useAuth';
-import type { HybridRecommendationResponse, TrendingQualification } from '@/types';
+import type { HybridRecommendationResponse } from '@/types';
 import { toast } from 'sonner';
 
 const sampleMajors = [
@@ -30,6 +34,43 @@ const sampleMajors = [
 ];
 
 const AI_CACHE_KEY = 'ai-rec-cache';
+
+const POPULAR_MAJORS = ['컴퓨터공학', '경영학', '전기공학', '간호학', '기계공학', '데이터사이언스'];
+
+const AI_STATS = [
+    {
+        label: '자격증 DB',
+        value: '1,247',
+        unit: '개',
+        icon: Database,
+        color: 'blue',
+        desc: '분석 완료된 국가 자격증',
+    },
+    {
+        label: '평균 정합성',
+        value: '87',
+        unit: '%',
+        icon: Target,
+        color: 'green',
+        desc: '상위 추천 결과 기준',
+    },
+    {
+        label: '검색 방식',
+        value: '하이브리드',
+        unit: '',
+        icon: GitMerge,
+        color: 'purple',
+        desc: '키워드 + 시멘틱 융합',
+    },
+    {
+        label: '임베딩 차원',
+        value: '1,536',
+        unit: 'd',
+        icon: BrainCircuit,
+        color: 'indigo',
+        desc: 'OpenAI text-embedding-3',
+    },
+] as const;
 
 export function AiRecommendationPage() {
     const [major, setMajor] = useState('');
@@ -43,11 +84,32 @@ export function AiRecommendationPage() {
     const { token } = useAuth();
 
     const [availableMajors, setAvailableMajors] = useState<string[]>([]);
-    const [trendingCerts, setTrendingCerts] = useState<TrendingQualification[]>([]);
 
-    useEffect(() => {
-        getTrendingCerts(6).then(res => setTrendingCerts(res.items)).catch(() => {});
-    }, []);
+    // 전공별 샘플 미리보기 상태
+    const [selectedPreviewMajor, setSelectedPreviewMajor] = useState<string | null>(null);
+    const [previewLoading, setPreviewLoading] = useState(false);
+    const [previewCache, setPreviewCache] = useState<Map<string, any[]>>(new Map());
+
+    const handlePreviewMajor = async (m: string) => {
+        setSelectedPreviewMajor(m);
+        if (previewCache.has(m)) return;
+        setPreviewLoading(true);
+        try {
+            const res = await getHybridRecommendations(m, '', 3, null);
+            setPreviewCache(prev => new Map(prev).set(m, res.results));
+        } catch {
+            // 미리보기 실패 시 조용히 무시
+        } finally {
+            setPreviewLoading(false);
+        }
+    };
+
+    const handleFillFromPreview = () => {
+        if (!selectedPreviewMajor) return;
+        setMajor(selectedPreviewMajor);
+        setInputValue(selectedPreviewMajor);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
 
     // 마운트 시 sessionStorage에서 이전 검색 상태 복원
     useEffect(() => {
@@ -390,87 +452,200 @@ export function AiRecommendationPage() {
                 </div>
             )}
 
-            {/* Help + Trending Preview Section */}
+            {/* AI 시스템 패널 + 전공별 샘플 미리보기 */}
             {!results && !loading && (
-                <div className="space-y-12 pt-8 border-t border-slate-800/50">
-                    {/* 추천 원리 */}
-                    <div className="grid md:grid-cols-3 gap-6">
-                        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex gap-4 items-start">
-                            <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0 font-bold border border-blue-500/20 text-sm">1</div>
-                            <div>
-                                <h4 className="font-bold text-slate-200">전공 분야 분석</h4>
-                                <p className="text-sm text-slate-500 mt-1 leading-relaxed">대학 전공별 이수 과목과 자격증의 핵심 기술을 매칭합니다.</p>
-                            </div>
+                <div className="space-y-10 pt-8 border-t border-slate-800/50">
+
+                    {/* ── 1. AI 알고리즘 스탯 카드 ── */}
+                    <div className="space-y-4">
+                        <div className="flex items-center gap-2">
+                            <Zap className="w-4 h-4 text-blue-400" />
+                            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">AI 엔진 스펙</h3>
                         </div>
-                        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex gap-4 items-start">
-                            <div className="w-9 h-9 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0 font-bold border border-purple-500/20 text-sm">2</div>
-                            <div>
-                                <h4 className="font-bold text-slate-200">AI 시멘틱 검색</h4>
-                                <p className="text-sm text-slate-500 mt-1 leading-relaxed">관심사 키워드를 AI가 문맥적으로 파악해 가장 가까운 자격증을 찾습니다.</p>
-                            </div>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                            {AI_STATS.map((stat) => {
+                                const Icon = stat.icon;
+                                const colorMap = {
+                                    blue: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
+                                    green: 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400',
+                                    purple: 'bg-purple-500/10 border-purple-500/20 text-purple-400',
+                                    indigo: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400',
+                                } as const;
+                                return (
+                                    <div key={stat.label} className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 space-y-3">
+                                        <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${colorMap[stat.color]}`}>
+                                            <Icon className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">{stat.label}</p>
+                                            <p className="text-2xl font-black text-white mt-0.5">
+                                                {stat.value}
+                                                {stat.unit && <span className="text-sm font-semibold text-slate-500 ml-1">{stat.unit}</span>}
+                                            </p>
+                                            <p className="text-[11px] text-slate-600 mt-1">{stat.desc}</p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
-                        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex gap-4 items-start">
-                            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 shrink-0 font-bold border border-indigo-500/20 text-sm">3</div>
-                            <div>
-                                <h4 className="font-bold text-slate-200">맞춤형 우선순위</h4>
-                                <p className="text-sm text-slate-500 mt-1 leading-relaxed">전공 연관성과 관심도를 조합해 가장 유리한 자격증 순서로 보여줍니다.</p>
+
+                        {/* 정합성 점수 구성 바 */}
+                        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
+                            <div className="flex items-center justify-between">
+                                <p className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                                    <GitMerge className="w-4 h-4 text-purple-400" />
+                                    정합성 점수 구성 (Hybrid Score)
+                                </p>
+                                <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20 text-[10px]">
+                                    하이브리드 알고리즘
+                                </Badge>
                             </div>
+                            <div className="space-y-3">
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="text-blue-400 font-semibold flex items-center gap-1.5">
+                                            <div className="w-2.5 h-2.5 rounded-sm bg-blue-500" />
+                                            전공 연관성 (Major Score)
+                                        </span>
+                                        <span className="text-blue-400 font-bold">40%</span>
+                                    </div>
+                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                        <div className="h-full w-[40%] bg-gradient-to-r from-blue-600 to-blue-400 rounded-full" />
+                                    </div>
+                                    <p className="text-[11px] text-slate-600">전공 분야와 자격증 출제 범위 간 키워드 매칭 점수</p>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <div className="flex items-center justify-between text-xs">
+                                        <span className="text-purple-400 font-semibold flex items-center gap-1.5">
+                                            <div className="w-2.5 h-2.5 rounded-sm bg-purple-500" />
+                                            AI 시멘틱 유사도 (Semantic Score)
+                                        </span>
+                                        <span className="text-purple-400 font-bold">60%</span>
+                                    </div>
+                                    <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
+                                        <div className="h-full w-[60%] bg-gradient-to-r from-purple-600 to-indigo-400 rounded-full" />
+                                    </div>
+                                    <p className="text-[11px] text-slate-600">1,536차원 벡터 공간에서 관심사와 자격증 설명의 코사인 유사도</p>
+                                </div>
+                            </div>
+                            <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800">
+                                최종 정합성 = Major Score × 0.4 + Semantic Score × 0.6
+                            </p>
                         </div>
                     </div>
 
-                    {/* 지금 인기 자격증 미리보기 */}
+                    {/* ── 2. 전공별 AI 추천 미리보기 ── */}
                     <div className="space-y-5">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <Sparkles className="w-5 h-5 text-yellow-400" />
-                                <h3 className="text-lg font-bold text-white">지금 인기 있는 자격증</h3>
-                                <Badge className="bg-yellow-500/10 text-yellow-400 border-yellow-500/20 text-[10px]">실시간</Badge>
+                        <div className="flex items-center justify-between flex-wrap gap-3">
+                            <div className="flex items-center gap-2">
+                                <Sparkles className="w-4 h-4 text-yellow-400" />
+                                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">전공별 AI 추천 미리보기</h3>
                             </div>
-                            <p className="text-xs text-slate-500">전공과 목표를 입력하면 맞춤 추천으로 바뀝니다</p>
+                            <p className="text-xs text-slate-600">탭을 클릭하면 실제 AI가 분석합니다</p>
                         </div>
 
-                        {trendingCerts.length > 0 ? (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {trendingCerts.map((cert, idx) => (
-                                    <div
-                                        key={cert.qual_id}
-                                        onClick={() => navigate(`/certs/${cert.qual_id}`)}
-                                        className="group bg-slate-900/40 border border-slate-800 hover:border-blue-500/40 hover:bg-slate-900 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-blue-500/10 hover:shadow-lg"
-                                    >
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                <div className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
-                                                    {idx + 1}
+                        {/* 전공 탭 */}
+                        <div className="flex flex-wrap gap-2">
+                            {POPULAR_MAJORS.map((m) => (
+                                <button
+                                    key={m}
+                                    onClick={() => handlePreviewMajor(m)}
+                                    className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all ${
+                                        selectedPreviewMajor === m
+                                            ? 'bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-900/30'
+                                            : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-blue-500/40 hover:text-slate-200'
+                                    }`}
+                                >
+                                    {m}
+                                    {previewCache.has(m) && selectedPreviewMajor !== m && (
+                                        <span className="ml-1.5 w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* 미리보기 결과 */}
+                        {selectedPreviewMajor && (
+                            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                {previewLoading ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        {[0, 1, 2].map(i => (
+                                            <div key={i} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 space-y-3">
+                                                <div className="flex justify-between">
+                                                    <div className="w-8 h-8 rounded-lg bg-slate-800 animate-pulse" />
+                                                    <div className="h-5 w-20 bg-slate-800 rounded-full animate-pulse" />
                                                 </div>
-                                                {cert.main_field && (
-                                                    <span className="text-[10px] font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">
-                                                        {cert.main_field}
-                                                    </span>
-                                                )}
+                                                <div className="h-5 w-full bg-slate-800 rounded animate-pulse" />
+                                                <div className="h-5 w-3/4 bg-slate-800 rounded animate-pulse" />
+                                                <div className="h-12 bg-slate-950/50 rounded-xl animate-pulse" />
                                             </div>
-                                            <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" />
-                                        </div>
-                                        <p className="text-sm font-semibold text-white group-hover:text-blue-300 transition-colors line-clamp-2 leading-snug">
-                                            {cert.qual_name}
-                                        </p>
-                                        {cert.qual_type && (
-                                            <p className="text-[11px] text-slate-500 mt-2">{cert.qual_type}</p>
-                                        )}
+                                        ))}
                                     </div>
-                                ))}
+                                ) : (previewCache.get(selectedPreviewMajor) || []).length > 0 ? (
+                                    <>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                            {(previewCache.get(selectedPreviewMajor) || []).map((res: any, idx: number) => (
+                                                <div
+                                                    key={res.qual_id}
+                                                    onClick={() => navigate(`/certs/${res.qual_id}`)}
+                                                    className="group bg-slate-900/40 border border-slate-800 hover:border-blue-500/40 hover:bg-slate-900 rounded-2xl p-5 cursor-pointer transition-all space-y-3"
+                                                >
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
+                                                            {idx + 1}
+                                                        </div>
+                                                        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px]">
+                                                            정합성 {Math.round(res.hybrid_score * 100)}%
+                                                        </Badge>
+                                                    </div>
+                                                    <p className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors line-clamp-2 leading-snug">
+                                                        {res.qual_name}
+                                                    </p>
+                                                    {res.reason && (
+                                                        <p className="text-[11px] text-slate-500 leading-relaxed line-clamp-2 italic">
+                                                            {res.reason}
+                                                        </p>
+                                                    )}
+                                                    {/* 미니 스코어 바 */}
+                                                    <div className="space-y-1.5 pt-1">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-2 h-2 rounded-sm bg-blue-500 shrink-0" />
+                                                            <div className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                                                                <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${res.major_score * 10}%` }} />
+                                                            </div>
+                                                            <span className="text-[10px] text-slate-600 w-8 shrink-0">전공</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-2 h-2 rounded-sm bg-purple-500 shrink-0" />
+                                                            <div className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
+                                                                <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${res.semantic_similarity * 100}%` }} />
+                                                            </div>
+                                                            <span className="text-[10px] text-slate-600 w-8 shrink-0">AI</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div className="flex items-center gap-3 pt-1">
+                                            <Button
+                                                onClick={handleFillFromPreview}
+                                                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl text-sm h-10 px-5"
+                                            >
+                                                <GraduationCap className="w-4 h-4 mr-2" />
+                                                {selectedPreviewMajor} 전공으로 상세 분석하기
+                                            </Button>
+                                            <p className="text-xs text-slate-600">커리어 목표를 추가하면 더 정확해집니다</p>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <p className="text-sm text-slate-500 text-center py-8">미리보기 결과를 불러오지 못했습니다.</p>
+                                )}
                             </div>
-                        ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {[...Array(6)].map((_, i) => (
-                                    <div key={i} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 space-y-3">
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-7 h-7 rounded-lg bg-slate-800 animate-pulse" />
-                                            <div className="h-4 w-16 bg-slate-800 rounded-full animate-pulse" />
-                                        </div>
-                                        <div className="h-4 w-full bg-slate-800 rounded animate-pulse" />
-                                        <div className="h-4 w-3/4 bg-slate-800 rounded animate-pulse" />
-                                    </div>
-                                ))}
+                        )}
+
+                        {!selectedPreviewMajor && (
+                            <div className="flex items-center justify-center h-24 rounded-2xl border border-dashed border-slate-800 text-slate-600 text-sm">
+                                위 전공 탭을 클릭하면 AI가 실시간으로 추천 결과를 미리 보여드립니다
                             </div>
                         )}
                     </div>
