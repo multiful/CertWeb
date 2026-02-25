@@ -35,6 +35,19 @@ async def lifespan(app: FastAPI):
             "JOB_SECRET is not set. Set JOB_SECRET in .env for production. "
             "Admin API (X-Job-Secret) will reject requests until configured."
         )
+
+    # SMTP 설정 상태 체크 (Render 배포 시 환경변수 누락 조기 감지)
+    if settings.EMAIL_USER and settings.EMAIL_PASSWORD:
+        logger.info(
+            "SMTP configured: host=%s port=%d user=%s",
+            settings.SMTP_HOST, settings.SMTP_PORT, settings.EMAIL_USER,
+        )
+    else:
+        logger.warning(
+            "SMTP NOT configured (EMAIL_USER/EMAIL_PASSWORD missing). "
+            "Contact form emails will NOT be sent. "
+            "Add SMTP env vars in Render Dashboard > Environment."
+        )
     
     # # Load CSV Data
     # try:

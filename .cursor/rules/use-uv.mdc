@@ -12,6 +12,15 @@ I am using uv for Python environment management. Always use `uv run` to execute 
   - Example: `& "C:\Users\rlaeh\envs\fastapi\.venv\Scripts\uv.exe" run uvicorn main:app --reload`
   - Or activate the venv first: `& "C:\Users\rlaeh\envs\fastapi\.venv\Scripts\Activate.ps1"` then `uv run ...`
 
-현재 프로젝트 루트는 Z:\cert-app으로 설정되어 있음.
+## 프로젝트 경로
 
-한글 경로 문제를 피하기 위해 모든 파일 참조는 Z: 드라이브를 기준으로 할 것.
+| 항목 | 경로 |
+|------|------|
+| 워크스페이스 루트 | `Z:\CertWeb` |
+| 백엔드 루트 | `Z:\CertWeb\cert-app\backend` |
+| 프론트엔드 루트 | `Z:\CertWeb\cert-app\frontend\app` |
+| Git 저장소 | `C:/Users/rlaeh/OneDrive/바탕 화면/Projects/CertWeb` |
+
+- 한글 경로 문제를 피하기 위해 Shell 명령 실행 시 반드시 `Z:` 드라이브 기준 경로를 사용할 것.
+- PowerShell에서는 `&&` 대신 `;` 또는 별도 명령어로 실행할 것.
+- Shell 명령에서 `required_permissions: ["all"]`을 사용해야 git 명령이 정상 작동함.
