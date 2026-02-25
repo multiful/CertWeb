@@ -87,6 +87,7 @@ CREATE INDEX IF NOT EXISTS idx_qual_type ON qualification(qual_type);
 CREATE INDEX IF NOT EXISTS idx_qual_main_field ON qualification(main_field);
 CREATE INDEX IF NOT EXISTS idx_qual_ncs ON qualification(ncs_large);
 CREATE INDEX IF NOT EXISTS idx_qual_active ON qualification(is_active);
+CREATE INDEX IF NOT EXISTS idx_qual_managing_body ON qualification(managing_body);
 CREATE INDEX IF NOT EXISTS idx_stats_qual_id ON qualification_stats(qual_id);
 CREATE INDEX IF NOT EXISTS idx_stats_year ON qualification_stats(year);
 CREATE INDEX IF NOT EXISTS idx_major_map_major ON major_qualification_map(major);

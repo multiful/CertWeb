@@ -83,12 +83,10 @@ cert-app/
 │   │   ├── redis_sync_worker.py     # cert_updates 구독 동기화
 │   │   └── scheduler.py
 │   ├── scripts/
-│   │   └── data_profile_rag.py      # RAG/벡터·자격 데이터 프로파일링
+│   │   └── populate_certificates_vectors.py   # RAG용 certificates_vectors 채우기
 │   ├── main.py
 │   ├── init.sql                     # 스키마·샘플 데이터
 │   ├── vector_migration.sql         # pgvector·certificates_vectors
-│   ├── user_acquired_certs_migration.sql
-│   ├── update_private_qualification_issuers.sql
 │   ├── rename_production_automation_names.sql
 │   ├── update_medical_device_ra_stats.sql
 │   ├── requirements.txt

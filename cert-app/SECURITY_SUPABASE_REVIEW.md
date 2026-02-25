@@ -229,14 +229,12 @@
 
 RAG/벡터 관련 데이터 품질·규모를 확인하기 위한 프로파일링 스크립트와 검토 요약입니다.
 
-### 7.1 프로파일링 스크립트
+### 7.1 RAG 데이터
 
 | 항목 | 내용 |
 |------|------|
-| **위치** | `cert-app/backend/scripts/data_profile_rag.py` |
-| **실행** | `cert-app/backend`에서 `uv run python scripts/data_profile_rag.py` (DB 연결 필요) |
-| **대상** | `certificates_vectors`(행 수, content 길이 min/max/avg/median, embedding NULL 수), `qualification`(행 수, qual_name 길이, embedding NULL 수) |
-| **원칙** | 벡터화된 집계 쿼리만 사용(row-wise loop 없음), 스키마·이상치 요약 출력 |
+| **벡터 적재** | `scripts/populate_certificates_vectors.py`로 `certificates_vectors` 채우기 (qualification 기준). |
+| **대상 테이블** | `certificates_vectors`(qual_id, name, content, embedding, metadata), `qualification`(embedding 등). |
 
 ### 7.2 검토 요약 (스킬 체크리스트)
 

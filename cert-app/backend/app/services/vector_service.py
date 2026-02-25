@@ -48,34 +48,35 @@ class VectorService:
         match_threshold: Optional[float] = None,
     ) -> List[Dict]:
         """
-        벡터 유사도 검색 (코사인). RAG 컨텍스트 주입 시 관련성 낮은 청크 제거용 임계값 지원.
-        match_threshold 이상인 결과만 반환 (예: 0.5면 similarity >= 0.5).
+        벡터 유사도 검색 (코사인). match_threshold는 DB WHERE 절에서 적용해 불필요한 행 전송을 줄임.
         """
         query_embedding = get_embedding(query_text)
+        # 코사인 거리 <=> 0~2. similarity = 1 - distance. threshold 이상 => distance <= 1 - threshold
+        max_distance = (1.0 - match_threshold) if (match_threshold is not None and match_threshold > 0) else 1.0
+
         sql = text("""
             SELECT v.qual_id, v.name, v.content, v.metadata,
                    (1 - (v.embedding <=> :embedding)) as similarity
             FROM certificates_vectors v
+            WHERE (v.embedding <=> :embedding) <= :max_distance
             ORDER BY v.embedding <=> :embedding
             LIMIT :limit
         """)
         results = db.execute(sql, {
             "embedding": str(query_embedding),
-            "limit": limit
+            "max_distance": max_distance,
+            "limit": limit,
         }).fetchall()
-        out = [
+        return [
             {
                 "qual_id": r.qual_id,
                 "name": r.name,
                 "content": r.content,
                 "similarity": float(r.similarity),
-                "metadata": r.metadata
+                "metadata": r.metadata,
             }
             for r in results
         ]
-        if match_threshold is not None and match_threshold > 0:
-            out = [x for x in out if x["similarity"] >= match_threshold]
-        return out
 
 
 vector_service = VectorService()

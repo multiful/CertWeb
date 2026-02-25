@@ -93,10 +93,10 @@ export function CertListPage() {
             .map((f: any) => ({ ...f.qualification }));
 
           // For items where stats are still null (backend cache issue),
-          // fall back to fetching individual cert detail which is always reliable
+          // fall back to fetching individual cert detail (최대 10건만 호출해 속도 보호)
           const missingStats = certs.filter(
             c => c.latest_pass_rate === null || c.latest_pass_rate === undefined
-          );
+          ).slice(0, 10);
 
           if (missingStats.length > 0) {
             const detailResults = await Promise.allSettled(

@@ -113,6 +113,18 @@ pip install -r requirements.txt
 uvicorn main:app --reload
 ```
 
+**Cursor / VS Code에서 FastAPI(venv) 연결**
+- **Ctrl+Shift+P** → **"Python: Select Interpreter"** 입력 후 선택
+- 목록에서 `C:\Users\rlaeh\envs\fastapi\.venv\Scripts\python.exe` 선택 (또는 **Enter interpreter path**로 해당 경로 지정)
+- 연결 후 해당 환경에서 디버깅·테스트·자동완성이 동작합니다.
+
+**서버 실행 (Windows)**
+```powershell
+cd cert-app/backend
+.\run.ps1
+```
+- 기본 주소: **http://127.0.0.1:8000** · API: **http://127.0.0.1:8000/api/v1** · 헬스: **http://127.0.0.1:8000/health**
+
 ### Frontend Setup
 ```bash
 cd cert-app/frontend/app
@@ -162,10 +174,10 @@ OPENAI_API_KEY=sk-...
 
 | 경고 | 조치 |
 |------|------|
-| **Function Search Path Mutable** | `backend/fix_supabase_security_warnings.sql` 실행. `update_modified_column` 은 `vector_migration.sql` 재적용 시 `SET search_path = public` 적용됨. |
-| **Extension in Public** | (선택) `backend/move_vector_extension_to_schema.sql` 실행해 pgvector를 `extensions` 스키마로 이동. |
+| **Function Search Path Mutable** | 함수 정의 시 `SET search_path = public` 추가. `update_modified_column` 은 `vector_migration.sql` 참고. |
+| **Extension in Public** | (선택) pgvector를 `extensions` 스키마로 이동 (Supabase/PostgreSQL 문서 참고). |
 | **Leaked Password Protection Disabled** | **Authentication → Providers → Email** 에서 **Enable leaked password protection** 활성화 (유출 비밀번호 목록 대조). |
-| **RLS Disabled in Public** | **SQL Editor**에서 `backend/enable_rls_public.sql` 전체 실행. 참조 테이블은 읽기 전용, profiles/즐겨찾기/취득자격은 본인만 CRUD, certificates_vectors는 클라이언트 비노출. "Destructive operation" 경고는 RLS/정책 추가용이라 데이터 삭제 아님 → **Run this query** 선택하면 됨. |
+| **RLS Disabled in Public** | **SQL Editor**에서 public 테이블에 RLS 활성화 및 정책 추가 (참조 테이블 읽기 전용, profiles/즐겨찾기/취득자격 본인만 CRUD). |
 
 ### RAG 검색 품질 (certificates_vectors 채우기)
 자격증 DB 기준으로 RAG 벡터를 채우면 `/certs/search/rag` 검색 품질이 좋아집니다.  

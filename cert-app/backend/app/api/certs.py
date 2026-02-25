@@ -77,7 +77,21 @@ async def get_certs(
             return QualificationListResponse(**cached)
     except Exception as e:
         logger.warning(f"Cache read failed for cert list: {e}")
-    
+
+    # Count 캐시 키 (필터만, 페이지 제외) — 동일 필터의 다른 페이지 요청 시 count() 생략
+    count_cache_key = "certs:count:v5:" + redis_client.hash_query_params(
+        q=q, main_field=main_field, ncs_large=ncs_large,
+        qual_type=qual_type, managing_body=managing_body,
+        is_active=is_active, sort=sort, sort_desc=sort_desc
+    )
+    cached_total = None
+    try:
+        raw = redis_client.get(count_cache_key)
+        if raw is not None and isinstance(raw, int):
+            cached_total = raw
+    except Exception:
+        pass
+
     # Get from database
     items, total = qualification_crud.get_list(
         db,
@@ -90,7 +104,8 @@ async def get_certs(
         sort=sort,
         sort_desc=sort_desc,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        cached_total=cached_total,
     )
     
     # Build response with aggregated stats in BULK (O(1) instead of N queries)
@@ -137,6 +152,7 @@ async def get_certs(
     # Save the computed result to cache
     try:
         redis_client.set(cache_key, response.model_dump(), get_cache_ttl("list"))
+        redis_client.set(count_cache_key, total, get_cache_ttl("list"))
         logger.debug(f"Cached cert list for key: {cache_key}")
     except Exception as e:
         logger.warning(f"Failed to cache cert list: {e}")
@@ -458,22 +474,24 @@ async def get_trending_certs(
             )
         return TrendingQualificationListResponse(items=items, total=len(items))
 
-    from app.models import Qualification
     qual_ids = [int(qid) for qid, _ in trending_data]
-    quals = db.query(Qualification).filter(Qualification.qual_id.in_(qual_ids)).all()
-    qual_map = {q.qual_id: q for q in quals}
+    rows = db.execute(
+        text("SELECT qual_id, qual_name, qual_type, main_field FROM qualification WHERE qual_id = ANY(:ids)"),
+        {"ids": qual_ids},
+    ).fetchall()
+    qual_map = {r.qual_id: r for r in rows}
 
     items = []
     for qual_id_str, score in trending_data:
         qual_id = int(qual_id_str)
-        qual = qual_map.get(qual_id)
-        if qual:
+        r = qual_map.get(qual_id)
+        if r:
             items.append(
                 TrendingQualificationResponse(
-                    qual_id=qual.qual_id,
-                    qual_name=qual.qual_name,
-                    qual_type=qual.qual_type,
-                    main_field=qual.main_field,
+                    qual_id=r.qual_id,
+                    qual_name=r.qual_name,
+                    qual_type=r.qual_type,
+                    main_field=r.main_field,
                     score=score
                 )
             )
@@ -555,27 +573,33 @@ async def get_recent_viewed(
     except Exception:
         return []
     
-    # Get qualifications
-    from app.models import Qualification
-    quals = db.query(Qualification).filter(Qualification.qual_id.in_(int_ids)).all()
-    qual_map = {q.qual_id: q for q in quals}
-    
+    # Get qualifications (= ANY(:ids) 로 바인드 1개만 사용)
+    rows = db.execute(
+        text("""
+            SELECT qual_id, qual_name, qual_type, main_field, ncs_large, managing_body,
+                   grade_code, is_active, created_at, updated_at
+            FROM qualification WHERE qual_id = ANY(:ids)
+        """),
+        {"ids": int_ids},
+    ).fetchall()
+    qual_map = {r.qual_id: r for r in rows}
+
     for qid in int_ids:
         if qid in qual_map:
-            item = qual_map[qid]
-            stats = get_qualification_aggregated_stats(db, item.qual_id)
+            r = qual_map[qid]
+            stats = get_qualification_aggregated_stats(db, r.qual_id)
             response_items.append(
                 QualificationListItemResponse(
-                    qual_id=item.qual_id,
-                    qual_name=item.qual_name,
-                    qual_type=item.qual_type,
-                    main_field=item.main_field,
-                    ncs_large=item.ncs_large,
-                    managing_body=item.managing_body,
-                    grade_code=item.grade_code,
-                    is_active=item.is_active,
-                    created_at=item.created_at,
-                    updated_at=item.updated_at,
+                    qual_id=r.qual_id,
+                    qual_name=r.qual_name,
+                    qual_type=r.qual_type,
+                    main_field=r.main_field,
+                    ncs_large=r.ncs_large,
+                    managing_body=r.managing_body,
+                    grade_code=r.grade_code,
+                    is_active=r.is_active,
+                    created_at=r.created_at,
+                    updated_at=r.updated_at,
                     **stats
                 )
             )

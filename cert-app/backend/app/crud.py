@@ -1,8 +1,9 @@
 
 """CRUD operations for database models."""
+from types import SimpleNamespace
 from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, desc, asc, or_, and_
+from sqlalchemy import func, desc, asc, or_, and_, text
 
 from app.models import Qualification, QualificationStats, MajorQualificationMap, UserFavorite, UserAcquiredCert, Job, Major
 from app.schemas import (
@@ -50,13 +51,10 @@ class QualificationCRUD:
         sort: str = "name",
         sort_desc: bool = True,
         page: int = 1,
-        page_size: int = 20
+        page_size: int = 20,
+        cached_total: Optional[int] = None,
     ) -> tuple[List[Qualification], int]:
-        """Get paginated list of qualifications with filters."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     return data_loader.get_qualifications_list(q, main_field, ncs_large, qual_type, managing_body, is_active, sort, page, page_size)
-        
+        """Get paginated list of qualifications with filters. cached_total가 있으면 count() 생략."""
         query = db.query(Qualification)
         
         # Apply filters
@@ -83,8 +81,10 @@ class QualificationCRUD:
         if is_active is not None:
             query = query.filter(Qualification.is_active == is_active)
         
-        # Get total count
-        total = query.count()
+        if cached_total is not None:
+            total = cached_total
+        else:
+            total = query.count()
         
         # Apply sorting
         if sort == "name":
@@ -111,16 +111,22 @@ class QualificationCRUD:
     
     @staticmethod
     def get_filter_options(db: Session) -> dict:
-        """Get available filter options."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     return data_loader.get_filter_options()
-            
+        """Get available filter options. 단일 쿼리로 4개 컬럼 값 수집 후 Python에서 distinct (라운드트립 1회)."""
+        rows = db.query(
+            Qualification.main_field,
+            Qualification.ncs_large,
+            Qualification.qual_type,
+            Qualification.managing_body,
+        ).filter(Qualification.is_active == True).all()
+        main_fields = sorted({r.main_field for r in rows if r.main_field})
+        ncs_large = sorted({r.ncs_large for r in rows if r.ncs_large})
+        qual_types = sorted({r.qual_type for r in rows if r.qual_type})
+        managing_bodies = sorted({r.managing_body for r in rows if r.managing_body})
         return {
-            "main_fields": [r[0] for r in db.query(Qualification.main_field).distinct().all() if r[0]],
-            "ncs_large": [r[0] for r in db.query(Qualification.ncs_large).distinct().all() if r[0]],
-            "qual_types": [r[0] for r in db.query(Qualification.qual_type).distinct().all() if r[0]],
-            "managing_bodies": [r[0] for r in db.query(Qualification.managing_body).distinct().all() if r[0]],
+            "main_fields": main_fields,
+            "ncs_large": ncs_large,
+            "qual_types": qual_types,
+            "managing_bodies": managing_bodies,
         }
     
     @staticmethod
@@ -614,42 +620,52 @@ def get_qualification_aggregated_stats(
 
 
 def get_qualification_aggregated_stats_bulk(db: Session, qual_ids: List[int]) -> dict:
-    """Get aggregated stats for multiple qualifications in bulk (fixes N+1)."""
+    """Get aggregated stats for multiple qualifications in bulk. = ANY(:ids)로 바인드 1개만 사용해 로그 폭주 방지."""
     if not qual_ids:
         return {}
 
-    # 1. Get raw aggregated stats for all IDs
-    raw_stats_list = db.query(
-        QualificationStats.qual_id,
-        func.avg(QualificationStats.pass_rate).label("avg_pass_rate"),
-        func.avg(QualificationStats.difficulty_score).label("avg_diff"),
-        func.sum(QualificationStats.candidate_cnt).label("total_cands"),
-        func.count(QualificationStats.stat_id).label("num_records")
-    ).filter(QualificationStats.qual_id.in_(qual_ids)).group_by(QualificationStats.qual_id).all()
+    stats_map = {}
+    latest_pass_rate_map = {}
+    qual_metadata = {}
 
-    # Create a lookup map
-    stats_map = {s.qual_id: s for s in raw_stats_list}
-
-    # 2. Get latest pass rates for all IDs
-    # Highly efficient subquery to find the latest stat entry per qual_id
-    latest_sub = db.query(
-        QualificationStats.qual_id,
-        func.max(QualificationStats.year * 10 + QualificationStats.exam_round).label("latest_key")
-    ).filter(QualificationStats.qual_id.in_(qual_ids)).group_by(QualificationStats.qual_id).subquery()
-
-    latest_stats = db.query(QualificationStats).join(
-        latest_sub,
-        and_(
-            QualificationStats.qual_id == latest_sub.c.qual_id,
-            (QualificationStats.year * 10 + QualificationStats.exam_round) == latest_sub.c.latest_key
+    # 1. Raw aggregated stats (바인드 1개: ids)
+    rows1 = db.execute(text("""
+        SELECT qual_id,
+               AVG(pass_rate) AS avg_pass_rate,
+               AVG(difficulty_score) AS avg_diff,
+               COALESCE(SUM(candidate_cnt), 0) AS total_cands,
+               COUNT(stat_id) AS num_records
+        FROM qualification_stats
+        WHERE qual_id = ANY(:ids)
+        GROUP BY qual_id
+    """), {"ids": qual_ids}).fetchall()
+    for r in rows1:
+        stats_map[r.qual_id] = SimpleNamespace(
+            qual_id=r.qual_id,
+            avg_pass_rate=float(r.avg_pass_rate) if r.avg_pass_rate is not None else None,
+            avg_diff=float(r.avg_diff) if r.avg_diff is not None else None,
+            total_cands=r.total_cands or 0,
+            num_records=r.num_records or 0,
         )
-    ).all()
 
-    latest_pass_rate_map = {s.qual_id: s.pass_rate for s in latest_stats}
+    # 2. Latest pass rate per qual_id (DISTINCT ON)
+    rows2 = db.execute(text("""
+        SELECT DISTINCT ON (qual_id) qual_id, pass_rate
+        FROM qualification_stats
+        WHERE qual_id = ANY(:ids)
+        ORDER BY qual_id, year DESC, exam_round DESC
+    """), {"ids": qual_ids}).fetchall()
+    for r in rows2:
+        latest_pass_rate_map[r.qual_id] = float(r.pass_rate) if r.pass_rate is not None else None
 
-    # 3. Get metadata for level weighting
-    quals = db.query(Qualification).filter(Qualification.qual_id.in_(qual_ids)).all()
-    qual_metadata = {q.qual_id: q for q in quals}
+    # 3. Qualification metadata for level weighting
+    rows3 = db.execute(text("""
+        SELECT qual_id, qual_type, grade_code
+        FROM qualification
+        WHERE qual_id = ANY(:ids)
+    """), {"ids": qual_ids}).fetchall()
+    for r in rows3:
+        qual_metadata[r.qual_id] = SimpleNamespace(qual_type=r.qual_type, grade_code=r.grade_code)
 
     # 4. Process all results
     results = {}
