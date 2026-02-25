@@ -51,6 +51,7 @@ async def get_certs(
     qual_type: Optional[str] = Query(None, description="Filter by qualification type"),
     managing_body: Optional[str] = Query(None, description="Filter by managing body"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    has_pass_rate: Optional[bool] = Query(None, description="Filter: true=합격률 있는 자격증만, false=합격률 없는 자격증만"),
     sort: str = Query("name", description="Sort by: name, pass_rate, difficulty, recent"),
     sort_desc: bool = Query(True, description="Sort direction: true for descending, false for ascending"),
     page: int = Query(1, ge=1, description="Page number"),
@@ -59,13 +60,14 @@ async def get_certs(
     _: None = Depends(check_rate_limit)
 ):
     """Get certification list with filters and pagination."""
-    # Build cache key (Bumped to v6: 난이도 로직 재설계 + 마이그레이션)
+    # Build cache key (v7: has_pass_rate 파라미터 추가)
     cache_key = redis_client.make_cache_key(
-        "certs:list:v6",
+        "certs:list:v7",
         hash=redis_client.hash_query_params(
             q=q, main_field=main_field, ncs_large=ncs_large,
             qual_type=qual_type, managing_body=managing_body,
-            is_active=is_active, sort=sort, sort_desc=sort_desc, page=page, page_size=page_size
+            is_active=is_active, has_pass_rate=has_pass_rate,
+            sort=sort, sort_desc=sort_desc, page=page, page_size=page_size
         )
     )
     
@@ -79,10 +81,11 @@ async def get_certs(
         logger.warning(f"Cache read failed for cert list: {e}")
 
     # Count 캐시 키 (필터만, 페이지 제외) — 동일 필터의 다른 페이지 요청 시 count() 생략
-    count_cache_key = "certs:count:v6:" + redis_client.hash_query_params(
+    count_cache_key = "certs:count:v7:" + redis_client.hash_query_params(
         q=q, main_field=main_field, ncs_large=ncs_large,
         qual_type=qual_type, managing_body=managing_body,
-        is_active=is_active, sort=sort, sort_desc=sort_desc
+        is_active=is_active, has_pass_rate=has_pass_rate,
+        sort=sort, sort_desc=sort_desc
     )
     cached_total = None
     try:
@@ -101,6 +104,7 @@ async def get_certs(
         qual_type=qual_type,
         managing_body=managing_body,
         is_active=is_active,
+        has_pass_rate=has_pass_rate,
         sort=sort,
         sort_desc=sort_desc,
         page=page,

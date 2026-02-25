@@ -242,9 +242,9 @@ export function MyPage() {
             });
             toast.success('프로필이 업데이트되었습니다.');
             setIsSettingsOpen(false);
-            await supabase.auth.refreshSession();
+            // 로컬 상태만 즉시 갱신 (refreshSession 제거 - onAuthStateChange가 useEffect를 재트리거해
+            // loadData가 이중 호출되어 favorites/acquired_certs가 깜빡이는 레이스컨디션 방지)
             setProfile((p: any) => (p ? { ...p, nickname, detail_major: userMajor, grade_year: gradeYear ?? 0 } : p));
-            await loadData();
         } catch (err: any) {
             const msg = err?.message || '프로필 업데이트에 실패했습니다.';
             if (msg.includes('중복')) setNicknameError('중복입니다.');

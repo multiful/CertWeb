@@ -220,9 +220,7 @@ def get_optional_user(
         if not uuid_sub:
             return None
             
-        profile = db.query(Profile).filter(Profile.id == uuid_sub).first()
-        if profile and profile.userid:
-            return profile.userid
+        # UUID만 반환 (userid는 변경 가능하므로 키로 사용 불가)
         return uuid_sub
     except Exception:
         return None
@@ -233,8 +231,10 @@ def get_current_user(
 ) -> str:
     """
     Get current user ID from JWT token (required).
-    반환값: profile.userid가 있으면 userid(문자열), 없으면 uuid_sub.
-    favorites 등에서 user_id로 사용되므로 일관되게 동일 사용자에 대해 같은 값이 반환됨.
+    반환값: 항상 Supabase auth UUID (sub) 를 반환한다.
+    - profile.userid(사용자 지정 문자 ID)는 변경 가능하므로 user_id 키로 사용하면
+      userid 변경 시 favorites/acquired_certs가 유실되는 버그가 발생한다.
+    - UUID는 계정 삭제 전까지 절대 변경되지 않으므로 안전한 FK 키다.
     """
     if not credentials:
         raise HTTPException(
@@ -255,32 +255,26 @@ def get_current_user(
         # Ensure profile exists (Social Login Support)
         profile = db.query(Profile).filter(Profile.id == uuid_sub).first()
         if not profile:
-            # Create a shell profile from JWT data
             email = payload.get("email")
-            # For social logins, we might have full_name or name in metadata
             meta = payload.get("user_metadata", {})
             name = meta.get("full_name") or meta.get("name")
-            
             try:
                 profile = Profile(
                     id=uuid_sub,
                     email=email,
                     name=name,
                     nickname=name or email.split("@")[0] if email else "New User",
-                    userid=None # Let them set it later
+                    userid=None
                 )
                 db.add(profile)
                 db.commit()
-                db.refresh(profile)
                 logger.info(f"Auto-created profile for social user: {uuid_sub}")
             except Exception as e:
                 db.rollback()
                 logger.warning(f"Failed to auto-create profile: {e}")
         
-        if profile and profile.userid:
-            return profile.userid
-            
-        return uuid_sub # Fallback to UUID if profile.userid is not yet set
+        # 항상 UUID 반환 — userid는 변경 가능하므로 user_id 키로 사용 불가
+        return uuid_sub
     except HTTPException:
         raise
     except Exception as e:

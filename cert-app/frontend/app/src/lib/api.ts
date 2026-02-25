@@ -103,6 +103,7 @@ export async function getCertifications(
     if (params.qual_type) query.append('qual_type', params.qual_type);
     if (params.managing_body) query.append('managing_body', params.managing_body);
     if (params.is_active !== undefined) query.append('is_active', String(params.is_active));
+    if (params.has_pass_rate !== undefined) query.append('has_pass_rate', String(params.has_pass_rate));
     if (params.sort) query.append('sort', params.sort);
     if (params.sort_desc !== undefined) query.append('sort_desc', String(params.sort_desc));
     if (params.page) query.append('page', params.page.toString());

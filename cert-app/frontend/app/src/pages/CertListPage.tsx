@@ -13,7 +13,8 @@ import {
   RefreshCw,
   Bookmark,
   Building2,
-  FileText
+  FileText,
+  BarChart2
 } from 'lucide-react';
 import { getFavorites, addFavorite, removeFavorite, getTrendingCerts, getCertificationDetail } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -451,7 +452,7 @@ export function CertListPage() {
               onClick={() => {
                 setInputValue('');
                 setSearchType('name');
-                setParams({ page: 1, page_size: 20, sort: 'name' });
+                setParams({ page: 1, page_size: 20, sort: 'name', has_pass_rate: undefined });
               }}
               className="h-11 px-4 border-slate-800 text-slate-400 hover:bg-slate-800 rounded-xl"
             >
@@ -527,6 +528,24 @@ export function CertListPage() {
             <Bookmark className={`w-3 h-3 mr-1 ${isFavoritesOnly ? 'fill-white' : ''}`} />
             관심 자격증만 보기
           </Badge>
+
+          {/* 합격률 필터 */}
+          <label
+            className={`cursor-pointer flex items-center gap-2 px-3 py-1 rounded-full text-xs border transition-all select-none ${
+              params.has_pass_rate === true
+                ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-400'
+                : 'border-slate-700 text-slate-500 hover:border-slate-600 hover:text-slate-300'
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="hidden"
+              checked={params.has_pass_rate === true}
+              onChange={(e) => updateParam('has_pass_rate', e.target.checked ? true : undefined)}
+            />
+            <BarChart2 className="w-3 h-3" />
+            합격률 없는 자격증 제외
+          </label>
         </div>
       </div>
 

@@ -285,7 +285,7 @@ async def get_popular_majors(
     _: None = Depends(check_rate_limit),
 ):
     """사용자들이 설정한 전공(detail_major)을 카운팅해 인기 전공 목록 반환 (정규화 없이 DB 값 그대로)."""
-    cache_key = f"recs:popular_majors:v3:{limit}"
+    cache_key = f"recs:popular_majors:v4:{limit}"
     try:
         cached = redis_client.get(cache_key)
         if cached and isinstance(cached, list):

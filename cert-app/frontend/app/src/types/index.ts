@@ -135,6 +135,7 @@ export interface CertFilterParams {
   qual_type?: string;
   managing_body?: string;
   is_active?: boolean;
+  has_pass_rate?: boolean;
   sort?: SortOption;
   sort_desc?: boolean;
   page?: number;

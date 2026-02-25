@@ -48,6 +48,7 @@ class QualificationCRUD:
         qual_type: Optional[str] = None,
         managing_body: Optional[str] = None,
         is_active: Optional[bool] = None,
+        has_pass_rate: Optional[bool] = None,
         sort: str = "name",
         sort_desc: bool = True,
         page: int = 1,
@@ -80,6 +81,25 @@ class QualificationCRUD:
         
         if is_active is not None:
             query = query.filter(Qualification.is_active == is_active)
+
+        if has_pass_rate is True:
+            # 합격률 데이터가 존재하는 자격증만 (pass_rate IS NOT NULL인 stats 레코드가 있는 것)
+            query = query.filter(
+                Qualification.qual_id.in_(
+                    db.query(QualificationStats.qual_id)
+                    .filter(QualificationStats.pass_rate.isnot(None))
+                    .distinct()
+                )
+            )
+        elif has_pass_rate is False:
+            # 합격률 데이터가 없는 자격증만
+            query = query.filter(
+                ~Qualification.qual_id.in_(
+                    db.query(QualificationStats.qual_id)
+                    .filter(QualificationStats.pass_rate.isnot(None))
+                    .distinct()
+                )
+            )
         
         if cached_total is not None:
             total = cached_total
