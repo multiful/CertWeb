@@ -45,6 +45,7 @@ export function useCerts(params: CertFilterParams = {}): UseCertsReturn {
     params.qual_type,
     params.managing_body,
     params.is_active,
+    params.has_pass_rate,
     params.sort,
     params.sort_desc,
     params.page,

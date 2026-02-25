@@ -34,7 +34,7 @@ export function PrivacyPolicyPage() {
                             <li>회원 가입 및 관리: 회원 가입 의사 확인, 서비스 제공에 따른 본인 식별·인증, 회원자격 유지·관리, 서비스 부정 이용 방지</li>
                             <li>서비스 제공: 자격증 맞춤 추천, 직무 매칭 분석, 관심 자격증 관리</li>
                             <li>마케팅 및 광고: 신규 서비스 개발 및 맞춤 서비스 제공, 통계적 특성에 따른 서비스 제공 및 광고 게재</li>
-                        </ul> section
+                        </ul>
                     </section>
 
                     <section className="space-y-4">
