@@ -230,6 +230,7 @@ class HybridRecommendationResponse(BaseModel):
     major: str
     interest: Optional[str] = None
     results: List[HybridRecommendationItem]
+    guest_limited: bool = False
 
 
 # ============== List Response Schemas ==============

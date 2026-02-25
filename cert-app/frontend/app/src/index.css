@@ -78,6 +78,13 @@
     /* Default is 16px. 15.36px is 96% scale. */
   }
 
+  /* 데스크탑에서 67% 뷰 적용 — 1024px 이상에서만 작동 (모바일/태블릿 제외) */
+  @media (min-width: 1024px) {
+    html {
+      zoom: 0.67;
+    }
+  }
+
   body {
     font-family: var(--font-sans);
     @apply bg-background text-foreground antialiased;

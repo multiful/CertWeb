@@ -7,4 +7,4 @@ Disallow: /admin/
 Disallow: /me/
 Disallow: /auth/
 
-Sitemap: https://certfinder.co.kr/sitemap.xml
+Sitemap: https://cert-web-sand.vercel.app/sitemap.xml

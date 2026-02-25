@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { Award, Search, ThumbsUp, Menu, X, Home, BrainCircuit } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Award, Search, ThumbsUp, Menu, X, Home, BrainCircuit, Cookie } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Link, useRouter } from '@/lib/router';
 import { UserMenu } from './UserMenu';
@@ -22,7 +22,23 @@ import { CertLogo } from '../common/CertLogo';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [cookieConsent, setCookieConsent] = useState<boolean | null>(null);
   const { route } = useRouter();
+
+  useEffect(() => {
+    const stored = localStorage.getItem('cookie_consent');
+    setCookieConsent(stored === 'accepted' ? true : stored === 'declined' ? false : null);
+  }, []);
+
+  const acceptCookies = () => {
+    localStorage.setItem('cookie_consent', 'accepted');
+    setCookieConsent(true);
+  };
+
+  const declineCookies = () => {
+    localStorage.setItem('cookie_consent', 'declined');
+    setCookieConsent(false);
+  };
 
   const currentRoutePath = useMemo(() => {
     if (route === 'home') return '/';
@@ -105,6 +121,45 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <main className="container mx-auto px-4 py-8">
         {children}
       </main>
+
+      {/* Cookie Consent Banner */}
+      {cookieConsent === null && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 p-4 pointer-events-none">
+          <div className="max-w-2xl mx-auto bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl p-5 shadow-2xl pointer-events-auto animate-in slide-in-from-bottom-4 duration-500">
+            <div className="flex items-start gap-4">
+              <div className="p-2 bg-blue-500/10 rounded-xl border border-blue-500/20 shrink-0 mt-0.5">
+                <Cookie className="w-5 h-5 text-blue-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-slate-300 leading-relaxed">
+                  CertFinder는 서비스 개선 및 맞춤형 광고 제공을 위해 쿠키를 사용합니다.
+                  자세한 내용은{' '}
+                  <Link to="/privacy" className="text-blue-400 underline hover:text-blue-300">
+                    개인정보 처리방침
+                  </Link>을 참고하세요.
+                </p>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={declineCookies}
+                  className="text-slate-500 hover:text-slate-300 text-xs px-3"
+                >
+                  거부
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={acceptCookies}
+                  className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 rounded-xl"
+                >
+                  동의
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-slate-800 mt-auto bg-slate-950/50">

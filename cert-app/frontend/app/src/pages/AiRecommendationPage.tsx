@@ -8,7 +8,9 @@ import {
     BrainCircuit,
     MessageSquare,
     ChevronRight,
-    Info
+    Info,
+    Lock,
+    LogIn,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,10 +54,6 @@ export function AiRecommendationPage() {
     const handleRecommend = async () => {
         if (!major) {
             toast.error('전공을 선택하거나 입력해주세요.');
-            return;
-        }
-        if (!token) {
-            toast.error('AI 추천은 로그인 후 이용할 수 있습니다.');
             return;
         }
 
@@ -191,6 +189,11 @@ export function AiRecommendationPage() {
                             </h2>
                             <p className="text-slate-400">
                                 {results.major} 전공과 {results.interest ? `"${results.interest}"` : "시스템 데이터"}를 결합한 추천입니다.
+                                {results.guest_limited && (
+                                    <span className="ml-2 text-amber-400 font-medium text-xs">
+                                        (비로그인 미리보기 — 상위 3개만 표시)
+                                    </span>
+                                )}
                             </p>
                         </div>
                     </div>
@@ -258,6 +261,56 @@ export function AiRecommendationPage() {
                             </Card>
                         ))}
                     </div>
+
+                    {/* 비로그인 잠금 UI */}
+                    {results.guest_limited && (
+                        <div className="relative">
+                            {/* 블러 처리된 더미 카드들 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pointer-events-none select-none blur-sm opacity-40">
+                                {[4, 5, 6, 7].map(i => (
+                                    <Card key={i} className="bg-slate-900/40 border-slate-800 rounded-2xl overflow-hidden">
+                                        <div className="h-2 bg-gradient-to-r from-blue-500 to-purple-600 opacity-30" />
+                                        <CardHeader className="pb-2">
+                                            <div className="flex justify-between items-start">
+                                                <div className="w-10 h-10 rounded-lg bg-slate-950 flex items-center justify-center text-blue-400 font-bold border border-slate-800">{i}</div>
+                                                <div className="h-6 w-20 bg-slate-800 rounded-full" />
+                                            </div>
+                                            <div className="h-6 w-3/4 bg-slate-800 rounded-lg mt-4" />
+                                        </CardHeader>
+                                        <CardContent className="space-y-3">
+                                            <div className="h-16 bg-slate-950/50 rounded-xl" />
+                                            <div className="h-4 w-full bg-slate-800 rounded" />
+                                            <div className="h-4 w-4/5 bg-slate-800 rounded" />
+                                        </CardContent>
+                                    </Card>
+                                ))}
+                            </div>
+
+                            {/* 잠금 오버레이 */}
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <div className="bg-slate-950/90 backdrop-blur-md border border-slate-700 rounded-3xl p-8 text-center space-y-5 shadow-2xl max-w-sm mx-auto">
+                                    <div className="w-14 h-14 rounded-2xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center mx-auto">
+                                        <Lock className="w-7 h-7 text-blue-400" />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <h3 className="text-lg font-bold text-white">더 많은 자격증을 확인하려면</h3>
+                                        <p className="text-slate-400 text-sm leading-relaxed">
+                                            로그인하면 맞춤형 추천 결과를 <br />
+                                            <span className="text-blue-400 font-semibold">최대 10개</span>까지 확인할 수 있습니다.<br />
+                                            학년·취득 자격증 기반 난이도 조정도 지원됩니다.
+                                        </p>
+                                    </div>
+                                    <Button
+                                        onClick={() => navigate('/auth/login')}
+                                        className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-xl"
+                                    >
+                                        <LogIn className="w-4 h-4 mr-2" />
+                                        로그인하고 전체 결과 보기
+                                    </Button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

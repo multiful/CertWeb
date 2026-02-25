@@ -27,6 +27,7 @@ export interface HybridRecommendationResponse {
     major: string;
     interest?: string;
     results: HybridRecommendationResult[];
+    guest_limited?: boolean;
 }
 
 export interface TrendingQualification {

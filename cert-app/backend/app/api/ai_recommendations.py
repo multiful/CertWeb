@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.api.deps import get_db_session, check_rate_limit, get_current_user
+from app.api.deps import get_db_session, check_rate_limit, get_current_user, get_optional_user
 from app.utils.ai import get_embedding_async
 from app.schemas import (
     SemanticSearchResponse,
@@ -62,6 +62,9 @@ async def semantic_search(
     ]
     return SemanticSearchResponse(query=query, results=formatted)
 
+GUEST_RESULT_LIMIT = 3  # 비로그인 사용자에게 보여줄 최대 결과 수
+
+
 @router.get("/hybrid-recommendation", response_model=HybridRecommendationResponse)
 async def hybrid_recommendation(
     major: str = Query(..., min_length=1, max_length=200, description="User's major"),
@@ -69,10 +72,11 @@ async def hybrid_recommendation(
     limit: int = Query(5, ge=1, le=20),
     db: Session = Depends(get_db_session),
     _: None = Depends(check_rate_limit),
-    user_id: str = Depends(get_current_user),
+    user_id: Optional[str] = Depends(get_optional_user),
 ) -> HybridRecommendationResponse:
     """
-    Combines Major-based mapping with Semantic search (Hybrid Search). 로그인 사용자 전용.
+    Combines Major-based mapping with Semantic search (Hybrid Search).
+    비로그인 사용자도 사용 가능하나 결과를 GUEST_RESULT_LIMIT개로 제한한다.
 
     2026-02: 사용자 맥락(학년, 프로필 전공, 북마크/취득 자격증 난이도)을 반영해
     추천 난이도를 자동 조절한다.
@@ -90,20 +94,22 @@ async def hybrid_recommendation(
         ) from e
 
     # --- 1) 사용자 맥락 수집 (학년, 프로필 전공, 북마크/취득 자격증 난이도) -----------------
-    profile_row = db.execute(
-        text("SELECT detail_major, grade_year FROM profiles WHERE id = :uid"),
-        {"uid": user_id},
-    ).mappings().first()
     grade_year: Optional[int] = None
-    if profile_row and profile_row.get("grade_year") is not None:
-        try:
-            grade_year = int(profile_row["grade_year"])
-        except Exception:
-            grade_year = None
+    fav_items, acq_items = [], []
 
-    # 즐겨찾기/취득 자격증의 평균 난이도 계산
-    fav_items, _ = favorite_crud.get_by_user(db, user_id, page=1, page_size=100)
-    acq_items, _ = acquired_cert_crud.get_by_user(db, user_id, page=1, page_size=200)
+    if user_id:
+        profile_row = db.execute(
+            text("SELECT detail_major, grade_year FROM profiles WHERE id = :uid"),
+            {"uid": user_id},
+        ).mappings().first()
+        if profile_row and profile_row.get("grade_year") is not None:
+            try:
+                grade_year = int(profile_row["grade_year"])
+            except Exception:
+                grade_year = None
+
+        fav_items, _ = favorite_crud.get_by_user(db, user_id, page=1, page_size=100)
+        acq_items, _ = acquired_cert_crud.get_by_user(db, user_id, page=1, page_size=200)
     context_qual_ids = list({*(f.qual_id for f in fav_items), *(a.qual_id for a in acq_items)})
     skill_level: Optional[float] = None  # 유저가 이미 소화한 난이도 지표(1~9.9)
     if context_qual_ids:
@@ -260,7 +266,9 @@ async def hybrid_recommendation(
             
         final_results.append(c)
 
-    sorted_results = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)[:limit]
+    # 비로그인 사용자는 GUEST_RESULT_LIMIT개로 제한
+    effective_limit = min(limit, GUEST_RESULT_LIMIT) if not user_id else limit
+    sorted_results = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)[:effective_limit]
     items = [
         HybridRecommendationItem(
             qual_id=c["qual_id"],
@@ -272,4 +280,10 @@ async def hybrid_recommendation(
         )
         for c in sorted_results
     ]
-    return HybridRecommendationResponse(mode="hybrid", major=major, interest=interest, results=items)
+    return HybridRecommendationResponse(
+        mode="hybrid",
+        major=major,
+        interest=interest,
+        results=items,
+        guest_limited=not bool(user_id),
+    )
