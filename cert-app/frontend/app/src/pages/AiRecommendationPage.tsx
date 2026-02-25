@@ -3,11 +3,11 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
     Sparkles,
     Tag,
-    Search,
     GraduationCap,
     BrainCircuit,
     MessageSquare,
     ChevronRight,
+    ChevronDown,
     Info,
     Lock,
     LogIn,
@@ -18,10 +18,10 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getHybridRecommendations, getAvailableMajors } from '@/lib/api';
+import { getHybridRecommendations, getAvailableMajors, getTrendingCerts } from '@/lib/api';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/hooks/useAuth';
-import type { HybridRecommendationResponse } from '@/types';
+import type { HybridRecommendationResponse, TrendingQualification } from '@/types';
 import { toast } from 'sonner';
 
 const sampleMajors = [
@@ -43,6 +43,11 @@ export function AiRecommendationPage() {
     const { token } = useAuth();
 
     const [availableMajors, setAvailableMajors] = useState<string[]>([]);
+    const [trendingCerts, setTrendingCerts] = useState<TrendingQualification[]>([]);
+
+    useEffect(() => {
+        getTrendingCerts(6).then(res => setTrendingCerts(res.items)).catch(() => {});
+    }, []);
 
     // 마운트 시 sessionStorage에서 이전 검색 상태 복원
     useEffect(() => {
@@ -100,6 +105,17 @@ export function AiRecommendationPage() {
         setInputValue('');
         setResults(null);
         sessionStorage.removeItem(AI_CACHE_KEY);
+    };
+
+    const [expandedReasons, setExpandedReasons] = useState<Set<number>>(new Set());
+
+    const toggleReason = (e: React.MouseEvent, qualId: number) => {
+        e.stopPropagation();
+        setExpandedReasons(prev => {
+            const next = new Set(prev);
+            next.has(qualId) ? next.delete(qualId) : next.add(qualId);
+            return next;
+        });
     };
 
     const navigateToCert = (qualId: number) => {
@@ -261,11 +277,30 @@ export function AiRecommendationPage() {
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    <div className="flex items-start gap-2 bg-slate-950/50 p-3 rounded-xl border border-slate-800">
+                                    <div
+                                        className="flex items-start gap-2 bg-slate-950/50 p-3 rounded-xl border border-slate-800 cursor-pointer hover:border-indigo-500/40 hover:bg-slate-950/80 transition-all"
+                                        onClick={(e) => toggleReason(e, res.qual_id)}
+                                        title="클릭하면 설명을 펼칩니다"
+                                    >
                                         <Info className="w-4 h-4 text-indigo-400 mt-0.5 flex-shrink-0" />
-                                        <p className="text-sm text-slate-400 leading-relaxed italic line-clamp-3">
-                                            {res.reason || "귀하의 전공 역량과 관심사를 고려하여 추천된 자격증입니다."}
-                                        </p>
+                                        <div className="flex-1 min-w-0">
+                                            <p className={`text-sm text-slate-400 leading-relaxed italic ${expandedReasons.has(res.qual_id) ? '' : 'line-clamp-3'}`}>
+                                                {res.reason || "귀하의 전공 역량과 관심사를 고려하여 추천된 자격증입니다."}
+                                            </p>
+                                            <span className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-indigo-400/70">
+                                                {expandedReasons.has(res.qual_id) ? (
+                                                    <>
+                                                        <ChevronDown className="w-3 h-3 rotate-180" />
+                                                        접기
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <ChevronDown className="w-3 h-3" />
+                                                        더보기
+                                                    </>
+                                                )}
+                                            </span>
+                                        </div>
                                     </div>
 
                                     <div className="flex items-center justify-between text-xs font-bold text-slate-500 pt-2">
@@ -355,81 +390,89 @@ export function AiRecommendationPage() {
                 </div>
             )}
 
-            {/* Help Section */}
+            {/* Help + Trending Preview Section */}
             {!results && !loading && (
-                <div className="grid md:grid-cols-2 gap-8 items-center pt-8 border-t border-slate-800/50">
-                    <div className="space-y-6">
-                        <h3 className="text-2xl font-bold text-white">추천 원리</h3>
-                        <ul className="space-y-6">
-                            <li className="flex gap-4 items-start">
-                                <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0 font-bold border border-blue-500/20">1</div>
-                                <div>
-                                    <h4 className="font-bold text-slate-200">전공 분야 분석</h4>
-                                    <p className="text-sm text-slate-500 mt-1">대학 전공별 이수 과목과 자격증의 핵심 기술을 매칭합니다.</p>
-                                </div>
-                            </li>
-                            <li className="flex gap-4 items-start">
-                                <div className="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0 font-bold border border-purple-500/20">2</div>
-                                <div>
-                                    <h4 className="font-bold text-slate-200">인공지능 시멘틱 검색</h4>
-                                    <p className="text-sm text-slate-500 mt-1">사용자가 적은 관심사 키워드를 AI가 문맥적으로 파악하여 가장 가까운 자격증을 찾습니다.</p>
-                                </div>
-                            </li>
-                            <li className="flex gap-4 items-start">
-                                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 shrink-0 font-bold border border-indigo-500/20">3</div>
-                                <div>
-                                    <h4 className="font-bold text-slate-200">맞춤형 우선순위</h4>
-                                    <p className="text-sm text-slate-500 mt-1">전공 연관성과 주관적 관심도를 조합하여 가장 유리한 자격증 순서대로 보여줍니다.</p>
-                                </div>
-                            </li>
-                        </ul>
-                    </div>
-                    <div>
-                        <div className="bg-slate-900/60 border border-slate-800 p-8 rounded-3xl relative overflow-hidden group">
-                            <div className="absolute inset-0 bg-blue-500/5 blur-3xl rounded-full group-hover:bg-blue-500/10 transition-colors" />
-
-                            <div className="relative space-y-6">
-                                <div className="flex items-center gap-4">
-                                    <div className="w-12 h-12 rounded-2xl bg-slate-800 flex items-center justify-center border border-slate-700">
-                                        <Search className="w-6 h-6 text-blue-400" />
-                                    </div>
-                                    <div className="space-y-2 flex-1">
-                                        <div className="h-3 w-3/4 bg-slate-800 rounded-full animate-pulse" />
-                                        <div className="h-3 w-1/2 bg-slate-800 rounded-full animate-pulse delay-75" />
-                                    </div>
-                                </div>
-
-                                <div className="flex justify-end pr-4">
-                                    <div className="bg-indigo-600/20 text-indigo-400 text-[10px] font-bold px-3 py-1 rounded-full border border-indigo-600/30">
-                                        Deep Analysis...
-                                    </div>
-                                </div>
-
-                                <div className="flex items-center gap-3 pt-4 border-t border-slate-800">
-                                    <div className="w-10 h-10 rounded-full bg-blue-900/30 border border-blue-500/30 flex items-center justify-center text-blue-400 animate-bounce">
-                                        <BrainCircuit className="w-5 h-5" />
-                                    </div>
-                                    <div className="flex-1 space-y-1.5">
-                                        <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
-                                            <div className="h-full w-2/3 bg-blue-500 animate-ping opacity-20" />
-                                        </div>
-                                        <div className="h-2 w-4/5 bg-slate-800 rounded-full" />
-                                    </div>
-                                </div>
-
-                                <div className="flex gap-2 pt-2">
-                                    <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20" />
-                                    <div className="w-8 h-8 rounded-lg bg-purple-500/10 border border-purple-500/20" />
-                                    <div className="w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500/20" />
-                                    <div className="w-12 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] text-slate-500">+1.2k</div>
-                                </div>
-
-                                <p className="text-slate-400 text-sm italic leading-relaxed pt-2">
-                                    &quot;AI가 수천 개의 자격증 문서와 직무 명세서를 <br />
-                                    실시간으로 분석하여 최적의 결과를 도출합니다.&quot;
-                                </p>
+                <div className="space-y-12 pt-8 border-t border-slate-800/50">
+                    {/* 추천 원리 */}
+                    <div className="grid md:grid-cols-3 gap-6">
+                        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex gap-4 items-start">
+                            <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 shrink-0 font-bold border border-blue-500/20 text-sm">1</div>
+                            <div>
+                                <h4 className="font-bold text-slate-200">전공 분야 분석</h4>
+                                <p className="text-sm text-slate-500 mt-1 leading-relaxed">대학 전공별 이수 과목과 자격증의 핵심 기술을 매칭합니다.</p>
                             </div>
                         </div>
+                        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex gap-4 items-start">
+                            <div className="w-9 h-9 rounded-xl bg-purple-500/10 flex items-center justify-center text-purple-400 shrink-0 font-bold border border-purple-500/20 text-sm">2</div>
+                            <div>
+                                <h4 className="font-bold text-slate-200">AI 시멘틱 검색</h4>
+                                <p className="text-sm text-slate-500 mt-1 leading-relaxed">관심사 키워드를 AI가 문맥적으로 파악해 가장 가까운 자격증을 찾습니다.</p>
+                            </div>
+                        </div>
+                        <div className="bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex gap-4 items-start">
+                            <div className="w-9 h-9 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400 shrink-0 font-bold border border-indigo-500/20 text-sm">3</div>
+                            <div>
+                                <h4 className="font-bold text-slate-200">맞춤형 우선순위</h4>
+                                <p className="text-sm text-slate-500 mt-1 leading-relaxed">전공 연관성과 관심도를 조합해 가장 유리한 자격증 순서로 보여줍니다.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 지금 인기 자격증 미리보기 */}
+                    <div className="space-y-5">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <Sparkles className="w-5 h-5 text-yellow-400" />
+                                <h3 className="text-lg font-bold text-white">지금 인기 있는 자격증</h3>
+                                <Badge className="bg-yellow-500/10 text-yellow-400 border-yellow-500/20 text-[10px]">실시간</Badge>
+                            </div>
+                            <p className="text-xs text-slate-500">전공과 목표를 입력하면 맞춤 추천으로 바뀝니다</p>
+                        </div>
+
+                        {trendingCerts.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {trendingCerts.map((cert, idx) => (
+                                    <div
+                                        key={cert.qual_id}
+                                        onClick={() => navigate(`/certs/${cert.qual_id}`)}
+                                        className="group bg-slate-900/40 border border-slate-800 hover:border-blue-500/40 hover:bg-slate-900 rounded-2xl p-5 cursor-pointer transition-all hover:shadow-blue-500/10 hover:shadow-lg"
+                                    >
+                                        <div className="flex items-center justify-between mb-3">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-7 h-7 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-center text-xs font-bold text-slate-400">
+                                                    {idx + 1}
+                                                </div>
+                                                {cert.main_field && (
+                                                    <span className="text-[10px] font-semibold text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">
+                                                        {cert.main_field}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" />
+                                        </div>
+                                        <p className="text-sm font-semibold text-white group-hover:text-blue-300 transition-colors line-clamp-2 leading-snug">
+                                            {cert.qual_name}
+                                        </p>
+                                        {cert.qual_type && (
+                                            <p className="text-[11px] text-slate-500 mt-2">{cert.qual_type}</p>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {[...Array(6)].map((_, i) => (
+                                    <div key={i} className="bg-slate-900/40 border border-slate-800 rounded-2xl p-5 space-y-3">
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-7 h-7 rounded-lg bg-slate-800 animate-pulse" />
+                                            <div className="h-4 w-16 bg-slate-800 rounded-full animate-pulse" />
+                                        </div>
+                                        <div className="h-4 w-full bg-slate-800 rounded animate-pulse" />
+                                        <div className="h-4 w-3/4 bg-slate-800 rounded animate-pulse" />
+                                    </div>
+                                ))}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

@@ -52,7 +52,7 @@ export function CertListPage() {
     managing_body: searchParams.get('managing_body') || undefined,
     sort: (searchParams.get('sort') as SortOption) || 'name',
     sort_desc: searchParams.get('sort_desc') !== 'false',
-    page: 1,
+    page: parseInt(searchParams.get('page') || '1', 10),
     page_size: searchParams.get('filter') === 'bookmarks' ? 100 : 20
   });
   const [isFavoritesOnly, setIsFavoritesOnly] = useState(searchParams.get('filter') === 'bookmarks');
@@ -74,6 +74,7 @@ export function CertListPage() {
     if (params.sort && params.sort !== 'name') urlParams.set('sort', params.sort);
     if (params.sort_desc === false) urlParams.set('sort_desc', 'false');
     if (isFavoritesOnly) urlParams.set('filter', 'bookmarks');
+    if (params.page && params.page > 1) urlParams.set('page', String(params.page));
     const newUrl = `/certs${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
     if (newUrl !== window.location.pathname + window.location.search) {
       window.history.replaceState(null, '', newUrl);
