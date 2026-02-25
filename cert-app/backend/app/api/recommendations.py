@@ -293,18 +293,25 @@ async def get_popular_majors(
     except Exception as e:
         logger.warning("Cache read failed for popular majors: %s", e)
 
-    rows = db.execute(
-        text("""
-            SELECT detail_major AS major, COUNT(*) AS cnt
-            FROM profiles
-            WHERE detail_major IS NOT NULL AND TRIM(detail_major) != ''
-            GROUP BY detail_major
-            ORDER BY cnt DESC
-            LIMIT :limit
-        """),
-        {"limit": limit},
-    ).mappings().fetchall()
-    majors = [r["major"] for r in (rows or []) if r and r.get("major")]
+    try:
+        rows = db.execute(
+            text("""
+                SELECT detail_major AS major, COUNT(*) AS cnt
+                FROM profiles
+                WHERE detail_major IS NOT NULL AND TRIM(detail_major) != ''
+                GROUP BY detail_major
+                ORDER BY cnt DESC
+                LIMIT :limit
+            """),
+            {"limit": limit},
+        ).mappings().fetchall()
+        majors = [str(r["major"]) for r in (rows or []) if r and r.get("major")]
+    except Exception as e:
+        logger.error("popular_majors DB query failed: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="인기 전공 조회 중 오류가 발생했습니다.",
+        ) from e
     try:
         redis_client.set(cache_key, majors, get_cache_ttl())
     except Exception:

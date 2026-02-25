@@ -119,22 +119,13 @@ app.add_middleware(
     allowed_hosts=["*"]
 )
 
-# 2. CORS (Must be near the top to handle OPTIONS effectively)
-_default_origins = [
-    "https://cert-web-sand.vercel.app",
-    "https://cert-web-multifuls-projects.vercel.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-_cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()] if settings.CORS_ORIGINS else _default_origins
+# 2. CORS
+# Bearer 토큰 기반 인증은 CORS allow_credentials 불필요.
+# allow_origins=["*"]로 Cloudflare/Vercel 프리뷰 URL 등 모든 환경에서 안정적으로 동작.
 app.add_middleware(
     CORSMiddleware,
-    # Vercel 프리뷰 배포 URL 전체 허용 (cert- 로 시작하는 모든 vercel.app 서브도메인)
-    allow_origin_regex=r"https://cert-web.*\.vercel\.app",
-    allow_origins=_cors_origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
@@ -162,9 +153,16 @@ async def add_process_time_header(request: Request, call_next):
 async def generic_exception_handler(request: Request, exc: Exception):
     """Handle generic exceptions."""
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    # ServerErrorMiddleware가 이 핸들러를 호출할 때 CORSMiddleware를 우회하므로
+    # 응답에 CORS 헤더를 직접 포함시켜야 한다.
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Internal server error"}
+        content={"detail": "Internal server error"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+            "Access-Control-Allow-Headers": "*",
+        },
     )
 
 
