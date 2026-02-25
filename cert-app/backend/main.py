@@ -74,7 +74,7 @@ async def lifespan(app: FastAPI):
             redis_client.flush_all()
             from app.services.fast_sync_service import FastSyncService
             from app.database import SessionLocal
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             db = SessionLocal()
             try:
                 await loop.run_in_executor(None, FastSyncService.sync_all_to_redis, db)
