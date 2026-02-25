@@ -145,34 +145,39 @@ async def hybrid_recommendation(
                 target_difficulty = 6.0
 
     # --- 2) 기존 Hybrid 후보 생성 로직 ----------------------------------------------
-    major_sql = text("""
-        SELECT q.qual_id, q.qual_name, q.qual_type, q.main_field, mq.score as mapping_score, mq.reason
-        FROM qualification q
-        JOIN major_qualification_map mq ON q.qual_id = mq.qual_id
-        WHERE mq.major = :major
-        ORDER BY mq.score DESC
-        LIMIT 50
-    """)
-    major_results = db.execute(major_sql, {"major": major}).fetchall()
-    global_semantic_sql = text("""
-        SELECT qual_id, qual_name,
-               1 - (embedding <=> :vec) as similarity
-        FROM qualification
-        WHERE embedding IS NOT NULL
-        ORDER BY embedding <=> :vec
-        LIMIT 100
-    """)
-    global_results = db.execute(global_semantic_sql, {"vec": str(interest_vector)}).fetchall()
+    try:
+        major_sql = text("""
+            SELECT q.qual_id, q.qual_name, q.qual_type, q.main_field, mq.score as mapping_score, mq.reason
+            FROM qualification q
+            JOIN major_qualification_map mq ON q.qual_id = mq.qual_id
+            WHERE mq.major = :major
+            ORDER BY mq.score DESC
+            LIMIT 50
+        """)
+        major_results = db.execute(major_sql, {"major": major}).fetchall()
+        global_semantic_sql = text("""
+            SELECT qual_id, qual_name,
+                   1 - (embedding <=> :vec) as similarity
+            FROM qualification
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> :vec
+            LIMIT 100
+        """)
+        global_results = db.execute(global_semantic_sql, {"vec": str(interest_vector)}).fetchall()
 
-    # Dynamic Major Relevance (Semantic match between Major Name and Qualification)
-    # This prevents the "0 or 90" problem by providing a continuous score
-    major_sim_sql = text("""
-        SELECT qual_id, 1 - (embedding <=> :vec) as major_sim
-        FROM qualification
-        WHERE embedding IS NOT NULL
-    """)
-    m_sims = db.execute(major_sim_sql, {"vec": str(major_vector)}).fetchall()
-    major_sim_lookup = {r.qual_id: float(r.major_sim) for r in m_sims}
+        major_sim_sql = text("""
+            SELECT qual_id, 1 - (embedding <=> :vec) as major_sim
+            FROM qualification
+            WHERE embedding IS NOT NULL
+        """)
+        m_sims = db.execute(major_sim_sql, {"vec": str(major_vector)}).fetchall()
+        major_sim_lookup = {r.qual_id: float(r.major_sim) for r in m_sims}
+    except Exception as e:
+        logger.exception("hybrid_recommendation DB query failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="추천 데이터 조회 중 오류가 발생했습니다.",
+        ) from e
 
     # 3) Combine Candidates
     candidate_map = {}

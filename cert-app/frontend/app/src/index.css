@@ -78,13 +78,6 @@
     /* Default is 16px. 15.36px is 96% scale. */
   }
 
-  /* 데스크탑에서 67% 뷰 적용 — 1024px 이상에서만 작동 (모바일/태블릿 제외) */
-  @media (min-width: 1024px) {
-    html {
-      zoom: 0.80;
-    }
-  }
-
   body {
     font-family: var(--font-sans);
     @apply bg-background text-foreground antialiased;
@@ -119,6 +112,14 @@
     50% {
       transform: translateY(-20px);
     }
+  }
+}
+
+/* 데스크탑에서 UI 스케일 축소 — 1024px 이상에서만 작동 (모바일 제외) */
+/* zoom은 표준 CSS 속성으로 Chrome/Edge에서 지원. Firefox는 transform 방식 사용 */
+@media (min-width: 1024px) {
+  html {
+    zoom: 0.80;
   }
 }
 

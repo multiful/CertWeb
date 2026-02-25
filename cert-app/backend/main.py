@@ -122,6 +122,7 @@ app.add_middleware(
 # 2. CORS (Must be near the top to handle OPTIONS effectively)
 _default_origins = [
     "https://cert-web-sand.vercel.app",
+    "https://cert-web-multifuls-projects.vercel.app",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
@@ -130,7 +131,8 @@ _default_origins = [
 _cors_origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()] if settings.CORS_ORIGINS else _default_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://cert-.*\.vercel\.app",
+    # Vercel 프리뷰 배포 URL 전체 허용 (cert- 로 시작하는 모든 vercel.app 서브도메인)
+    allow_origin_regex=r"https://cert-web.*\.vercel\.app",
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],

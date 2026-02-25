@@ -23,8 +23,19 @@ export function ContactPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        setLoading(true);
 
+        // 이메일 형식 검사 (프론트에서 사전 차단)
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(formData.email)) {
+            toast.error('올바른 이메일 주소를 입력해주세요. (예: example@gmail.com)');
+            return;
+        }
+        if (!formData.name.trim() || !formData.subject.trim() || !formData.message.trim()) {
+            toast.error('모든 필드를 입력해주세요.');
+            return;
+        }
+
+        setLoading(true);
         try {
             await sendContactEmail(formData);
             setIsSubmitted(true);
