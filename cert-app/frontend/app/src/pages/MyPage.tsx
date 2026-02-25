@@ -23,7 +23,6 @@ import {
 import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile, getAcquiredCerts, addAcquiredCert, removeAcquiredCert, getCertifications, getAcquiredCertsSummary } from '@/lib/api';
 import type { AcquiredCertItem, AcquiredCertSummary } from '@/lib/api';
 import type { QualificationListResponse } from '@/types';
-import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
 // Re-importing missing icons (added Activity, Target)
