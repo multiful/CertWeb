@@ -19,14 +19,17 @@ CREATE TABLE IF NOT EXISTS certificates_vectors (
 CREATE INDEX IF NOT EXISTS certificates_vectors_embedding_idx 
 ON certificates_vectors USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 
--- Trigger for updated_at
+-- Trigger for updated_at (search_path 고정으로 Function Search Path Mutable 경고 해소)
 CREATE OR REPLACE FUNCTION update_modified_column()
-RETURNS TRIGGER AS $$
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
 BEGIN
     NEW.updated_at = now();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
+$$;
 
 DROP TRIGGER IF EXISTS update_certificates_vectors_modtime ON certificates_vectors;
 CREATE TRIGGER update_certificates_vectors_modtime

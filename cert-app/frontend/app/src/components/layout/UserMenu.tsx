@@ -51,9 +51,13 @@ export function UserMenu() {
     const [findIdEmail, setFindIdEmail] = useState('');
     const [findIdCode, setFindIdCode] = useState('');
     const [foundUserid, setFoundUserid] = useState<string | null>(null);
-    // 비밀번호 찾기 모달
+    // 비밀번호 찾기 모달: 1=아이디+이메일 입력, 2=비밀번호 재설정
     const [forgotPwOpen, setForgotPwOpen] = useState(false);
+    const [forgotPwStep, setForgotPwStep] = useState(1);
+    const [forgotPwUserid, setForgotPwUserid] = useState('');
     const [forgotPwEmail, setForgotPwEmail] = useState('');
+    const [forgotPwNewPassword, setForgotPwNewPassword] = useState('');
+    const [forgotPwNewPasswordConfirm, setForgotPwNewPasswordConfirm] = useState('');
 
     const API_BASE = import.meta.env.VITE_API_BASE_URL ||
         (import.meta as any).env?.VITE_API_BASE_URL ||
@@ -203,27 +207,69 @@ export function UserMenu() {
         setForgotPwOpen(true);
     };
 
-    const handleForgotPasswordSubmit = async () => {
+    const handleForgotPasswordVerify = async () => {
+        if (!forgotPwUserid?.trim()) {
+            toast.error('아이디를 입력해 주세요.');
+            return;
+        }
         if (!forgotPwEmail?.trim()) {
             toast.error('이메일을 입력해 주세요.');
             return;
         }
         setLoading(true);
         try {
-            const res = await fetch(`${API_BASE}/auth/password-reset`, {
+            const res = await fetch(`${API_BASE}/auth/verify-userid-email`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: forgotPwEmail.trim() })
+                body: JSON.stringify({ userid: forgotPwUserid.trim(), email: forgotPwEmail.trim() })
+            });
+            const data = await res.json();
+            if (res.ok && data.verified) {
+                setForgotPwStep(2);
+            } else {
+                toast.error(data.detail || '아이디와 이메일이 일치하는 회원이 없습니다.');
+            }
+        } catch {
+            toast.error('확인 요청 중 오류가 발생했습니다.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleForgotPasswordReset = async () => {
+        if (!forgotPwNewPassword || forgotPwNewPassword.length < 6) {
+            toast.error('비밀번호는 6자 이상 입력해 주세요.');
+            return;
+        }
+        if (forgotPwNewPassword !== forgotPwNewPasswordConfirm) {
+            toast.error('비밀번호가 일치하지 않습니다.');
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await fetch(`${API_BASE}/auth/reset-password-direct`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    userid: forgotPwUserid.trim(),
+                    email: forgotPwEmail.trim(),
+                    new_password: forgotPwNewPassword
+                })
             });
             const data = await res.json();
             if (res.ok) {
-                toast.success(data.message || '비밀번호 재설정 메일이 발송되었습니다. 이메일 링크에서 비밀번호를 변경해 주세요.');
+                toast.success(data.message || '비밀번호가 변경되었습니다.');
                 setForgotPwOpen(false);
+                setForgotPwStep(1);
+                setForgotPwUserid('');
+                setForgotPwEmail('');
+                setForgotPwNewPassword('');
+                setForgotPwNewPasswordConfirm('');
             } else {
-                toast.error(data.detail || '요청 실패');
+                toast.error(data.detail || '비밀번호 변경에 실패했습니다.');
             }
         } catch {
-            toast.error('비밀번호 재설정 요청 중 오류가 발생했습니다.');
+            toast.error('비밀번호 재설정 중 오류가 발생했습니다.');
         } finally {
             setLoading(false);
         }
@@ -745,34 +791,93 @@ export function UserMenu() {
                 </DialogContent>
             </Dialog>
 
-            {/* 비밀번호 찾기: Supabase 재설정 메일 */}
-            <Dialog open={forgotPwOpen} onOpenChange={setForgotPwOpen}>
+            {/* 비밀번호 찾기: 아이디+이메일 확인 후 인증코드 없이 비밀번호 재설정 */}
+            <Dialog open={forgotPwOpen} onOpenChange={(open) => {
+                setForgotPwOpen(open);
+                if (!open) {
+                    setForgotPwStep(1);
+                    setForgotPwUserid('');
+                    setForgotPwEmail('');
+                    setForgotPwNewPassword('');
+                    setForgotPwNewPasswordConfirm('');
+                }
+            }}>
                 <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-md rounded-2xl">
                     <DialogHeader>
                         <DialogTitle className="text-white font-bold">비밀번호 찾기</DialogTitle>
                         <DialogDescription className="text-slate-400 text-sm">
-                            가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내드립니다. 이메일 내 링크에서 새 비밀번호를 설정해 주세요.
+                            {forgotPwStep === 1 && '가입 시 사용한 아이디와 이메일을 입력하세요. 일치하면 비밀번호를 바로 재설정할 수 있습니다.'}
+                            {forgotPwStep === 2 && '새 비밀번호를 입력해 주세요.'}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-2">
-                        <div className="space-y-2">
-                            <Label className="text-slate-400">이메일</Label>
-                            <Input
-                                type="email"
-                                value={forgotPwEmail}
-                                onChange={(e) => setForgotPwEmail(e.target.value)}
-                                placeholder="example@email.com"
-                                className="bg-slate-800 border-slate-700"
-                                autoComplete="email"
-                            />
-                        </div>
-                        <Button
-                            className="w-full"
-                            disabled={loading}
-                            onClick={handleForgotPasswordSubmit}
-                        >
-                            {loading ? '발송 중...' : '재설정 메일 발송'}
-                        </Button>
+                        {forgotPwStep === 1 && (
+                            <>
+                                <div className="space-y-2">
+                                    <Label className="text-slate-400">아이디</Label>
+                                    <Input
+                                        type="text"
+                                        value={forgotPwUserid}
+                                        onChange={(e) => setForgotPwUserid(e.target.value)}
+                                        placeholder="아이디 입력"
+                                        className="bg-slate-800 border-slate-700"
+                                        autoComplete="username"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-slate-400">이메일</Label>
+                                    <Input
+                                        type="email"
+                                        value={forgotPwEmail}
+                                        onChange={(e) => setForgotPwEmail(e.target.value)}
+                                        placeholder="example@email.com"
+                                        className="bg-slate-800 border-slate-700"
+                                        autoComplete="email"
+                                    />
+                                </div>
+                                <Button
+                                    className="w-full"
+                                    disabled={loading}
+                                    onClick={handleForgotPasswordVerify}
+                                >
+                                    {loading ? '확인 중...' : '확인'}
+                                </Button>
+                            </>
+                        )}
+                        {forgotPwStep === 2 && (
+                            <>
+                                <p className="text-xs text-slate-500">{forgotPwUserid} · {forgotPwEmail}</p>
+                                <div className="space-y-2">
+                                    <Label className="text-slate-400">새 비밀번호</Label>
+                                    <Input
+                                        type="password"
+                                        value={forgotPwNewPassword}
+                                        onChange={(e) => setForgotPwNewPassword(e.target.value)}
+                                        placeholder="6자 이상"
+                                        className="bg-slate-800 border-slate-700"
+                                        autoComplete="new-password"
+                                    />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label className="text-slate-400">비밀번호 확인</Label>
+                                    <Input
+                                        type="password"
+                                        value={forgotPwNewPasswordConfirm}
+                                        onChange={(e) => setForgotPwNewPasswordConfirm(e.target.value)}
+                                        placeholder="비밀번호 다시 입력"
+                                        className="bg-slate-800 border-slate-700"
+                                        autoComplete="new-password"
+                                    />
+                                </div>
+                                <Button
+                                    className="w-full"
+                                    disabled={loading}
+                                    onClick={handleForgotPasswordReset}
+                                >
+                                    {loading ? '변경 중...' : '비밀번호 재설정'}
+                                </Button>
+                            </>
+                        )}
                     </div>
                 </DialogContent>
             </Dialog>

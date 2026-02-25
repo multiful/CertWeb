@@ -284,8 +284,8 @@ async def get_popular_majors(
     db: Session = Depends(get_db_session),
     _: None = Depends(check_rate_limit),
 ):
-    """사용자들이 설정한 전공(detail_major)을 카운팅해 인기 전공 목록 반환."""
-    cache_key = f"recs:popular_majors:v1:{limit}"
+    """사용자들이 설정한 전공(detail_major)을 카운팅해 인기 전공 목록 반환 (정규화 없이 DB 값 그대로)."""
+    cache_key = f"recs:popular_majors:v3:{limit}"
     try:
         cached = redis_client.get(cache_key)
         if cached and isinstance(cached, list):
@@ -304,7 +304,7 @@ async def get_popular_majors(
         """),
         {"limit": limit},
     ).fetchall()
-    majors = [r["major"] for r in rows if r and r["major"]]
+    majors = [r["major"] for r in (rows or []) if r and r.get("major")]
     try:
         redis_client.set(cache_key, majors, get_cache_ttl())
     except Exception:

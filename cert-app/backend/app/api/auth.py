@@ -17,7 +17,9 @@ from app.schemas.auth import (
     AuthLoginRequest,
     AuthTokenResponse,
     UserIdCheckRequest,
-    UserProfileUpdate
+    UserProfileUpdate,
+    VerifyUseridEmailRequest,
+    ResetPasswordDirectRequest,
 )
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -429,7 +431,7 @@ async def request_password_reset(
     payload: EmailRequest,
     _: None = Depends(check_auth_rate_limit),
 ):
-    """Request password reset via Supabase."""
+    """Request password reset via Supabase (이메일 링크 방식, 레거시)."""
     try:
         res = requests.post(
             f"{settings.SUPABASE_URL}/auth/v1/recover",
@@ -446,6 +448,58 @@ async def request_password_reset(
         return {"message": "비밀번호 재설정 메일이 발송되었습니다."}
     except Exception as e:
         logger.error(f"Password reset error: {e}")
+        raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
+
+
+@router.post("/verify-userid-email")
+async def verify_userid_email(
+    payload: VerifyUseridEmailRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_auth_rate_limit),
+):
+    """아이디와 이메일이 동일한 유저의 정보인지 확인. 비밀번호 찾기 1단계."""
+    row = db.execute(
+        text(
+            "SELECT id FROM profiles WHERE TRIM(userid) = TRIM(:userid) AND LOWER(TRIM(email)) = LOWER(TRIM(:email))"
+        ),
+        {"userid": payload.userid.strip(), "email": payload.email.strip()},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=400, detail="아이디와 이메일이 일치하는 회원이 없습니다.")
+    return {"verified": True}
+
+
+@router.post("/reset-password-direct")
+async def reset_password_direct(
+    payload: ResetPasswordDirectRequest,
+    db: Session = Depends(get_db),
+    _: None = Depends(check_auth_rate_limit),
+):
+    """아이디+이메일 확인 후 인증코드 없이 비밀번호 직접 재설정."""
+    row = db.execute(
+        text(
+            "SELECT id FROM profiles WHERE TRIM(userid) = TRIM(:userid) AND LOWER(TRIM(email)) = LOWER(TRIM(:email))"
+        ),
+        {"userid": payload.userid.strip(), "email": payload.email.strip()},
+    ).mappings().first()
+    if not row:
+        raise HTTPException(status_code=400, detail="아이디와 이메일이 일치하는 회원이 없습니다.")
+    user_id = row["id"]
+    try:
+        res = requests.put(
+            f"{settings.SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+            headers=_admin_headers(),
+            json={"password": payload.new_password},
+            timeout=10,
+        )
+        if res.status_code >= 400:
+            logger.error("Supabase admin update user password: status=%s", res.status_code)
+            raise HTTPException(status_code=400, detail="비밀번호 변경에 실패했습니다.")
+        return {"message": "비밀번호가 변경되었습니다. 새 비밀번호로 로그인해 주세요."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Reset password direct error: {e}")
         raise HTTPException(status_code=500, detail="서버 오류가 발생했습니다.")
 
 @router.patch("/profile")

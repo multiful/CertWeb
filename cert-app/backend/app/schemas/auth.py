@@ -49,3 +49,14 @@ class UserIdCheckResponse(BaseModel):
 class EmailCheckResponse(BaseModel):
     available: bool
     message: str
+
+
+class VerifyUseridEmailRequest(BaseModel):
+    userid: str = Field(..., min_length=1, max_length=64)
+    email: EmailStr
+
+
+class ResetPasswordDirectRequest(BaseModel):
+    userid: str = Field(..., min_length=1, max_length=64)
+    email: EmailStr
+    new_password: str = Field(..., min_length=6, max_length=512)

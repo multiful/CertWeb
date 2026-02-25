@@ -156,6 +156,29 @@ OPENAI_API_KEY=sk-...
 
 ---
 
+## 🔒 Supabase 보안 경고 대응
+
+대시보드 **Project Settings → Reports → Issues** 에서 다음처럼 처리할 수 있습니다.
+
+| 경고 | 조치 |
+|------|------|
+| **Function Search Path Mutable** | `backend/fix_supabase_security_warnings.sql` 실행. `update_modified_column` 은 `vector_migration.sql` 재적용 시 `SET search_path = public` 적용됨. |
+| **Extension in Public** | (선택) `backend/move_vector_extension_to_schema.sql` 실행해 pgvector를 `extensions` 스키마로 이동. |
+| **Leaked Password Protection Disabled** | **Authentication → Providers → Email** 에서 **Enable leaked password protection** 활성화 (유출 비밀번호 목록 대조). |
+| **RLS Disabled in Public** | **SQL Editor**에서 `backend/enable_rls_public.sql` 전체 실행. 참조 테이블은 읽기 전용, profiles/즐겨찾기/취득자격은 본인만 CRUD, certificates_vectors는 클라이언트 비노출. "Destructive operation" 경고는 RLS/정책 추가용이라 데이터 삭제 아님 → **Run this query** 선택하면 됨. |
+
+### RAG 검색 품질 (certificates_vectors 채우기)
+자격증 DB 기준으로 RAG 벡터를 채우면 `/certs/search/rag` 검색 품질이 좋아집니다.  
+`cert-app/backend`에서:
+```bash
+uv run python scripts/populate_certificates_vectors.py
+```
+- 기존 동일 `qual_id` 행은 갱신, 새 자격만 추가됩니다.  
+- 처음부터 비우고 채우려면: `--truncate`  
+- OpenAI API 호출이 필요하므로 `OPENAI_API_KEY` 설정 필요.
+
+---
+
 ## 📄 License
 This project is for personal portfolio purposes. All data is provided for informational use only.
 
