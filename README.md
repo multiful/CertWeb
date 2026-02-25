@@ -118,10 +118,10 @@ uvicorn main:app --reload
 - 목록에서 `C:\Users\rlaeh\envs\fastapi\.venv\Scripts\python.exe` 선택 (또는 **Enter interpreter path**로 해당 경로 지정)
 - 연결 후 해당 환경에서 디버깅·테스트·자동완성이 동작합니다.
 
-**서버 실행 (Windows)**
+**서버 실행**
 ```powershell
 cd cert-app/backend
-.\run.ps1
+uv run python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
 - 기본 주소: **http://127.0.0.1:8000** · API: **http://127.0.0.1:8000/api/v1** · 헬스: **http://127.0.0.1:8000/health**
 

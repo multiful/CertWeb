@@ -90,7 +90,6 @@ cert-app/
 │   ├── rename_production_automation_names.sql
 │   ├── update_medical_device_ra_stats.sql
 │   ├── requirements.txt
-│   ├── run.ps1                      # Windows: uvicorn 실행 (venv 경로 지정)
 │   └── Dockerfile
 ├── frontend/
 │   └── app/                         # Vite + React 앱
@@ -126,10 +125,8 @@ cp frontend/app/.env.example frontend/app/.env
 ```bash
 cd backend
 # 가상환경 생성 후 (선택) pip install -r requirements.txt
-# 또는 uv 사용 시:
+# uv 사용 시:
 uv run uvicorn main:app --reload
-# Windows에서 run.ps1 사용 시 (venv 경로 지정):
-./run.ps1
 ```
 - 기본 포트: **8000**  
 - API 문서: `http://localhost:8000/docs` (DEBUG=True 시)  

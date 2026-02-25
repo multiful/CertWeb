@@ -74,6 +74,9 @@ docker-compose.override.yml
 .cursor/
 *.mdc
 
+# [Windows / 로컬 스크립트] (실행 경로·venv 등 환경 의존)
+*.ps1
+
 # [Misc]
 *.tmp
 *.temp
