@@ -14,9 +14,11 @@ import {
   Bookmark,
   Building2,
   FileText,
-  BarChart2
+  BarChart2,
+  CheckCircle2,
+  EyeOff,
 } from 'lucide-react';
-import { getFavorites, addFavorite, removeFavorite, getTrendingCerts, getCertificationDetail } from '@/lib/api';
+import { getFavorites, addFavorite, removeFavorite, getTrendingCerts, getCertificationDetail, getAcquiredCerts } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { Card, CardContent } from '@/components/ui/card';
@@ -56,8 +58,10 @@ export function CertListPage() {
     page_size: searchParams.get('filter') === 'bookmarks' ? 100 : 20
   });
   const [isFavoritesOnly, setIsFavoritesOnly] = useState(searchParams.get('filter') === 'bookmarks');
+  const [isHideAcquired, setIsHideAcquired] = useState(false);
   const { user, token } = useAuth();
   const [favoriteIds, setFavoriteIds] = useState<number[]>([]);
+  const [acquiredIds, setAcquiredIds] = useState<number[]>([]);
 
   const { data, loading, error, refetch } = useCerts(params);
   const { data: filters } = useFilterOptions();
@@ -175,6 +179,14 @@ export function CertListPage() {
     loadFavorites();
   }, [user, token]);
 
+  // 취득 자격증 ID 로드 (로그인 사용자 전용)
+  useEffect(() => {
+    if (!user || !token) { setAcquiredIds([]); return; }
+    getAcquiredCerts(token, 1, 200)
+      .then(res => setAcquiredIds(res.items.map((a: any) => a.qual_id)))
+      .catch(() => setAcquiredIds([]));
+  }, [user, token]);
+
   const toggleFavorite = async (e: React.MouseEvent, cert: any) => {
     e.stopPropagation(); // Card 클릭 방지
     const certId = cert.qual_id;
@@ -229,18 +241,25 @@ export function CertListPage() {
 
   // Filter items locally if Favorites Only is active
   const filteredItems = useMemo(() => {
+    let base: any[];
     if (isFavoritesOnly) {
-      // If we are logged in, use the full fetched favorites list
       if (user && favoritesItems.length > 0) {
-        return favoritesItems;
+        base = favoritesItems;
+      } else if (!data) {
+        return [];
+      } else {
+        base = data.items.filter(item => favoriteIds.includes(item.qual_id));
       }
-      // If guest or favoritesData is empty, fallback to current page filtered (limited)
+    } else {
       if (!data) return [];
-      return data.items.filter(item => favoriteIds.includes(item.qual_id));
+      base = data.items;
     }
-    if (!data) return [];
-    return data.items;
-  }, [data, isFavoritesOnly, favoriteIds, favoritesItems, user]);
+    // 취득 자격증 제외 토글이 켜져 있으면 취득 완료 항목 필터링
+    if (isHideAcquired && acquiredIds.length > 0) {
+      base = base.filter(item => !acquiredIds.includes(item.qual_id));
+    }
+    return base;
+  }, [data, isFavoritesOnly, favoriteIds, favoritesItems, user, isHideAcquired, acquiredIds]);
 
   // Debounce search input - Removed to ensure explicit search action
   /*
@@ -566,6 +585,26 @@ export function CertListPage() {
             <BarChart2 className="w-3 h-3" />
             합격률 없는 자격증 제외
           </label>
+
+          {/* 취득 자격증 제외 필터 (로그인 사용자 + 취득 자격증 있을 때) */}
+          {user && acquiredIds.length > 0 && (
+            <label
+              className={`cursor-pointer flex items-center gap-2 px-3 py-1 rounded-full text-xs border transition-all select-none ${
+                isHideAcquired
+                  ? 'bg-sky-600/20 border-sky-500/40 text-sky-400'
+                  : 'border-slate-700 text-slate-500 hover:border-slate-600 hover:text-slate-300'
+              }`}
+            >
+              <input
+                type="checkbox"
+                className="hidden"
+                checked={isHideAcquired}
+                onChange={(e) => setIsHideAcquired(e.target.checked)}
+              />
+              <EyeOff className="w-3 h-3" />
+              취득 자격증 제외 ({acquiredIds.length}개)
+            </label>
+          )}
         </div>
       </div>
 
@@ -627,7 +666,13 @@ export function CertListPage() {
                     <CardContent className="p-8 space-y-6">
                       <div className="flex justify-between items-start">
                         <Badge className="bg-slate-950 text-slate-400 border-slate-800 px-2 py-0.5 text-xs">{cert.qual_type}</Badge>
-                        <div className="flex gap-2">
+                        <div className="flex items-center gap-2">
+                          {acquiredIds.includes(cert.qual_id) && (
+                            <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">
+                              <CheckCircle2 className="w-3 h-3" />
+                              취득
+                            </span>
+                          )}
                           <Bookmark
                             className={`w-4 h-4 cursor-pointer transition-all hover:scale-125 ${favoriteIds.includes(cert.qual_id) ? 'text-amber-500 fill-amber-500' : 'text-slate-600 hover:text-amber-500'}`}
                             onClick={(e) => toggleFavorite(e, cert)}
@@ -669,9 +714,17 @@ export function CertListPage() {
                       <Award className="w-6 h-6 text-slate-500 group-hover:text-blue-400" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors truncate">
-                        {cert.qual_name}
-                      </h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors truncate">
+                          {cert.qual_name}
+                        </h3>
+                        {acquiredIds.includes(cert.qual_id) && (
+                          <span className="shrink-0 flex items-center gap-0.5 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full">
+                            <CheckCircle2 className="w-3 h-3" />
+                            취득
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm text-slate-500">{cert.managing_body} • {cert.qual_type}</p>
                     </div>
                     <div className="flex gap-8 items-center">

@@ -17,7 +17,7 @@ def _is_valid_uuid(value: Optional[str]) -> bool:
     return bool(value and _UUID_RE.match(value))
 
 from app.api.deps import get_db_session, check_rate_limit, get_current_user, get_optional_user
-from app.utils.ai import get_embedding_async, generate_reasons_batch
+from app.utils.ai import get_embedding_async, generate_reasons_batch, expand_query_async, llm_rerank_and_reason
 from app.schemas import (
     SemanticSearchResponse,
     SemanticSearchResultItem,
@@ -103,8 +103,11 @@ async def hybrid_recommendation(
         user_id = None
 
     try:
+        # Query Expansion: 관심사를 임베딩 전에 풍부한 키워드로 확장 (HyDE-style)
+        # expand_query_async 실패 시 원본 텍스트 그대로 사용
+        expanded_interest = await expand_query_async(major, interest)
         interest_vector, major_vector = await asyncio.gather(
-            get_embedding_async(interest or major),
+            get_embedding_async(expanded_interest),
             get_embedding_async(major),
         )
     except Exception as e:
@@ -177,6 +180,30 @@ async def hybrid_recommendation(
             LIMIT 60
         """)
         major_results = db.execute(major_sql, {"major": major}).fetchall()
+
+        # --- Fuzzy Major Matching 폴백 -----------------------------------
+        # 입력 전공이 major_qualification_map에 없을 경우 pg_trgm 유사도로 가장 근접한
+        # 전공을 찾아 그 전공의 자격증 매핑을 활용한다 (커버리지 대폭 향상).
+        if not major_results:
+            fuzzy_sql = text("""
+                SELECT DISTINCT ON (q.qual_id)
+                       q.qual_id, q.qual_name, q.qual_type, q.main_field,
+                       mq.score AS mapping_score,
+                       mq.weight AS mapping_weight,
+                       mq.reason,
+                       similarity(mq.major, :major) AS fuzzy_sim
+                FROM qualification q
+                JOIN major_qualification_map mq ON q.qual_id = mq.qual_id
+                WHERE similarity(mq.major, :major) > 0.35
+                ORDER BY q.qual_id, mq.score DESC
+                LIMIT 60
+            """)
+            major_results = db.execute(fuzzy_sql, {"major": major}).fetchall()
+            if major_results:
+                logger.info(
+                    "fuzzy major match for %r: found %d certs (trgm fallback)",
+                    major, len(major_results),
+                )
 
         # 관심사 기반 semantic search (TOP-120)
         global_semantic_sql = text("""
@@ -316,13 +343,47 @@ async def hybrid_recommendation(
         c["pass_rate"] = pass_rate_lookup.get(cid)
         final_results.append(c)
 
-    # --- 8) 정렬 & 결과 수 제한 ----------------------------------------------
+    # --- 8) 1차 정렬 & 결과 수 제한 ------------------------------------------
     effective_limit = min(limit, GUEST_RESULT_LIMIT) if not user_id else limit
-    sorted_results = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)[:effective_limit]
+    # LLM re-ranking 후보로 최대 20개를 준비 (로그인 사용자) / 게스트는 그대로 잘라냄
+    rrf_sorted = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)
+    rerank_pool = rrf_sorted[:20] if user_id else rrf_sorted[:effective_limit]
+    sorted_results = rerank_pool[:effective_limit]  # 기본값 (폴백용)
 
-    # --- 9) LLM 이유 생성 (로그인 사용자 전용, 실패해도 폴백 처리) ---------------
+    # --- 9) LLM Cross-encoder Re-ranking + 이유 생성 -------------------------
+    # 로그인 사용자 전용: GPT-4o-mini가 RRF top-20을 사용자 맥락에 맞게 재정렬하고
+    # 이유를 동시에 생성한다. 실패 시 기존 RRF 순서 + generate_reasons_batch로 폴백.
     llm_reasons: List[str] = []
-    if user_id and sorted_results:
+    reranked = False
+
+    if user_id and rerank_pool:
+        rerank_input = [
+            {
+                "qual_id": c["qual_id"],
+                "qual_name": c["qual_name"],
+                "pass_rate": c.get("pass_rate"),
+            }
+            for c in rerank_pool
+        ]
+        rerank_result = await llm_rerank_and_reason(
+            major=major,
+            interest=interest,
+            candidates=rerank_input,
+            top_n=effective_limit,
+            grade_year=grade_year,
+            skill_level=skill_level,
+        )
+        if rerank_result:
+            qual_id_to_c = {c["qual_id"]: c for c in rerank_pool}
+            new_order = [qual_id_to_c[r["qual_id"]] for r in rerank_result if r["qual_id"] in qual_id_to_c]
+            if len(new_order) >= effective_limit:
+                sorted_results = new_order[:effective_limit]
+                llm_reasons = [r["reason"] for r in rerank_result[:effective_limit]]
+                reranked = True
+                logger.info("llm_rerank applied: %d items reranked for major=%r", len(sorted_results), major)
+
+    # LLM re-ranking 실패 시 기존 generate_reasons_batch로 폴백
+    if user_id and not reranked and sorted_results:
         llm_input = [{"qual_name": c["qual_name"], "pass_rate": c.get("pass_rate")} for c in sorted_results]
         llm_reasons = await generate_reasons_batch(
             major=major,
@@ -352,7 +413,7 @@ async def hybrid_recommendation(
 
     items = []
     for i, c in enumerate(sorted_results):
-        use_llm = bool(llm_reasons) and i < len(llm_reasons)
+        use_llm = bool(llm_reasons) and i < len(llm_reasons) and llm_reasons[i]
         reason = llm_reasons[i] if use_llm else _fallback_reason(c, diff_lookup.get(c["qual_id"]))
         items.append(
             HybridRecommendationItem(
