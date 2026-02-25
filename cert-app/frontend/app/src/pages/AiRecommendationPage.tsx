@@ -40,11 +40,11 @@ const POPULAR_MAJORS = ['컴퓨터공학', '경영학', '전기공학', '간호�
 const AI_STATS = [
     {
         label: '자격증 DB',
-        value: '1,247',
+        value: '1,103',
         unit: '개',
         icon: Database,
         color: 'blue',
-        desc: '분석 완료된 국가 자격증',
+        desc: '임베딩 완료된 국가 자격증',
     },
     {
         label: '평균 정합성',
@@ -330,13 +330,40 @@ export function AiRecommendationPage() {
                                         <div className="w-10 h-10 rounded-lg bg-slate-950 flex items-center justify-center text-blue-400 font-bold border border-slate-800">
                                             {idx + 1}
                                         </div>
-                                        <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
-                                            정합성 {Math.round(res.hybrid_score * 100)}%
-                                        </Badge>
+                                        <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                                            {res.llm_reason && (
+                                                <Badge className="bg-yellow-500/10 text-yellow-400 border-yellow-500/20 text-[9px] px-1.5 py-0">
+                                                    ✦ AI 생성
+                                                </Badge>
+                                            )}
+                                            <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
+                                                정합성 {Math.round(res.hybrid_score * 100)}%
+                                            </Badge>
+                                        </div>
                                     </div>
                                     <CardTitle className="text-xl font-bold text-white mt-4 group-hover:text-blue-400 transition-colors line-clamp-2">
                                         {res.qual_name}
                                     </CardTitle>
+                                    {res.pass_rate != null && (
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className="text-[11px] text-slate-500">합격률</span>
+                                            <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden max-w-[80px]">
+                                                <div
+                                                    className={`h-full rounded-full transition-all ${
+                                                        res.pass_rate >= 50 ? 'bg-emerald-500' :
+                                                        res.pass_rate >= 25 ? 'bg-yellow-500' : 'bg-red-500'
+                                                    }`}
+                                                    style={{ width: `${Math.min(res.pass_rate, 100)}%` }}
+                                                />
+                                            </div>
+                                            <span className={`text-[11px] font-bold ${
+                                                res.pass_rate >= 50 ? 'text-emerald-400' :
+                                                res.pass_rate >= 25 ? 'text-yellow-400' : 'text-red-400'
+                                            }`}>
+                                                {res.pass_rate.toFixed(1)}%
+                                            </span>
+                                        </div>
+                                    )}
                                 </CardHeader>
                                 <CardContent className="space-y-4">
                                     <div

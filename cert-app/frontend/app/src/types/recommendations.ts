@@ -20,6 +20,9 @@ export interface HybridRecommendationResult {
     major_score: number;
     reason: string | null;
     hybrid_score: number;
+    pass_rate?: number | null;       // 최신 합격률 (0–100)
+    rrf_score?: number | null;       // Reciprocal Rank Fusion 점수
+    llm_reason?: boolean;            // GPT가 이유를 생성했으면 true
 }
 
 export interface HybridRecommendationResponse {

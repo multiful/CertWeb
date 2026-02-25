@@ -222,6 +222,9 @@ class HybridRecommendationItem(BaseModel):
     reason: str
     semantic_similarity: float
     hybrid_score: float
+    pass_rate: Optional[float] = None   # 최신 합격률 (0-100), 없으면 None
+    rrf_score: Optional[float] = None   # Reciprocal Rank Fusion 점수
+    llm_reason: bool = False            # LLM이 reason을 생성했으면 True
 
 
 class HybridRecommendationResponse(BaseModel):

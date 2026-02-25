@@ -17,7 +17,7 @@ def _is_valid_uuid(value: Optional[str]) -> bool:
     return bool(value and _UUID_RE.match(value))
 
 from app.api.deps import get_db_session, check_rate_limit, get_current_user, get_optional_user
-from app.utils.ai import get_embedding_async
+from app.utils.ai import get_embedding_async, generate_reasons_batch
 from app.schemas import (
     SemanticSearchResponse,
     SemanticSearchResultItem,
@@ -165,29 +165,33 @@ async def hybrid_recommendation(
             if target_difficulty < 6.0:
                 target_difficulty = 6.0
 
-    # --- 2) 기존 Hybrid 후보 생성 로직 ----------------------------------------------
+    # --- 2) 후보 생성: Major Map + Semantic Search (병렬) --------------------------
     try:
         major_sql = text("""
-            SELECT q.qual_id, q.qual_name, q.qual_type, q.main_field, mq.score as mapping_score, mq.reason
+            SELECT q.qual_id, q.qual_name, q.qual_type, q.main_field,
+                   mq.score AS mapping_score, mq.weight AS mapping_weight, mq.reason
             FROM qualification q
             JOIN major_qualification_map mq ON q.qual_id = mq.qual_id
             WHERE mq.major = :major
             ORDER BY mq.score DESC
-            LIMIT 50
+            LIMIT 60
         """)
         major_results = db.execute(major_sql, {"major": major}).fetchall()
+
+        # 관심사 기반 semantic search (TOP-120)
         global_semantic_sql = text("""
             SELECT qual_id, qual_name,
-                   1 - (embedding <=> :vec) as similarity
+                   1 - (embedding <=> :vec) AS similarity
             FROM qualification
             WHERE embedding IS NOT NULL
             ORDER BY embedding <=> :vec
-            LIMIT 100
+            LIMIT 120
         """)
         global_results = db.execute(global_semantic_sql, {"vec": str(interest_vector)}).fetchall()
 
+        # 전공명 자체의 벡터 유사도 (모든 후보 대상)
         major_sim_sql = text("""
-            SELECT qual_id, 1 - (embedding <=> :vec) as major_sim
+            SELECT qual_id, 1 - (embedding <=> :vec) AS major_sim
             FROM qualification
             WHERE embedding IS NOT NULL
         """)
@@ -200,123 +204,170 @@ async def hybrid_recommendation(
             detail="추천 데이터 조회 중 오류가 발생했습니다.",
         ) from e
 
-    # 3) Combine Candidates
-    candidate_map = {}
-    
-    # Process major results from map
+    # --- 3) 후보 통합 -------------------------------------------------------
+    # 이미 취득한 자격증은 추천에서 제외 (acq_items은 위에서 이미 로드됨)
+    acq_qual_ids: set[int] = {a.qual_id for a in acq_items}
+
+    candidate_map: dict[int, dict] = {}
+
     for r in major_results:
-        # Scale DB score (0-10) to 0.5-1.0 base if it exists, 
-        # but also consider semantic similarity to major name
+        if r.qual_id in acq_qual_ids:
+            continue
         m_sim = major_sim_lookup.get(r.qual_id, 0.5)
-        # Use existing score if high, otherwise fallback to semantic
-        base_major_score = max(float(r.mapping_score or 0), m_sim * 10.0)
-        
+        # mapping_weight 가 있으면 score 보정에 반영 (기본 1.0)
+        w = float(r.mapping_weight or 1.0)
+        base_major_score = max(float(r.mapping_score or 0) * min(w, 1.5), m_sim * 10.0)
         candidate_map[r.qual_id] = {
             "qual_id": r.qual_id,
             "qual_name": r.qual_name,
             "major_score": base_major_score,
             "reason": r.reason or "전공 맞춤형 자격증",
-            "semantic_similarity": 0.0 
+            "semantic_similarity": 0.0,
         }
 
-    # Process interest results
     for r in global_results:
+        if r.qual_id in acq_qual_ids:
+            continue
         m_sim = major_sim_lookup.get(r.qual_id, 0.3)
         if r.qual_id in candidate_map:
             candidate_map[r.qual_id]["semantic_similarity"] = float(r.similarity)
         else:
-            # New candidate from interest
             candidate_map[r.qual_id] = {
                 "qual_id": r.qual_id,
                 "qual_name": r.qual_name,
-                "major_score": m_sim * 10.0, # Purely semantic fallback
+                "major_score": m_sim * 10.0,
                 "reason": "관심사 기반 연관 자격증",
-                "semantic_similarity": float(r.similarity)
+                "semantic_similarity": float(r.similarity),
             }
 
-    # --- 3) 난이도 정보 결합 ----------------------------------------------
-    # 후보들의 난이도를 한 번에 가져와 필터링/가중치에 사용
+    # --- 4) 난이도 + 합격률 통계 일괄 로드 ------------------------------------
     candidate_ids = list(candidate_map.keys())
     diff_lookup: dict[int, Optional[float]] = {}
+    pass_rate_lookup: dict[int, Optional[float]] = {}
+
     if candidate_ids:
-        diff_stats = get_qualification_aggregated_stats_bulk(db, candidate_ids)
+        stats = get_qualification_aggregated_stats_bulk(db, candidate_ids)
         for qid in candidate_ids:
-            s = diff_stats.get(qid) or {}
+            s = stats.get(qid) or {}
             diff_lookup[qid] = s.get("avg_difficulty")
+            pass_rate_lookup[qid] = s.get("latest_pass_rate")
 
-    # --- 4) Final Hybrid Scoring & Thresholding (난이도 반영) -----------------------
-    # interest가 입력된 경우: semantic_similarity 최솟값 적용 (전공 점수만으로 무관한 자격증이 뜨는 현상 방지)
+    # --- 5) RRF (Reciprocal Rank Fusion) 점수 계산 ---------------------------
+    # 세 가지 순위 리스트를 RRF로 융합: major_score / semantic_similarity / major_sim
+    RRF_K = 60
+    n = len(candidate_map)
+
+    major_ranked = sorted(candidate_map.keys(), key=lambda c: candidate_map[c]["major_score"], reverse=True)
+    semantic_ranked = sorted(candidate_map.keys(), key=lambda c: candidate_map[c]["semantic_similarity"], reverse=True)
+    major_sim_ranked = sorted(candidate_map.keys(), key=lambda c: major_sim_lookup.get(c, 0.0), reverse=True)
+
+    major_rank_map = {cid: i + 1 for i, cid in enumerate(major_ranked)}
+    semantic_rank_map = {cid: i + 1 for i, cid in enumerate(semantic_ranked)}
+    major_sim_rank_map = {cid: i + 1 for i, cid in enumerate(major_sim_ranked)}
+
     interest_provided = bool(interest and interest.strip())
-    # interest 입력 시: 관심사 가중치 0.65 / 전공 0.35, 최소 semantic 0.15 이상
-    # interest 미입력 시: 전공 0.6 / 의미 0.4 (기본)
-    w_interest = 0.65 if interest_provided else 0.4
-    w_major = 0.35 if interest_provided else 0.6
-    min_semantic = 0.15 if interest_provided else 0.0
+    # interest 있으면 semantic 가중치 높임 (2배), 없으면 균등
+    w_sem = 2.0 if interest_provided else 1.0
+    w_maj = 1.0
+    w_msim = 1.0
 
-    final_results = []
     for cid, c in candidate_map.items():
-        # 관심사가 있을 때 semantic_similarity 최솟값 미달은 제외 (IEQ 등 무관한 자격증 필터링)
+        rrf = (
+            w_maj  / (RRF_K + major_rank_map.get(cid, n + 1)) +
+            w_sem  / (RRF_K + semantic_rank_map.get(cid, n + 1)) +
+            w_msim / (RRF_K + major_sim_rank_map.get(cid, n + 1))
+        )
+        c["rrf_score"] = rrf
+
+    # --- 6) 합격률 시그널 계산 ------------------------------------------------
+    # 적정 합격률(25~55%) 구간에 점수 부스트, 너무 낮거나(< 5%) 너무 높으면(> 85%) 약간 감점
+    def _pass_rate_factor(pr: Optional[float]) -> float:
+        if pr is None:
+            return 1.0  # 데이터 없으면 중립
+        p = pr / 100.0
+        # 벨 곡선 중심 0.40, 최솟값 0.85 (감점 최대 15%)
+        return max(0.85, 1.05 - abs(p - 0.40) * 0.5)
+
+    # --- 7) 최종 스코어 & 필터링 ---------------------------------------------
+    min_semantic = 0.15 if interest_provided else 0.0
+    final_results: list[dict] = []
+
+    for cid, c in candidate_map.items():
         if interest_provided and c["semantic_similarity"] < min_semantic:
             continue
-        # 최소 전공 연관성 OR 관심도 조건
         if c["major_score"] < 3.0 and c["semantic_similarity"] < 0.20:
             continue
 
-        # 난이도 기반 가중치
         diff = diff_lookup.get(cid)
         difficulty_factor = 1.0
         if diff is not None:
-            # 학년별 하드 필터: 1~2학년에게는 지나치게 높은 난이도는 제외
             if grade_year is not None and grade_year <= 2 and diff > 8.0:
                 continue
-            # 3~4학년 이상인데 너무 쉬운(<=3) 자격증은 우선순위 낮춤
             if grade_year is not None and grade_year >= 3 and diff < 3.0:
-                difficulty_factor *= 0.8
-
-            # 타깃 난이도와의 거리로 미세 가중치 (±4 범위 안이면 거의 1.0 유지)
+                difficulty_factor *= 0.80
             delta = abs(diff - target_difficulty)
             difficulty_factor *= max(0.75, 1.1 - (delta / 4.0))
 
-        # Hybrid Score: interest 입력 여부에 따라 가중치 동적 조정 후 난이도 반영
-        h_score = (c["semantic_similarity"] * w_interest) + (c["major_score"] / 10.0 * w_major)
-        h_score *= difficulty_factor
-        c["hybrid_score"] = h_score
-        
-        # Format reason more nicely
-        if c["major_score"] > 8.0 and c["semantic_similarity"] > 0.4:
-            c["reason"] = f"전공({major})과 매우 밀접하며, 관심사({interest or '입력'})와도 높은 연관성을 보입니다."
-        elif c["major_score"] > 7.0:
-            c["reason"] = f"전공 분야의 핵심 역량을 증명할 수 있는 주요 자격증입니다."
-        elif c["semantic_similarity"] > 0.5:
-            c["reason"] = f"작성해주신 관심사({interest or '입력'}) 분야에서 매우 인기 있는 전문 자격증입니다."
+        pr_factor = _pass_rate_factor(pass_rate_lookup.get(cid))
 
-        # 난이도·학년 기반 보정 설명 추가
-        if diff is not None:
-            if grade_year is not None:
-                if grade_year <= 2 and diff <= 6.0:
-                    c["reason"] += f" 현재 {grade_year}학년 수준에서 무리 없이 도전할 수 있는 난이도({diff:.1f})로 판단되었습니다."
-                elif grade_year >= 3 and diff >= 6.0:
-                    c["reason"] += f" {grade_year}학년 및 이미 취득/북마크한 자격증 난이도를 고려해 한 단계 높은 난이도({diff:.1f})를 추천합니다."
-            elif skill_level is not None:
-                if diff >= skill_level + 1.0:
-                    c["reason"] += f" 이미 학습하신 자격증들의 평균 난이도({skill_level:.1f})보다 약간 높은 레벨({diff:.1f})로 성장에 도움이 됩니다."
-            
+        # 최종 하이브리드 = RRF × 난이도 보정 × 합격률 보정 (정규화용으로 10배)
+        h_score = c["rrf_score"] * difficulty_factor * pr_factor * 10.0
+        c["hybrid_score"] = h_score
+        c["pass_rate"] = pass_rate_lookup.get(cid)
         final_results.append(c)
 
-    # 비로그인 사용자는 GUEST_RESULT_LIMIT개로 제한
+    # --- 8) 정렬 & 결과 수 제한 ----------------------------------------------
     effective_limit = min(limit, GUEST_RESULT_LIMIT) if not user_id else limit
     sorted_results = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)[:effective_limit]
-    items = [
-        HybridRecommendationItem(
-            qual_id=c["qual_id"],
-            qual_name=c["qual_name"],
-            major_score=c["major_score"],
-            reason=c["reason"],
-            semantic_similarity=c["semantic_similarity"],
-            hybrid_score=c["hybrid_score"],
+
+    # --- 9) LLM 이유 생성 (로그인 사용자 전용, 실패해도 폴백 처리) ---------------
+    llm_reasons: List[str] = []
+    if user_id and sorted_results:
+        llm_input = [{"qual_name": c["qual_name"], "pass_rate": c.get("pass_rate")} for c in sorted_results]
+        llm_reasons = await generate_reasons_batch(
+            major=major,
+            interest=interest,
+            candidates=llm_input,
+            grade_year=grade_year,
+            skill_level=skill_level,
         )
-        for c in sorted_results
-    ]
+
+    # --- 10) 폴백 reason (LLM 실패 시 또는 비로그인) --------------------------
+    def _fallback_reason(c: dict, diff: Optional[float]) -> str:
+        ms, ss = c["major_score"], c["semantic_similarity"]
+        if ms > 8.0 and ss > 0.4:
+            base = f"전공({major})과 매우 밀접하며 관심사와도 높은 연관성을 보입니다."
+        elif ms > 7.0:
+            base = "전공 분야의 핵심 역량을 증명할 수 있는 주요 자격증입니다."
+        elif ss > 0.5:
+            base = f"작성하신 관심사 분야에서 매우 인기 있는 전문 자격증입니다."
+        else:
+            base = c.get("reason") or "전공·관심사 분석에 기반한 추천 자격증입니다."
+        if diff is not None and grade_year is not None:
+            if grade_year <= 2 and diff <= 6.0:
+                base += f" 현재 {grade_year}학년 수준에서 도전하기 좋은 난이도({diff:.1f})입니다."
+            elif grade_year >= 3 and diff >= 6.0:
+                base += f" {grade_year}학년에게 적합한 난이도({diff:.1f})입니다."
+        return base
+
+    items = []
+    for i, c in enumerate(sorted_results):
+        use_llm = bool(llm_reasons) and i < len(llm_reasons)
+        reason = llm_reasons[i] if use_llm else _fallback_reason(c, diff_lookup.get(c["qual_id"]))
+        items.append(
+            HybridRecommendationItem(
+                qual_id=c["qual_id"],
+                qual_name=c["qual_name"],
+                major_score=c["major_score"],
+                reason=reason,
+                semantic_similarity=c["semantic_similarity"],
+                hybrid_score=c["hybrid_score"],
+                pass_rate=c.get("pass_rate"),
+                rrf_score=c.get("rrf_score"),
+                llm_reason=use_llm,
+            )
+        )
+
     return HybridRecommendationResponse(
         mode="hybrid",
         major=major,
