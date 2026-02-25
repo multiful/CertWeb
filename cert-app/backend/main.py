@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 import time
 
@@ -62,25 +63,29 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Database connection: FAILED")
     
-    # Sync Cache to Redis if connected
-    try:
-        if redis_client.is_connected():
-            logger.info("FLUSHING REDIS CACHE ON STARTUP to fix TypeErrors...")
+    # Redis sync은 백그라운드로 실행 — yield 이전에 블로킹하면 Render 헬스체크 타임아웃으로 배포 실패
+    async def _background_redis_sync():
+        await asyncio.sleep(5)  # 서버 준비 후 시작
+        try:
+            if not redis_client.is_connected():
+                logger.warning("Redis not connected. Skipping background sync.")
+                return
+            logger.info("Background Redis sync starting...")
             redis_client.flush_all()
-            
             from app.services.fast_sync_service import FastSyncService
             from app.database import SessionLocal
+            loop = asyncio.get_event_loop()
             db = SessionLocal()
             try:
-                FastSyncService.sync_all_to_redis(db)
+                await loop.run_in_executor(None, FastSyncService.sync_all_to_redis, db)
             finally:
                 db.close()
-            logger.info("Initial Redis sync complete.")
-        else:
-            logger.warning("Redis not connected on startup. Skipping flush.")
-    except Exception as e:
-        logger.warning(f"Initial Redis setup failed: {e}")
-    
+            logger.info("Background Redis sync complete.")
+        except Exception as e:
+            logger.warning("Background Redis sync failed: %s", e)
+
+    asyncio.create_task(_background_redis_sync())
+
     yield
     
     # Shutdown

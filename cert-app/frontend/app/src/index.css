@@ -74,8 +74,7 @@
   }
 
   html {
-    font-size: 15.36px;
-    /* Default is 16px. 15.36px is 96% scale. */
+    font-size: 15px;
   }
 
   body {
@@ -85,8 +84,7 @@
   }
 
   #root {
-    max-width: 1600px;
-    /* Constrain wide screens to ~80% of typical 1920px resolution */
+    max-width: 1440px;
     margin: 0 auto;
     position: relative;
     width: 100%;
@@ -115,13 +113,6 @@
   }
 }
 
-/* 데스크탑에서 UI 스케일 축소 — 1024px 이상에서만 작동 (모바일 제외) */
-/* zoom은 표준 CSS 속성으로 Chrome/Edge에서 지원. Firefox는 transform 방식 사용 */
-@media (min-width: 1024px) {
-  html {
-    zoom: 0.80;
-  }
-}
 
 .glass {
   background: rgba(15, 23, 42, 0.4);
