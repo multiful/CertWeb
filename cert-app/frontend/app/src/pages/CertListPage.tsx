@@ -11,7 +11,9 @@ import {
   List as ListIcon,
   SearchX,
   RefreshCw,
-  Bookmark
+  Bookmark,
+  Building2,
+  FileText
 } from 'lucide-react';
 import { getFavorites, addFavorite, removeFavorite, getTrendingCerts, getCertificationDetail } from '@/lib/api';
 import { useAuth } from '@/hooks/useAuth';
@@ -73,7 +75,8 @@ export function CertListPage() {
     loadTrending();
   }, []);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [inputValue, setInputValue] = useState(params.q || '');
+  const [searchType, setSearchType] = useState<'name' | 'body'>('name');
+  const [inputValue, setInputValue] = useState(params.q || params.managing_body || '');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [favoritesItems, setFavoritesItems] = useState<any[]>([]);
   const [favoritesLoading, setFavoritesLoading] = useState(true);
@@ -246,14 +249,24 @@ export function CertListPage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    updateParam('q', inputValue);
+    if (searchType === 'name') {
+      setParams(prev => ({ ...prev, q: inputValue, managing_body: undefined, page: 1 }));
+    } else {
+      setParams(prev => ({ ...prev, managing_body: inputValue, q: undefined, page: 1 }));
+    }
     setShowSuggestions(false);
   };
 
   const handleSuggestionClick = (name: string) => {
     setInputValue(name);
-    updateParam('q', name);
+    setParams(prev => ({ ...prev, q: name, managing_body: undefined, page: 1 }));
     setShowSuggestions(false);
+  };
+
+  const handleSearchTypeChange = (type: 'name' | 'body') => {
+    setSearchType(type);
+    setInputValue('');
+    setParams(prev => ({ ...prev, q: undefined, managing_body: undefined, page: 1 }));
   };
 
   return (
@@ -292,32 +305,63 @@ export function CertListPage() {
       {/* Filter Section */}
       <div className="bg-slate-900/40 border border-slate-800 rounded-3xl p-8 space-y-8 backdrop-blur-sm">
         <form onSubmit={handleSearch} className="grid lg:grid-cols-12 gap-6 items-end">
-          <div className="lg:col-span-4 space-y-3 relative">
-            <label
-              htmlFor="cert-search-input"
-              className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"
-            >
+          <div className="lg:col-span-5 space-y-3 relative">
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
               <Search className="w-3 h-3" /> 자격증 명칭
             </label>
+
+            {/* 검색 타입 토글 */}
+            <div className="flex gap-1 p-1 bg-slate-950/60 border border-slate-800 rounded-xl w-fit">
+              <button
+                type="button"
+                onClick={() => handleSearchTypeChange('name')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  searchType === 'name'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <FileText className="w-3 h-3" />
+                자격증명으로 검색
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSearchTypeChange('body')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  searchType === 'body'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-slate-500 hover:text-slate-300'
+                }`}
+              >
+                <Building2 className="w-3 h-3" />
+                주최기관으로 검색
+              </button>
+            </div>
+
             <div className="relative z-20">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              {searchType === 'name'
+                ? <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                : <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-purple-500" />
+              }
               <Input
                 id="cert-search-input"
-                name="q"
-                placeholder="검색어를 입력하세요..."
+                name={searchType === 'name' ? 'q' : 'managing_body'}
+                placeholder={searchType === 'name' ? '자격증 이름을 검색하세요...' : '발행기관·주최기관명을 검색하세요...'}
                 value={inputValue}
-                onFocus={() => setShowSuggestions(true)}
+                onFocus={() => setShowSuggestions(searchType === 'name')}
                 onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                 onChange={(e) => {
                   setInputValue(e.target.value);
-                  setShowSuggestions(true);
+                  if (searchType === 'name') setShowSuggestions(true);
                 }}
-                className="pl-10 h-11 bg-black/20 border-slate-800 text-white rounded-xl focus:ring-blue-500"
+                className={`pl-10 h-11 bg-black/20 border-slate-800 text-white rounded-xl focus:ring-2 ${
+                  searchType === 'body' ? 'focus:ring-purple-500 border-purple-900/40' : 'focus:ring-blue-500'
+                }`}
               />
             </div>
 
-            {/* Suggestions Dropdown */}
-            {showSuggestions && inputValue.length >= 1 && data && data.items.length > 0 && (
+            {/* Suggestions Dropdown - 자격증명 검색 시만 표시 */}
+            {showSuggestions && searchType === 'name' && inputValue.length >= 1 && data && data.items.length > 0 && (
               <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 max-h-60 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 animate-in fade-in slide-in-from-top-2 duration-200">
                 <div className="p-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-950/20 border-b border-slate-800">
                   추천 검색어 ({data.items.length})
@@ -336,7 +380,7 @@ export function CertListPage() {
             )}
           </div>
 
-          <div className="lg:col-span-2 space-y-3">
+          <div className="lg:col-span-2 space-y-3 lg:mt-[52px]">
             <label
               htmlFor="main-field-select"
               className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"
@@ -359,7 +403,7 @@ export function CertListPage() {
             </Select>
           </div>
 
-          <div className="lg:col-span-2 space-y-3">
+          <div className="lg:col-span-2 space-y-3 lg:mt-[52px]">
             <label
               htmlFor="sort-select"
               className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2"
@@ -397,7 +441,7 @@ export function CertListPage() {
             </div>
           </div>
 
-          <div className="lg:col-span-4 flex gap-3">
+          <div className="lg:col-span-3 flex gap-3 lg:mt-[52px]">
             <div className="flex-1 flex items-center justify-center bg-blue-600/5 border border-blue-500/20 rounded-xl px-4 text-[10px] font-bold text-blue-400 uppercase tracking-widest">
               <Zap className="w-3 h-3 mr-2 animate-pulse" /> Real-time Analysis Active
             </div>
@@ -406,6 +450,7 @@ export function CertListPage() {
               variant="outline"
               onClick={() => {
                 setInputValue('');
+                setSearchType('name');
                 setParams({ page: 1, page_size: 20, sort: 'name' });
               }}
               className="h-11 px-4 border-slate-800 text-slate-400 hover:bg-slate-800 rounded-xl"

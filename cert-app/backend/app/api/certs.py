@@ -59,9 +59,9 @@ async def get_certs(
     _: None = Depends(check_rate_limit)
 ):
     """Get certification list with filters and pagination."""
-    # Build cache key (Bumped to v5 for data stability)
+    # Build cache key (Bumped to v6: 난이도 로직 재설계 + 마이그레이션)
     cache_key = redis_client.make_cache_key(
-        "certs:list:v5",
+        "certs:list:v6",
         hash=redis_client.hash_query_params(
             q=q, main_field=main_field, ncs_large=ncs_large,
             qual_type=qual_type, managing_body=managing_body,
@@ -79,7 +79,7 @@ async def get_certs(
         logger.warning(f"Cache read failed for cert list: {e}")
 
     # Count 캐시 키 (필터만, 페이지 제외) — 동일 필터의 다른 페이지 요청 시 count() 생략
-    count_cache_key = "certs:count:v5:" + redis_client.hash_query_params(
+    count_cache_key = "certs:count:v6:" + redis_client.hash_query_params(
         q=q, main_field=main_field, ncs_large=ncs_large,
         qual_type=qual_type, managing_body=managing_body,
         is_active=is_active, sort=sort, sort_desc=sort_desc

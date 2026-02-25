@@ -92,15 +92,22 @@ class QualificationCRUD:
         elif sort == "recent":
             query = query.order_by(desc(Qualification.created_at) if sort_desc else asc(Qualification.created_at))
         elif sort in ["pass_rate", "difficulty"]:
-            # These require joining with stats
+            # stats 조인 후 그룹 집계로 정렬
             query = query.outerjoin(QualificationStats).group_by(Qualification.qual_id)
             if sort == "pass_rate":
+                # 합격률 높은 순 / 낮은 순 (NULL은 항상 마지막)
                 query = query.order_by(
-                    desc(func.avg(QualificationStats.pass_rate)) if sort_desc else asc(func.avg(QualificationStats.pass_rate))
+                    desc(func.avg(QualificationStats.pass_rate)).nulls_last()
+                    if sort_desc else
+                    asc(func.avg(QualificationStats.pass_rate)).nulls_last()
                 )
             else:
+                # 난이도 정렬: 표시값은 pass_rate 역함수이므로 pass_rate 역순으로 정렬
+                # (difficulty_score 컬럼은 로딩 시점 계산값이라 표시값과 불일치 → pass_rate 사용)
                 query = query.order_by(
-                    desc(func.avg(QualificationStats.difficulty_score)) if sort_desc else asc(func.avg(QualificationStats.difficulty_score))
+                    asc(func.avg(QualificationStats.pass_rate)).nulls_last()
+                    if sort_desc else
+                    desc(func.avg(QualificationStats.pass_rate)).nulls_last()
                 )
         
         # Apply pagination
@@ -555,58 +562,48 @@ def get_qualification_aggregated_stats(
             "total_candidates": None,
         }
     
-    # 2. Derive base difficulty from pass rate
-    avg_pass_rate = raw_stats.avg_pass_rate or 35.0  # Default to 35% if null
-    base_diff = max(1.0, min(10.0, (100 - avg_pass_rate) / 10.0))
-    
-    # 3. Bayesian Smoothing / Regularization
-    C_THRESHOLD = 500  # We trust the data fully if > 500 candidates
-    K_THRESHOLD = 3    # We trust the data fully if > 3 exam rounds
-    
+    import math
+
+    C_THRESHOLD = 5000.0
+    K_THRESHOLD = 8.0
+    PRIOR_DIFF   = 5.5
+
+    GRADE_ADJ = {"기술사": 1.2, "기능장": 0.8, "기사": 0.4, "산업기사": 0.2, "기능사": -0.3}
+    GRADE_MAX = {"기술사": 10.0, "기능장": 9.5, "기사": 9.0, "산업기사": 8.5, "기능사": 8.0}
+
+    # 2. Base difficulty from pass rate
+    avg_pass_rate = raw_stats.avg_pass_rate if raw_stats.avg_pass_rate is not None else 35.0
+    base_diff = max(1.0, min(9.9, (100.0 - avg_pass_rate) / 10.0))
+
     total_cands = raw_stats.total_cands or 0
     num_records = raw_stats.num_records or 0
-    
-    # Global/Prior mean difficulty for certifications
-    PRIOR_DIFF = 6.5
-    
-    # Confidence factor [0.0 to 1.0]
-    conf_cands = min(1.0, total_cands / C_THRESHOLD)
+
+    # 3. Log-scale Bayesian smoothing (응시자 적으면 Prior로 강하게 수렴)
+    conf_cands   = min(1.0, math.log1p(total_cands) / math.log1p(C_THRESHOLD))
     conf_records = min(1.0, num_records / K_THRESHOLD)
-    confidence = (conf_cands + conf_records) / 2.0
-    
-    # 4. Level-based Difficulty Adjustment (Heuristic Weighting)
-    # Get qualification metadata
+    confidence = conf_cands * 0.70 + conf_records * 0.30
+
+    smoothed = base_diff * confidence + PRIOR_DIFF * (1.0 - confidence)
+
+    # 4. Level-based additive adjustment (곱셈 → 덧셈, 상한 초과 방지)
     from app.models import Qualification
     qual = db.query(Qualification).filter(Qualification.qual_id == qual_id).first()
-    
-    level_weight = 1.0
+
+    grade_adj = 0.0
+    max_cap   = 9.5
     if qual:
-        # National Technical Qualifications (국가기술자격)
         if qual.qual_type == "국가기술자격":
-            if qual.grade_code in ["기술사", "기능장"]:
-                level_weight = 1.3
-            elif qual.grade_code == "기사":
-                level_weight = 1.15
-            elif qual.grade_code == "산업기사":
-                level_weight = 1.05
-            elif qual.grade_code == "기능사":
-                level_weight = 0.95
-        # National Professional Qualifications (국가전문자격)
+            grade_adj = GRADE_ADJ.get(qual.grade_code, 0.0)
+            max_cap   = GRADE_MAX.get(qual.grade_code, 9.0)
         elif qual.qual_type == "국가전문자격":
-            # Per user request: Weight between Technical Professional (1.3) and Engineer (1.15)
-            level_weight = 1.22
-        # Private Qualifications (민간자격)
+            grade_adj = 0.5
+            max_cap   = 9.5
         elif qual.qual_type and "민간" in qual.qual_type:
-            level_weight = 0.85
+            grade_adj = -0.5
+            max_cap   = 8.5
 
-    # Apply weight to base difficulty
-    base_diff *= level_weight
-
-    # Final smoothed difficulty
-    final_difficulty = (base_diff * confidence) + (PRIOR_DIFF * (1 - confidence))
-    
-    # Ensure it stays within 1.0 - 10.0
-    final_difficulty = max(1.0, min(10.0, final_difficulty))
+    final_difficulty = smoothed + grade_adj * confidence
+    final_difficulty = max(1.0, min(max_cap, final_difficulty))
 
     # 5. Get latest pass rate safely
     latest = QualificationStatsCRUD.get_latest_by_qual_id(db, qual_id)
@@ -668,10 +665,32 @@ def get_qualification_aggregated_stats_bulk(db: Session, qual_ids: List[int]) ->
         qual_metadata[r.qual_id] = SimpleNamespace(qual_type=r.qual_type, grade_code=r.grade_code)
 
     # 4. Process all results
+    import math
+
+    # 응시자 수가 적을수록 Prior로 강하게 당김 (로그 스케일 Bayesian smoothing)
+    # 기준: 5000명 이상이면 데이터 신뢰도 100%, 8회 이상이면 회차 신뢰도 100%
+    C_THRESHOLD = 5000.0
+    K_THRESHOLD = 8.0
+    PRIOR_DIFF   = 5.5   # 중립 Prior (이전 6.5에서 하향 - 10 쏠림 방지)
+
+    # 자격 등급별 가산/감산 조정값 (곱셈→덧셈으로 전환: 상한 초과 방지)
+    GRADE_ADJ = {
+        "기술사": 1.2,
+        "기능장": 0.8,
+        "기사":   0.4,
+        "산업기사": 0.2,
+        "기능사": -0.3,
+    }
+    # 등급별 최대 허용 난이도 상한 (10 쏠림 방지)
+    GRADE_MAX = {
+        "기술사": 10.0,
+        "기능장": 9.5,
+        "기사":   9.0,
+        "산업기사": 8.5,
+        "기능사":   8.0,
+    }
+
     results = {}
-    PRIOR_DIFF = 6.5
-    C_THRESHOLD = 500
-    K_THRESHOLD = 3
 
     for q_id in qual_ids:
         raw = stats_map.get(q_id)
@@ -683,32 +702,39 @@ def get_qualification_aggregated_stats_bulk(db: Session, qual_ids: List[int]) ->
             }
             continue
 
-        avg_pass_rate = raw.avg_pass_rate or 35.0
-        base_diff = max(1.0, min(10.0, (100 - avg_pass_rate) / 10.0))
+        avg_pass_rate = raw.avg_pass_rate if raw.avg_pass_rate is not None else 35.0
+        total_cands   = raw.total_cands or 0
+        num_records   = raw.num_records or 0
 
-        total_cands = raw.total_cands or 0
-        num_records = raw.num_records or 0
+        # 1) 합격률 → 원시 난이도 (0~100% → 1.0~10.0)
+        base_diff = max(1.0, min(9.9, (100.0 - avg_pass_rate) / 10.0))
 
-        conf_cands = min(1.0, total_cands / C_THRESHOLD)
+        # 2) 로그 스케일 응시자 신뢰도: 응시자 적을수록 Prior로 훨씬 강하게 당김
+        conf_cands   = min(1.0, math.log1p(total_cands) / math.log1p(C_THRESHOLD))
         conf_records = min(1.0, num_records / K_THRESHOLD)
-        confidence = (conf_cands + conf_records) / 2.0
+        # 응시자 수 가중치 70%, 회차 수 가중치 30%
+        confidence = conf_cands * 0.70 + conf_records * 0.30
 
+        # 3) Bayesian 스무딩 (데이터 희소 → Prior 쪽으로 수렴)
+        smoothed = base_diff * confidence + PRIOR_DIFF * (1.0 - confidence)
+
+        # 4) 자격 등급별 가산점 (confidence 비례 적용: 불확실하면 조정도 작게)
         qual = qual_metadata.get(q_id)
-        level_weight = 1.0
+        grade_adj = 0.0
+        max_cap   = 9.5
         if qual:
             if qual.qual_type == "국가기술자격":
-                if qual.grade_code in ["기술사", "기능장"]: level_weight = 1.3
-                elif qual.grade_code == "기사": level_weight = 1.15
-                elif qual.grade_code == "산업기사": level_weight = 1.05
-                elif qual.grade_code == "기능사": level_weight = 0.95
+                grade_adj = GRADE_ADJ.get(qual.grade_code, 0.0)
+                max_cap   = GRADE_MAX.get(qual.grade_code, 9.0)
             elif qual.qual_type == "국가전문자격":
-                level_weight = 1.22
+                grade_adj = 0.5
+                max_cap   = 9.5
             elif qual.qual_type and "민간" in qual.qual_type:
-                level_weight = 0.85
+                grade_adj = -0.5
+                max_cap   = 8.5
 
-        base_diff *= level_weight
-        final_difficulty = (base_diff * confidence) + (PRIOR_DIFF * (1 - confidence))
-        final_difficulty = max(1.0, min(10.0, final_difficulty))
+        final_difficulty = smoothed + grade_adj * confidence
+        final_difficulty = max(1.0, min(max_cap, final_difficulty))
 
         results[q_id] = {
             "latest_pass_rate": latest_pass_rate_map.get(q_id),
