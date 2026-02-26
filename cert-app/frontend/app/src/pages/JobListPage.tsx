@@ -57,10 +57,14 @@ export function JobListPage() {
                     page,
                     page_size: PAGE_SIZE,
                 });
-                setJobs(res.items);
+                const items = res.items ?? [];
+                setJobs(items);
                 setPage(res.page);
-                setTotalPages(res.total_pages || Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE)));
-                setTotalJobs(res.total || 0);
+                // 백엔드 total_pages를 쓰되, 한 페이지가 꽉 찼으면 최소 2페이지는 있다고 보고(다음 버튼용)
+                const fromBackend = res.total_pages ?? Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE));
+                const inferred = items.length >= PAGE_SIZE ? Math.max(fromBackend, res.page + 1) : fromBackend;
+                setTotalPages(inferred);
+                setTotalJobs(res.total ?? 0);
             } catch (error) {
                 console.error('Failed to fetch jobs:', error);
             } finally {
@@ -384,8 +388,8 @@ export function JobListPage() {
                 )}
             </div>
 
-            {/* Pagination Controls — 항상 5개 슬롯(1 2 3 4 5) 표시, totalPages가 작으면 초과 번호는 비활성 */}
-            {!loading && totalPages > 1 && (
+            {/* Pagination Controls — 결과가 있으면 항상 표시, 5개 슬롯(1 2 3 4 5), 초과 번호는 비활성 */}
+            {!loading && jobList.length > 0 && (
                 <div className="flex justify-center items-center gap-4 pt-10">
                     <Button
                         variant="outline"
