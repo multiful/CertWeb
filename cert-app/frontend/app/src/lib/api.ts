@@ -245,29 +245,27 @@ export async function getJobs(
 
     const raw = await apiRequest<any>(`/jobs?${query.toString()}`);
 
-    // 백엔드가 아직 배열 형태(Job[])를 반환하는 경우(구버전 호환)
-    // 한 페이지가 꽉 찼으면 다음 페이지가 있을 수 있으므로 total_pages를 page+1 이상으로 둬서 페이지 UI가 나오게 함
+    // 1) 백엔드가 배열(Job[])만 반환하는 구버전 호환
     if (Array.isArray(raw)) {
       const page = params.page ?? 1;
       const pageSize = params.page_size ?? 20;
       const total = raw.length;
-      const hasMore = raw.length >= pageSize;
-      const totalPages = hasMore ? Math.max(2, page + 1) : page;
+      const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1;
       return {
         items: raw,
-        total: hasMore ? page * pageSize + 1 : (page - 1) * pageSize + total,
+        total,
         page,
         page_size: pageSize,
         total_pages: totalPages,
       };
     }
 
-    // 정상적인 JobListResponse 형태
+    // 2) 정상적인 JobListResponse 형태
     if (raw && Array.isArray(raw.items)) {
       return raw as JobListResponse;
     }
 
-    // 예기치 못한 응답 형태에 대한 안전한 폴백
+    // 3) 예기치 못한 응답 형태에 대한 안전한 폴백
     return {
       items: [],
       total: 0,

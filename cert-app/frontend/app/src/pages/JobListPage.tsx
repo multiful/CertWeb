@@ -59,7 +59,7 @@ export function JobListPage() {
                 });
                 setJobs(res.items);
                 setPage(res.page);
-                setTotalPages(res.total_pages || 1);
+                setTotalPages(res.total_pages || Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE)));
                 setTotalJobs(res.total || 0);
             } catch (error) {
                 console.error('Failed to fetch jobs:', error);
@@ -384,7 +384,7 @@ export function JobListPage() {
                 )}
             </div>
 
-            {/* Pagination Controls */}
+            {/* Pagination Controls — 항상 5개 슬롯(1 2 3 4 5) 표시, totalPages가 작으면 초과 번호는 비활성 */}
             {!loading && totalPages > 1 && (
                 <div className="flex justify-center items-center gap-4 pt-10">
                     <Button
@@ -396,17 +396,18 @@ export function JobListPage() {
                         이전
                     </Button>
                     <div className="flex items-center gap-2">
-                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                        {Array.from({ length: 5 }, (_, i) => {
                             const startPage = Math.max(1, Math.min(page - 2, Math.max(1, totalPages - 4)));
                             const p = startPage + i;
-                            if (p > totalPages) return null;
+                            const outOfRange = p > totalPages;
 
                             return (
                                 <Button
                                     key={p}
                                     variant={page === p ? "secondary" : "ghost"}
-                                    onClick={() => handlePageClick(p)}
-                                    className="h-10 w-10 p-0 rounded-xl"
+                                    disabled={outOfRange}
+                                    onClick={() => !outOfRange && handlePageClick(p)}
+                                    className="h-10 w-10 p-0 rounded-xl disabled:opacity-40"
                                 >
                                     {p}
                                 </Button>
