@@ -32,6 +32,11 @@ export function JobListPage() {
     const router = useRouter();
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(false);
+
+    const PAGE_SIZE = 50;
 
     const initialQ = new URL(window.location.href).searchParams.get('q') || '';
     const [searchQuery, setSearchQuery] = useState(initialQ);
@@ -39,11 +44,13 @@ export function JobListPage() {
     useEffect(() => {
         const fetchJobs = async () => {
             setLoading(true);
+            setLoadingMore(false);
             try {
-                // 직무는 페이지네이션 없이 한 번에 전체를 보여주기 위해
-                // 넉넉한 page_size로 요청 (백엔드 상한 100 기준)
-                const data = await getJobs({ q: searchQuery, page: 1, page_size: 100 });
+                // 초기 로드: 1페이지 50개씩 페이지네이션
+                const data = await getJobs({ q: searchQuery, page: 1, page_size: PAGE_SIZE });
                 setJobs(data);
+                setPage(1);
+                setHasMore(data.length === PAGE_SIZE);
             } catch (error) {
                 console.error('Failed to fetch jobs:', error);
             } finally {
@@ -52,6 +59,22 @@ export function JobListPage() {
         };
         fetchJobs();
     }, [searchQuery]);
+
+    const handleLoadMore = async () => {
+        if (loadingMore) return;
+        const nextPage = page + 1;
+        setLoadingMore(true);
+        try {
+            const data = await getJobs({ q: searchQuery, page: nextPage, page_size: PAGE_SIZE });
+            setJobs(prev => [...prev, ...data]);
+            setPage(nextPage);
+            setHasMore(data.length === PAGE_SIZE);
+        } catch (error) {
+            console.error('Failed to fetch more jobs:', error);
+        } finally {
+            setLoadingMore(false);
+        }
+    };
 
     // searchQuery가 바뀔 때마다 URL을 replaceState로 동기화 → 뒤로가기 시 검색어 복원
     useEffect(() => {
@@ -341,6 +364,19 @@ export function JobListPage() {
                                 </Card>
                             );
                         })}
+
+                        {hasMore && (
+                            <div className="flex justify-center pt-2">
+                                <Button
+                                    variant="outline"
+                                    onClick={handleLoadMore}
+                                    disabled={loadingMore}
+                                    className="px-6 py-2 rounded-full text-xs font-bold tracking-widest uppercase"
+                                >
+                                    {loadingMore ? '불러오는 중...' : `다음 ${PAGE_SIZE}개 직무 더 보기`}
+                                </Button>
+                            </div>
+                        )}
                     </div>
                 )}
             </div>
