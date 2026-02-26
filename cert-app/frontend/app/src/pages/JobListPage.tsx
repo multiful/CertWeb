@@ -75,7 +75,8 @@ export function JobListPage() {
     }, [searchQuery, page]);
 
     const goToPage = (nextPage: number) => {
-        if (nextPage < 1 || nextPage > totalPages || nextPage === page) return;
+        // totalPages 계산이 보수적으로 잡혀도 번호 클릭은 항상 동작하도록
+        if (nextPage < 1 || nextPage === page) return;
         setPage(nextPage);
     };
 
@@ -403,15 +404,12 @@ export function JobListPage() {
                         {Array.from({ length: 5 }, (_, i) => {
                             const startPage = Math.max(1, Math.min(page - 2, Math.max(1, totalPages - 4)));
                             const p = startPage + i;
-                            const outOfRange = p > totalPages;
-
                             return (
                                 <Button
                                     key={p}
                                     variant={page === p ? "secondary" : "ghost"}
-                                    disabled={outOfRange}
-                                    onClick={() => !outOfRange && handlePageClick(p)}
-                                    className="h-10 w-10 p-0 rounded-xl disabled:opacity-40"
+                                    onClick={() => handlePageClick(p)}
+                                    className="h-10 w-10 p-0 rounded-xl"
                                 >
                                     {p}
                                 </Button>

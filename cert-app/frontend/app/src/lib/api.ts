@@ -249,11 +249,15 @@ export async function getJobs(
     if (Array.isArray(raw)) {
       const page = params.page ?? 1;
       const pageSize = params.page_size ?? 20;
-      const total = raw.length;
-      const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1;
+      const pageCount = raw.length;
+      // 한 페이지가 꽉 찼으면 최소 5페이지 정도는 있다고 가정해서
+      // 현재 페이지 기준으로 5개 번호(1~5, 2~6 ...)를 자연스럽게 보여준다.
+      const hasMore = pageCount >= pageSize;
+      const totalPages = hasMore ? page + 4 : page;
       return {
         items: raw,
-        total,
+        // total은 대략적인 수치만 사용 (UI 텍스트용)
+        total: hasMore ? page * pageSize + 1 : (page - 1) * pageSize + pageCount,
         page,
         page_size: pageSize,
         total_pages: totalPages,
