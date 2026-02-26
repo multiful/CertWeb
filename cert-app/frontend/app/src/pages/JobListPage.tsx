@@ -40,7 +40,9 @@ export function JobListPage() {
         const fetchJobs = async () => {
             setLoading(true);
             try {
-                const data = await getJobs({ q: searchQuery });
+                // 직무는 페이지네이션 없이 한 번에 전체를 보여주기 위해
+                // 넉넉한 page_size로 요청 (백엔드 상한 100 기준)
+                const data = await getJobs({ q: searchQuery, page: 1, page_size: 100 });
                 setJobs(data);
             } catch (error) {
                 console.error('Failed to fetch jobs:', error);
