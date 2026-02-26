@@ -139,8 +139,15 @@ export function ContactPage() {
                         <form onSubmit={handleSubmit} className="space-y-6">
                             <div className="grid md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
-                                    <label className="text-sm font-bold text-slate-400 ml-1">성함</label>
+                                    <label
+                                        htmlFor="contact-name"
+                                        className="text-sm font-bold text-slate-400 ml-1"
+                                    >
+                                        성함
+                                    </label>
                                     <Input
+                                        id="contact-name"
+                                        name="name"
                                         required
                                         placeholder="홍길동"
                                         value={formData.name}
@@ -149,8 +156,15 @@ export function ContactPage() {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-sm font-bold text-slate-400 ml-1">이메일</label>
+                                    <label
+                                        htmlFor="contact-email"
+                                        className="text-sm font-bold text-slate-400 ml-1"
+                                    >
+                                        이메일
+                                    </label>
                                     <Input
+                                        id="contact-email"
+                                        name="email"
                                         required
                                         type="email"
                                         placeholder="example@email.com"
@@ -162,8 +176,15 @@ export function ContactPage() {
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-400 ml-1">제목</label>
+                                <label
+                                    htmlFor="contact-subject"
+                                    className="text-sm font-bold text-slate-400 ml-1"
+                                >
+                                    제목
+                                </label>
                                 <Input
+                                    id="contact-subject"
+                                    name="subject"
                                     required
                                     placeholder="문의 제목을 입력해 주세요."
                                     value={formData.subject}
