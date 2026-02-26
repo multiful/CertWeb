@@ -57,6 +57,8 @@ export interface Job {
   qualifications?: Qualification[];
 }
 
+export interface JobListResponse extends PaginatedResponse<Job> { }
+
 export interface QualificationDetail extends Qualification {
   stats: QualificationStats[];
   jobs: Job[];

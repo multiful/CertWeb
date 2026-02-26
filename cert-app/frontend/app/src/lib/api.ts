@@ -13,6 +13,8 @@ import type {
   SemanticSearchResponse,
   HybridRecommendationResponse,
   TrendingQualificationListResponse,
+  JobListResponse,
+  JobQueryParams,
 } from '@/types';
 import { mockApi } from './mockApi';
 
@@ -233,17 +235,24 @@ export async function getPopularMajors(limit: number = 12): Promise<{ majors: st
 // ============== Job APIs ==============
 
 export async function getJobs(
-  params: { q?: string; page?: number; page_size?: number } = {}
-): Promise<Job[]> {
+  params: JobQueryParams = {}
+): Promise<JobListResponse> {
   try {
     const query = new URLSearchParams();
     if (params.q) query.append('q', params.q);
     if (params.page) query.append('page', params.page.toString());
     if (params.page_size) query.append('page_size', params.page_size.toString());
 
-    return await apiRequest<Job[]>(`/jobs?${query.toString()}`);
+    return await apiRequest<JobListResponse>(`/jobs?${query.toString()}`);
   } catch {
-    return []; // No mock for jobs yet
+    // 네트워크 실패 시 빈 페이지네이션 응답 반환
+    return {
+      items: [],
+      total: 0,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 20,
+      total_pages: 0,
+    };
   }
 }
 

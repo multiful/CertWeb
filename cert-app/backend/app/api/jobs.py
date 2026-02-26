@@ -5,13 +5,13 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, check_rate_limit
 from app.crud import job_crud
-from app.schemas import JobResponse
+from app.schemas import JobResponse, JobListResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 from app.redis_client import redis_client
 
-@router.get("", response_model=List[JobResponse])
+@router.get("", response_model=JobListResponse)
 async def get_jobs(
     q: Optional[str] = Query(None, description="Job name search"),
     page: int = Query(1, ge=1),
@@ -20,22 +20,30 @@ async def get_jobs(
     _: None = Depends(check_rate_limit)
 ):
     """Search for jobs and their outlook/salary info."""
-    cache_key = f"jobs:list:v5:{q}:{page}:{page_size}"
+    cache_key = f"jobs:list:v6:{q}:{page}:{page_size}"
     
     try:
         cached = redis_client.get(cache_key)
-        if cached and isinstance(cached, list):
+        if cached and isinstance(cached, dict) and "items" in cached:
             return cached
     except Exception:
         pass
 
-    items, _ = job_crud.get_list(db, q, page, page_size)
-    
-    # Store directly as lists of dicts
-    result = [JobResponse.model_validate(item).model_dump() for item in items]
-    redis_client.set(cache_key, result, 3600)  # cache for 1 hour
-    
-    return result
+    items, total = job_crud.get_list(db, q, page, page_size)
+
+    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+
+    payload = JobListResponse(
+        items=[JobResponse.model_validate(item) for item in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    ).model_dump()
+
+    redis_client.set(cache_key, payload, 3600)  # cache for 1 hour
+
+    return payload
 
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(

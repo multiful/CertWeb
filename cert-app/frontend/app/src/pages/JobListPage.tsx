@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getJobs } from '@/lib/api';
-import type { Job } from '@/types';
+import type { Job, JobListResponse } from '@/types';
 import { useRouter } from '@/lib/router';
 import {
     ResponsiveContainer,
@@ -32,25 +32,35 @@ export function JobListPage() {
     const router = useRouter();
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
     const [page, setPage] = useState(1);
-    const [hasMore, setHasMore] = useState(false);
+    const [totalPages, setTotalPages] = useState(1);
+    const [totalJobs, setTotalJobs] = useState(0);
 
-    const PAGE_SIZE = 50;
+    const PAGE_SIZE = 20;
 
-    const initialQ = new URL(window.location.href).searchParams.get('q') || '';
+    const url = new URL(window.location.href);
+    const initialQ = url.searchParams.get('q') || '';
+    const initialPage = parseInt(url.searchParams.get('page') || '1', 10) || 1;
     const [searchQuery, setSearchQuery] = useState(initialQ);
+
+    useEffect(() => {
+        // URL 초기값을 한 번만 반영
+        setPage(initialPage);
+    }, []);
 
     useEffect(() => {
         const fetchJobs = async () => {
             setLoading(true);
-            setLoadingMore(false);
             try {
-                // 초기 로드: 1페이지 50개씩 페이지네이션
-                const data = await getJobs({ q: searchQuery, page: 1, page_size: PAGE_SIZE });
-                setJobs(data);
-                setPage(1);
-                setHasMore(data.length === PAGE_SIZE);
+                const res: JobListResponse = await getJobs({
+                    q: searchQuery || undefined,
+                    page,
+                    page_size: PAGE_SIZE,
+                });
+                setJobs(res.items);
+                setPage(res.page);
+                setTotalPages(res.total_pages || 1);
+                setTotalJobs(res.total || 0);
             } catch (error) {
                 console.error('Failed to fetch jobs:', error);
             } finally {
@@ -58,33 +68,34 @@ export function JobListPage() {
             }
         };
         fetchJobs();
-    }, [searchQuery]);
+    }, [searchQuery, page]);
 
-    const handleLoadMore = async () => {
-        if (loadingMore) return;
-        const nextPage = page + 1;
-        setLoadingMore(true);
-        try {
-            const data = await getJobs({ q: searchQuery, page: nextPage, page_size: PAGE_SIZE });
-            setJobs(prev => [...prev, ...data]);
-            setPage(nextPage);
-            setHasMore(data.length === PAGE_SIZE);
-        } catch (error) {
-            console.error('Failed to fetch more jobs:', error);
-        } finally {
-            setLoadingMore(false);
-        }
+    const goToPage = (nextPage: number) => {
+        if (nextPage < 1 || nextPage > totalPages || nextPage === page) return;
+        setPage(nextPage);
     };
 
-    // searchQuery가 바뀔 때마다 URL을 replaceState로 동기화 → 뒤로가기 시 검색어 복원
+    const handlePrevPage = () => {
+        goToPage(page - 1);
+    };
+
+    const handleNextPage = () => {
+        goToPage(page + 1);
+    };
+
+    const handlePageClick = (p: number) => {
+        goToPage(p);
+    };
+    // searchQuery 또는 page가 바뀔 때마다 URL을 replaceState로 동기화 → 뒤로가기 시 검색어/페이지 복원
     useEffect(() => {
         const urlParams = new URLSearchParams();
         if (searchQuery) urlParams.set('q', searchQuery);
+        if (page > 1) urlParams.set('page', String(page));
         const newUrl = `/jobs${urlParams.toString() ? `?${urlParams.toString()}` : ''}`;
         if (newUrl !== window.location.pathname + window.location.search) {
             window.history.replaceState(null, '', newUrl);
         }
-    }, [searchQuery]);
+    }, [searchQuery, page]);
 
     const [inputValue, setInputValue] = useState(initialQ);
     const [showSuggestions, setShowSuggestions] = useState(false);
@@ -93,6 +104,7 @@ export function JobListPage() {
         const timer = setTimeout(() => {
             if (inputValue !== searchQuery) {
                 setSearchQuery(inputValue);
+                setPage(1);
             }
         }, 400);
         return () => clearTimeout(timer);
@@ -101,12 +113,14 @@ export function JobListPage() {
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
         setSearchQuery(inputValue);
+        setPage(1);
         setShowSuggestions(false);
     };
 
     const handleSuggestionClick = (name: string) => {
         setInputValue(name);
         setSearchQuery(name);
+        setPage(1);
         setShowSuggestions(false);
     };
 
@@ -192,7 +206,7 @@ export function JobListPage() {
                             <Briefcase className="w-6 h-6 text-blue-500" />
                             {searchQuery ? `'${searchQuery}' 분석 결과` : '최신 직무 트렌드'}
                         </h2>
-                        <p className="text-slate-500 text-sm">{jobs.length}개의 포지션이 분석됨</p>
+                        <p className="text-slate-500 text-sm">{totalJobs}개의 포지션이 분석됨</p>
                     </div>
 
                     <div className="flex items-center gap-4 text-xs font-bold text-slate-500 uppercase tracking-widest">
@@ -364,22 +378,49 @@ export function JobListPage() {
                                 </Card>
                             );
                         })}
-
-                        {hasMore && (
-                            <div className="flex justify-center pt-2">
-                                <Button
-                                    variant="outline"
-                                    onClick={handleLoadMore}
-                                    disabled={loadingMore}
-                                    className="px-6 py-2 rounded-full text-xs font-bold tracking-widest uppercase"
-                                >
-                                    {loadingMore ? '불러오는 중...' : `다음 ${PAGE_SIZE}개 직무 더 보기`}
-                                </Button>
-                            </div>
-                        )}
                     </div>
                 )}
             </div>
+
+            {/* Pagination Controls */}
+            {!loading && totalPages > 1 && (
+                <div className="flex justify-center items-center gap-4 pt-10">
+                    <Button
+                        variant="outline"
+                        disabled={page === 1}
+                        onClick={handlePrevPage}
+                        className="border-slate-800 text-white disabled:opacity-30 rounded-xl"
+                    >
+                        이전
+                    </Button>
+                    <div className="flex items-center gap-2">
+                        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                            const startPage = Math.max(1, Math.min(page - 2, Math.max(1, totalPages - 4)));
+                            const p = startPage + i;
+                            if (p > totalPages) return null;
+
+                            return (
+                                <Button
+                                    key={p}
+                                    variant={page === p ? "secondary" : "ghost"}
+                                    onClick={() => handlePageClick(p)}
+                                    className="h-10 w-10 p-0 rounded-xl"
+                                >
+                                    {p}
+                                </Button>
+                            );
+                        })}
+                    </div>
+                    <Button
+                        variant="outline"
+                        disabled={page === totalPages}
+                        onClick={handleNextPage}
+                        className="border-slate-800 text-white disabled:opacity-30 rounded-xl"
+                    >
+                        다음
+                    </Button>
+                </div>
+            )}
 
             {/* Guide Section */}
             <div className="bg-slate-900 border border-slate-800 rounded-[2rem] p-12 text-center space-y-8">

@@ -295,6 +295,11 @@ class MajorListResponse(PaginatedResponse):
     items: List[MajorResponse]
 
 
+class JobListResponse(PaginatedResponse):
+    """Job list response."""
+    items: List[JobResponse]
+
+
 class AvailableMajorsResponse(BaseModel):
     """Available majors list response."""
     majors: List[str]
