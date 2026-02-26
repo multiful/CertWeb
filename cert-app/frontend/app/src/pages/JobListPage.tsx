@@ -124,7 +124,7 @@ export function JobListPage() {
         setShowSuggestions(false);
     };
 
-    const suggestionJobs = Array.isArray(jobs) ? jobs : [];
+    const jobList: Job[] = Array.isArray(jobs) ? jobs : [];
 
     return (
         <div className="space-y-12 pb-20">
@@ -179,12 +179,12 @@ export function JobListPage() {
                         </Button>
 
                         {/* Suggestions Dropdown */}
-                        {showSuggestions && inputValue.length >= 1 && suggestionJobs.length > 0 && (
+                        {showSuggestions && inputValue.length >= 1 && jobList.length > 0 && (
                             <div className="absolute top-full left-0 right-0 mt-3 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 max-h-60 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-700 animate-in fade-in slide-in-from-top-2 duration-200">
                                 <div className="p-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-950/20 border-b border-slate-800">
-                                    추천 직무 ({suggestionJobs.length})
+                                    추천 직무 ({jobList.length})
                                 </div>
-                                {suggestionJobs.slice(0, 10).map((job) => (
+                                {jobList.slice(0, 10).map((job) => (
                                     <div
                                         key={job.job_id}
                                         className="px-5 py-3 hover:bg-slate-800 cursor-pointer text-slate-200 border-b border-slate-800/50 last:border-0 flex items-center justify-between group/item transition-colors"
@@ -221,7 +221,7 @@ export function JobListPage() {
                     <div className="grid gap-8">
                         {[1, 2, 3].map(i => <Skeleton key={i} className="h-96 rounded-[2rem] bg-slate-900" />)}
                     </div>
-                ) : jobs.length === 0 ? (
+                ) : jobList.length === 0 ? (
                     <Card className="bg-slate-900/40 border-slate-800 border-dashed py-32 text-center rounded-[2rem]">
                         <CardContent className="space-y-6">
                             <div className="p-8 bg-slate-900 rounded-full w-fit mx-auto">
@@ -235,7 +235,7 @@ export function JobListPage() {
                     </Card>
                 ) : (
                     <div className="grid gap-10">
-                        {jobs.map((job) => {
+                        {jobList.map((job) => {
                             const radarData = [
                                 { subject: '보상', A: job.reward || 0, fullMark: 100 },
                                 { subject: '안정성', A: job.stability || 0, fullMark: 100 },

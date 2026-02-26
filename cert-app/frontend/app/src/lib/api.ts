@@ -243,7 +243,36 @@ export async function getJobs(
     if (params.page) query.append('page', params.page.toString());
     if (params.page_size) query.append('page_size', params.page_size.toString());
 
-    return await apiRequest<JobListResponse>(`/jobs?${query.toString()}`);
+    const raw = await apiRequest<any>(`/jobs?${query.toString()}`);
+
+    // 백엔드가 아직 배열 형태(Job[])를 반환하는 경우(구버전 호환)
+    if (Array.isArray(raw)) {
+      const page = params.page ?? 1;
+      const pageSize = params.page_size ?? raw.length;
+      const total = raw.length;
+      const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1;
+      return {
+        items: raw,
+        total,
+        page,
+        page_size: pageSize,
+        total_pages: totalPages,
+      };
+    }
+
+    // 정상적인 JobListResponse 형태
+    if (raw && Array.isArray(raw.items)) {
+      return raw as JobListResponse;
+    }
+
+    // 예기치 못한 응답 형태에 대한 안전한 폴백
+    return {
+      items: [],
+      total: 0,
+      page: params.page ?? 1,
+      page_size: params.page_size ?? 20,
+      total_pages: 0,
+    };
   } catch {
     // 네트워크 실패 시 빈 페이지네이션 응답 반환
     return {
