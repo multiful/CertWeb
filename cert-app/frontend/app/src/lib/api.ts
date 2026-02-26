@@ -246,14 +246,16 @@ export async function getJobs(
     const raw = await apiRequest<any>(`/jobs?${query.toString()}`);
 
     // 백엔드가 아직 배열 형태(Job[])를 반환하는 경우(구버전 호환)
+    // 한 페이지가 꽉 찼으면 다음 페이지가 있을 수 있으므로 total_pages를 page+1 이상으로 둬서 페이지 UI가 나오게 함
     if (Array.isArray(raw)) {
       const page = params.page ?? 1;
-      const pageSize = params.page_size ?? raw.length;
+      const pageSize = params.page_size ?? 20;
       const total = raw.length;
-      const totalPages = pageSize > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 1;
+      const hasMore = raw.length >= pageSize;
+      const totalPages = hasMore ? Math.max(2, page + 1) : page;
       return {
         items: raw,
-        total,
+        total: hasMore ? page * pageSize + 1 : (page - 1) * pageSize + total,
         page,
         page_size: pageSize,
         total_pages: totalPages,
