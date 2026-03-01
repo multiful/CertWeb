@@ -16,7 +16,7 @@
 
 | 환경 | URL |
 |------|-----|
-| **프론트엔드** | https://cert-web-multifuls-projects.vercel.app (또는 배포된 Vercel URL) |
+| **프론트엔드** | https://cert-web-multifuls-projects.vercel.app |
 | **백엔드 API** | https://certweb-xzpx.onrender.com |
 | **헬스 체크** | https://certweb-xzpx.onrender.com/health |
 
