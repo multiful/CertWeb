@@ -43,6 +43,8 @@ class Settings(BaseSettings):
 
     # CORS (쉼표 구분. 비어 있으면 기본값 사용)
     CORS_ORIGINS: str = ""
+    # Trusted Host (쉼표 구분. 비어 있으면 Render + localhost)
+    ALLOWED_HOSTS: str = ""
 
     # RAG: 유사도 임계값 (이하면 결과에서 제외). 0이면 미적용.
     RAG_MATCH_THRESHOLD: float = 0.4

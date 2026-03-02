@@ -24,6 +24,24 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+# CORS 허용 오리진 (환경변수 없으면 기본값: Vercel 프로덕션 + DEBUG 시 localhost)
+def _get_allowed_origins() -> list[str]:
+    if settings.CORS_ORIGINS and settings.CORS_ORIGINS.strip():
+        return [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+    base = ["https://cert-web-multifuls-projects.vercel.app"]
+    if settings.DEBUG:
+        base.extend(["http://localhost:5173", "http://127.0.0.1:5173"])
+    return base
+
+# Trusted Host 허용 호스트 (환경변수 없으면 Render + localhost)
+def _get_allowed_hosts() -> list[str]:
+    if settings.ALLOWED_HOSTS and settings.ALLOWED_HOSTS.strip():
+        return [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
+    return ["certweb-xzpx.onrender.com", "localhost", "127.0.0.1"]
+
+ALLOWED_ORIGINS = _get_allowed_origins()
+ALLOWED_HOSTS = _get_allowed_hosts()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -130,56 +148,57 @@ app.add_middleware(
     minimum_size=1000
 )
 
-# 3. Trusted Host (Safe but can stay)
-from fastapi.middleware.trustedhost import TrustedHostMiddleware
+# 3. Trusted Host (실제 서비스 도메인만 허용)
 app.add_middleware(
     TrustedHostMiddleware,
-    allowed_hosts=["*"]
+    allowed_hosts=ALLOWED_HOSTS,
 )
 
-# 2. CORS
-# Bearer 토큰 기반 인증은 CORS allow_credentials 불필요.
-# allow_origins=["*"]로 Cloudflare/Vercel 프리뷰 URL 등 모든 환경에서 안정적으로 동작.
+# 2. CORS (프론트 도메인만 허용)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
-# 1. Custom HTTP Middleware (Outermost for process time)
+# 1. Custom HTTP Middleware (Outermost: process time + 보안 헤더)
 @app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    # Special handle for OPTIONS to be ABSOLUTELY sure no 400 occurs
+async def add_process_time_and_security_headers(request: Request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
-        
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
-    
     if hasattr(request.state, "rate_limit_remaining"):
         response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
-    
+    # 보안 헤더
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
 # Exception handlers
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    """Handle generic exceptions."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-    # ServerErrorMiddleware가 이 핸들러를 호출할 때 CORSMiddleware를 우회하므로
-    # 응답에 CORS 헤더를 직접 포함시켜야 한다.
+    """Handle generic exceptions. 로그에는 스택만, 파라미터/토큰 원문은 남기지 않음."""
+    logger.exception("Unhandled exception: %s", type(exc).__name__)
+    origin = request.headers.get("origin") or ""
+    allow_origin = origin if origin in ALLOWED_ORIGINS else (ALLOWED_ORIGINS[0] if ALLOWED_ORIGINS else "*")
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={"detail": "Internal server error"},
         headers={
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": allow_origin,
             "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
             "Access-Control-Allow-Headers": "*",
+            "X-Frame-Options": "DENY",
+            "X-Content-Type-Options": "nosniff",
         },
     )
 

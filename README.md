@@ -107,71 +107,26 @@ CertWeb/
 
 ---
 
-## 시작하기 (로컬 개발)
+## 운영/유지보수 메모 (내부용)
 
-### 사전 요구
+이 서비스는 **Vercel(프론트) + Render(백엔드) + Supabase(Postgres) + Redis Cloud** 환경에 배포된 상태로 운영되며,  
+일반 사용자가 로컬에서 직접 서버를 띄우는 것을 전제로 하지 않습니다. 아래 내용은 **운영자용 메모**입니다.
 
-- **Python 3.11+** (권장: `uv` 사용)
-- **Node.js 18+**
-- **Supabase / Redis** (또는 로컬 PostgreSQL + Redis)
+- **환경 변수 분리**
+  - 프론트(Vercel): `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` 등 브라우저에서 필요한 값만 저장.
+  - 백엔드(Render): `DATABASE_URL`, `REDIS_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `OPENAI_API_KEY` 등 비밀 키는 모두 Render 환경변수에만 저장.
+  - DB 접속 정보나 Service Role Key, JWT Secret은 Vercel에 두지 않고 노출 시 즉시 키를 회전(재발급)한다.
 
-### 백엔드
+- **RAG 임베딩 관리**
+  - 자격증 요약 텍스트 임베딩은 Supabase `certificates_vectors` 테이블에 미리 저장되어 있으며,
+    필요 시 운영자가 `scripts/populate_certificates_vectors.py`를 안전한 환경(로컬 관리자 또는 백엔드 워커)에서 실행해 재생성한다.
+  - 이 작업에는 `OPENAI_API_KEY`와 DB 권한이 필요하므로, 일반 사용자는 수행할 수 없다.
 
-```bash
-cd cert-app/backend
+- **모니터링**
+  - Render `/health` 엔드포인트와 UptimeRobot으로 슬립/다운 여부를 모니터링한다.
+  - `ai_recommendations` 모듈에서 남기는 metrics 로그(응답 시간, 후보 수, 점수 분포)를 통해 AI 추천 품질·속도를 정기적으로 점검한다.
 
-# uv 사용 시 (권장)
-uv pip install -r requirements.txt
-uv run uvicorn main:app --reload --host 127.0.0.1 --port 8000
-```
-
-또는 기존 venv:
-
-```bash
-python -m venv venv
-# Windows: venv\Scripts\activate
-# macOS/Linux: source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --host 127.0.0.1 --port 8000
-```
-
-- API 베이스: **http://127.0.0.1:8000/api/v1**
-- 헬스: **http://127.0.0.1:8000/health**
-
-### 프론트엔드
-
-```bash
-cd cert-app/frontend/app
-npm install
-npm run dev
-```
-
-- 개발 서버: **http://localhost:5173** (또는 Vite 안내 주소)
-
-### 환경 변수 (백엔드 `.env`)
-
-```env
-DATABASE_URL=postgresql://...
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_ANON_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...
-SUPABASE_JWT_SECRET=...
-REDIS_URL=redis://...
-OPENAI_API_KEY=sk-...
-
-# 문의 폼 (선택)
-SMTP_HOST=smtp.naver.com
-SMTP_PORT=587
-EMAIL_USER=your@naver.com
-EMAIL_PASSWORD=<앱 비밀번호>
-CONTACT_EMAIL=your@naver.com
-```
-
-프론트엔드 (Vite):
-
-```env
-VITE_API_BASE_URL=http://127.0.0.1:8000/api/v1
-```
+로컬 개발/실행 방법은 문서에서 제거하고, 배포된 웹 서비스를 기준으로만 안내한다.
 
 ---
 
@@ -188,17 +143,11 @@ Render Free 플랜은 비활성 시 슬립 가능. `/health`로 UptimeRobot 등 
 
 ---
 
-## AI 추천 품질 (임베딩 채우기)
+## AI 추천 품질 (개발자 참고)
 
-자격증 테이블의 `embedding` 컬럼이 비어 있으면 시멘틱 검색이 동작하지 않습니다. 백엔드에서:
-
-```bash
-cd cert-app/backend
-uv run python scripts/populate_certificates_vectors.py
-```
-
-- `OPENAI_API_KEY` 필요
-- `--truncate`: 기존 벡터 비우고 재생성 (선택)
+- AI 추천은 Supabase `certificates_vectors` 테이블의 임베딩과 통계 테이블(`qualification_stats`)을 기반으로 동작한다.
+- 운영 중에는 주기적으로 데이터 변경 여부를 확인하고, 필요 시 운영자가 RAG 인덱스를 재생성한다.
+- 이 과정은 배포된 서비스의 일환으로만 수행되며, 일반 사용자는 임베딩 생성/갱신 작업에 접근할 수 없다.
 
 ---
 
