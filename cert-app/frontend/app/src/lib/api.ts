@@ -25,6 +25,8 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ||
 
 /** 요청 타임아웃 (ms). 실무에서는 15~30초 권장 */
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
+/** AI 추천 등 무거운 API용 타임아웃 (cold start·embedding·LLM 고려) */
+const AI_RECOMMENDATION_TIMEOUT_MS = 45000;
 /** 재시도 횟수 (네트워크/5xx만). 4xx는 재시도 안 함 */
 const MAX_RETRIES = 2;
 /** 재시도 대기: 지수 백오프 (1초, 2초) */
@@ -47,17 +49,22 @@ async function getErrorDetail(response: Response): Promise<string> {
   return response.statusText || `HTTP ${response.status}`;
 }
 
+/** RequestInit + 선택적 timeoutMs (해당 요청만 타임아웃 연장) */
+type ApiRequestOptions = RequestInit & { timeoutMs?: number };
+
 async function apiRequest<T>(
   path: string,
-  options?: RequestInit,
+  options?: ApiRequestOptions,
   retries = MAX_RETRIES
 ): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const { timeoutMs: _omit, ...requestInit } = options ?? {};
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), DEFAULT_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const init: RequestInit = {
-    ...options,
-    signal: options?.signal ?? controller.signal,
-    headers: { ...options?.headers },
+    ...requestInit,
+    signal: requestInit.signal ?? controller.signal,
+    headers: { ...requestInit.headers },
   };
 
   try {
@@ -81,7 +88,7 @@ async function apiRequest<T>(
       const delay = RETRY_DELAY_MS * (MAX_RETRIES - retries + 1);
       console.warn(`[API Retry] ${path} in ${delay}ms (${retries} left)`);
       await sleep(delay);
-      return apiRequest<T>(path, options, retries - 1);
+      return apiRequest<T>(path, options as ApiRequestOptions, retries - 1);
     }
     if (error.status === 401) {
       console.warn(`API Request 401 for ${path}`);
@@ -203,7 +210,7 @@ export async function getHybridRecommendations(
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return await apiRequest<HybridRecommendationResponse>(
     `/recommendations/ai/hybrid-recommendation?${query.toString()}`,
-    { headers }
+    { headers, timeoutMs: AI_RECOMMENDATION_TIMEOUT_MS }
   );
 }
 
