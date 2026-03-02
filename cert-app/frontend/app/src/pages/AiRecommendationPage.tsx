@@ -347,7 +347,7 @@ export function AiRecommendationPage() {
                                     </CardTitle>
                                     {res.pass_rate != null && (
                                         <div className="flex items-center gap-2 mt-1">
-                                            <span className="text-[11px] text-slate-500">합격률</span>
+                                            <span className="text-[11px] text-slate-500">최근합격률</span>
                                             <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden max-w-[80px]">
                                                 <div
                                                     className={`h-full rounded-full transition-all ${

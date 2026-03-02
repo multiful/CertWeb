@@ -353,6 +353,15 @@ async def hybrid_recommendation(
                 "semantic_similarity": float(r.similarity),
             }
 
+    # 후보 수가 너무 많을 경우(이론상 수백 개) 이후 단계 속도를 위해 상위 일부만 남긴다.
+    if len(candidate_map) > 180:
+        trimmed = sorted(
+            candidate_map.values(),
+            key=lambda c: (c["major_score"] * 0.6) + (c["semantic_similarity"] * 0.4),
+            reverse=True,
+        )[:180]
+        candidate_map = {c["qual_id"]: c for c in trimmed}
+
     # --- 4) 난이도 + 합격률 통계 일괄 로드 ------------------------------------
     candidate_ids = list(candidate_map.keys())
     diff_lookup: dict[int, Optional[float]] = {}
@@ -374,11 +383,12 @@ async def hybrid_recommendation(
         if max_semantic > 0:
             for c in candidate_map.values():
                 raw = float(c["semantic_similarity"]) / max_semantic  # 0~1
-                # 작은 값도 눈에 보이도록 sqrt로 감마 보정 (0.25 -> 0.5 등)
-                scaled = raw ** 0.5
-                # 0이 아닌 경우에는 최소 0.15 이상으로 올려서 바가 보이게 함
+                # 더 공격적인 감마 보정으로 작은 값도 크게 올린다.
+                # 예: 0.1 -> ~0.56, 0.25 -> ~0.71, 1.0 -> 1.0
+                scaled = raw ** 0.35
+                # 0이 아닌 경우에는 최소 0.35 이상으로 올려서 바가 확실히 보이게 함
                 if scaled > 0:
-                    scaled = max(0.15, scaled)
+                    scaled = max(0.35, scaled)
                 c["semantic_similarity"] = min(scaled, 1.0)
 
     # --- 5) RRF (Reciprocal Rank Fusion) 점수 계산 ---------------------------
