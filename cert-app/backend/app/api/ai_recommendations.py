@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+import time
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
@@ -29,6 +30,11 @@ from app.redis_client import redis_client
 
 router = APIRouter(prefix="/recommendations/ai", tags=["ai-recommendations"])
 logger = logging.getLogger(__name__)
+
+# 하이브리드 RAG 후보 풀 및 정렬 관련 기본 파라미터
+HYBRID_TOP_PER_QUERY = 30            # certificates_vectors에서 질의당 가져올 상위 결과 수
+HYBRID_GLOBAL_RESULTS_LIMIT = 80     # RRF 이후 전역 후보에서 사용할 상위 결과 수
+HYBRID_CANDIDATE_TRIM_LIMIT = 120    # major/semantic 통합 후 유지할 최대 후보 수
 
 
 @router.get("/semantic-search", response_model=SemanticSearchResponse)
@@ -127,6 +133,9 @@ async def hybrid_recommendation(
     else:
         expanded_interest = major
 
+    # 처리 시간 측정을 위한 타이머 시작 (메트릭 수집용)
+    start_time = time.perf_counter()
+
     # --- 1) 사용자 맥락 수집 (학년, 프로필 전공, 북마크/취득 자격증 난이도) -----------------
     grade_year: Optional[int] = None
     fav_items, acq_items = [], []
@@ -189,7 +198,7 @@ async def hybrid_recommendation(
         queries: List[str],
         query_vectors: List[List[float]],
         exclude_qual_ids: List[int],
-        top_per_query: int = 30,
+        top_per_query: int = HYBRID_TOP_PER_QUERY,
         use_fulltext: bool = True,
     ) -> tuple[dict[int, float], dict[int, str]]:
         """
@@ -311,13 +320,23 @@ async def hybrid_recommendation(
             multi_queries,
             query_vectors,
             exclude_ids_list,
-            top_per_query=30,
+            top_per_query=HYBRID_TOP_PER_QUERY,
             use_fulltext=interest_provided,
         )
         global_results = [
             type("Row", (), {"qual_id": qid, "qual_name": hybrid_qual_names.get(qid, ""), "similarity": sc})()
-            for qid, sc in sorted(hybrid_rrf_scores.items(), key=lambda x: -x[1])[:80]
+            for qid, sc in sorted(hybrid_rrf_scores.items(), key=lambda x: -x[1])[:HYBRID_GLOBAL_RESULTS_LIMIT]
         ]
+
+        logger.debug(
+            "hybrid_recommendation.pool major=%r interest_provided=%r "
+            "top_per_query=%d hybrid_candidates=%d global_results=%d",
+            major,
+            interest_provided,
+            HYBRID_TOP_PER_QUERY,
+            len(hybrid_rrf_scores),
+            len(global_results),
+        )
 
         # 전공명 벡터 유사도: certificates_vectors에서 qual_id별 최고 유사도 사용
         major_sim_sql = text("""
@@ -372,13 +391,21 @@ async def hybrid_recommendation(
             }
 
     # 후보 수가 너무 많을 경우(이론상 수백 개) 이후 단계 속도를 위해 상위 일부만 남긴다.
-    if len(candidate_map) > 120:
+    initial_candidate_count = len(candidate_map)
+    if len(candidate_map) > HYBRID_CANDIDATE_TRIM_LIMIT:
         trimmed = sorted(
             candidate_map.values(),
             key=lambda c: (c["major_score"] * 0.6) + (c["semantic_similarity"] * 0.4),
             reverse=True,
-        )[:120]
+        )[:HYBRID_CANDIDATE_TRIM_LIMIT]
         candidate_map = {c["qual_id"]: c for c in trimmed}
+
+    logger.debug(
+        "hybrid_recommendation.candidates major=%r initial=%d after_trim=%d",
+        major,
+        initial_candidate_count,
+        len(candidate_map),
+    )
 
     # --- 4) 난이도 + 합격률 통계 일괄 로드 ------------------------------------
     candidate_ids = list(candidate_map.keys())
@@ -477,7 +504,9 @@ async def hybrid_recommendation(
             if grade_year is not None and grade_year >= 3 and diff < 3.0:
                 difficulty_factor *= 0.80
             delta = abs(diff - target_difficulty)
-            difficulty_factor *= max(0.75, 1.1 - (delta / 4.0))
+            # 목표 난이도에서 멀어질수록 조금 더 강하게 페널티를 주어
+            # 체감 난이도와 맞지 않는 추천이 상위에 오는 것을 줄인다.
+            difficulty_factor *= max(0.70, 1.15 - (delta / 3.0))
 
         pr_factor = _pass_rate_factor(pass_rate_lookup.get(cid))
 
@@ -488,8 +517,11 @@ async def hybrid_recommendation(
             major_norm = 1.0
         sem_norm = max(0.0, min(c["semantic_similarity"], 1.0))
 
-        # 정합성 기본 점수: 전공 40%, 관심사 60%
-        base_match = 0.4 * major_norm + 0.6 * sem_norm
+        # 정합성 기본 점수: interest가 있을 때는 관심사(semantic)를 더 강하게 반영
+        if interest_provided:
+            base_match = 0.3 * major_norm + 0.7 * sem_norm
+        else:
+            base_match = 0.5 * major_norm + 0.5 * sem_norm
 
         # 최종 하이브리드 = (전공/관심사 매칭) × 난이도 보정 × 합격률 보정
         h_score = base_match * difficulty_factor * pr_factor
@@ -503,6 +535,8 @@ async def hybrid_recommendation(
     # UI에서 정합성(%)을 0~100 범위로 직관적으로 보여주기 위해, 0~1 구간으로 재스케일링한다.
     # 모든 하이브리드 점수가 동일한 경우에도 순위 기반으로 약간의 분산을 줘서
     # 게이지가 전부 같은 값으로 보이지 않도록 한다.
+    max_h = 0.0
+    min_h = 0.0
     if final_results:
         max_h = max(c["hybrid_score"] for c in final_results)
         min_h = min(c["hybrid_score"] for c in final_results)
@@ -528,11 +562,25 @@ async def hybrid_recommendation(
         if n_rank == 1:
             ranked_for_interest[0]["interest_level"] = 9
         elif n_rank > 1:
-            span = n_rank - 1
-            for idx, c in enumerate(ranked_for_interest):
-                frac = 1.0 - (idx / span)
-                level = 1 + int(round(frac * 8))  # 1~9
-                c["interest_level"] = max(1, min(level, 9))
+            if n_rank <= 3:
+                # 후보 수가 2~3개일 때는 단순히 9,8,7 정도로만 분배
+                levels = [9, 8, 7]
+                for idx, c in enumerate(ranked_for_interest):
+                    c["interest_level"] = levels[idx]
+            else:
+                # 상위 3개는 9,8,7로 고정하고, 나머지는 1~6 사이로 완만하게 분배
+                span_rest = n_rank - 3
+                for idx, c in enumerate(ranked_for_interest):
+                    if idx == 0:
+                        level = 9
+                    elif idx == 1:
+                        level = 8
+                    elif idx == 2:
+                        level = 7
+                    else:
+                        frac = 1.0 - ((idx - 3) / span_rest)  # 1~0
+                        level = 1 + int(round(frac * 5))      # 1~6
+                    c["interest_level"] = max(1, min(level, 9))
 
     # --- 8) 1차 정렬 & 결과 수 제한 ------------------------------------------
     effective_limit = min(limit, GUEST_RESULT_LIMIT) if not user_id else limit
@@ -575,6 +623,7 @@ async def hybrid_recommendation(
     # --- 10) 폴백 reason (규칙 기반) --------------------------
     def _fallback_reason(c: dict, diff: Optional[float]) -> str:
         ms, ss = c["major_score"], c["semantic_similarity"]
+        pr = pass_rate_lookup.get(c["qual_id"]) if "qual_id" in c else None
 
         # 난이도 문구에 사용할 표시용 난이도 (실제 로직에는 영향 X)
         display_diff = diff
@@ -582,24 +631,35 @@ async def hybrid_recommendation(
             # 4학년 이상에게는 5.0~7.0 구간을 적합 난이도로 강조
             display_diff = max(5.0, min(diff, 7.0))
 
-        # 전공/관심사 매칭 정도에 따른 기본 설명
-        if ms > 8.0 and ss > 0.4:
-            base = f"전공({major})과 매우 밀접하며 입력하신 관심사와도 높은 연관성을 보이는 자격증입니다."
-        elif ms > 7.0:
-            base = "전공 분야의 핵심 역량을 증명할 수 있는 주요 자격증입니다."
-        elif ss > 0.6 and interest:
-            base = f"입력하신 \"{interest}\"와(과) 내용이 밀접하게 연결된 자격증입니다."
-        elif ss > 0.4 and interest:
-            base = f"관심사와 관련된 업무에서 자주 활용되는 자격증입니다."
+        # 전공/관심사·난이도·합격률 조합에 따른 기본 설명 패턴
+        if ms > 8.0 and ss > 0.6:
+            base = f"전공({major})과 매우 밀접하며 입력하신 관심사와도 강하게 연결되는 핵심 자격증입니다."
+        elif ms > 8.0:
+            base = "전공 분야의 핵심 역량을 증명할 수 있는 대표적인 자격증입니다."
+        elif ss > 0.7 and interest:
+            base = f"입력하신 \"{interest}\"와(과) 내용이 밀접하게 연결된 실무 중심 자격증입니다."
+        elif ss > 0.5 and interest:
+            base = f"관심사와 연관된 업무에서 자주 활용되는 자격증입니다."
+        elif diff is not None and diff > target_difficulty + 1.5:
+            base = "현재 수준보다 한 단계 높은 난이도로, 성장과 포트폴리오 강화를 노릴 때 적합한 자격증입니다."
         else:
-            base = c.get("reason") or "전공·관심사 분석에 기반한 추천 자격증입니다."
+            base = c.get("reason") or "전공·관심사 분석에 기반해 선별된 추천 자격증입니다."
+
+        # 합격률 맥락 추가
+        if pr is not None:
+            if pr < 20:
+                base += " 합격률이 낮아 난이도는 높은 편이지만, 취득 시 경쟁력이 크게 올라갑니다."
+            elif pr < 40:
+                base += " 합격률이 높지는 않지만 준비할 가치가 큰 자격증입니다."
+            elif pr > 70:
+                base += " 비교적 합격률이 높아 입문·기초를 다지기 좋은 자격증입니다."
 
         # 난이도 맥락 추가 (표시용 난이도 사용)
         if display_diff is not None and grade_year is not None:
             if grade_year <= 2 and display_diff <= 6.0:
                 base += f" 현재 {grade_year}학년 수준에서 도전하기 좋은 난이도({display_diff:.1f})입니다."
             elif grade_year >= 3:
-                base += f" {grade_year}학년에게 적합한 난이도({display_diff:.1f})입니다."
+                base += f" {grade_year}학년에게 적합한 난이도({display_diff:.1f})로 설계되어 있습니다."
 
         return base
 
@@ -627,6 +687,21 @@ async def hybrid_recommendation(
         interest=interest,
         results=items,
         guest_limited=not bool(user_id),
+    )
+
+    # 메트릭 로깅: 처리 시간, 후보 수, 점수 분포 등 (개인정보 제외)
+    elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+    logger.info(
+        "hybrid_recommendation.metrics major=%r interest_len=%d tier=%s "
+        "candidates=%d final=%d elapsed_ms=%.1f max_h=%.3f min_h=%.3f",
+        major,
+        len(interest) if interest else 0,
+        "guest" if not user_id else "user",
+        len(candidate_map),
+        len(final_results),
+        elapsed_ms,
+        max_h,
+        min_h,
     )
 
     # --- 12) Redis 캐시에 최종 결과 저장 ---------------------------------------
