@@ -427,6 +427,33 @@ async def hybrid_recommendation(
 
     # --- 8) 1차 정렬 & 결과 수 제한 ------------------------------------------
     effective_limit = min(limit, GUEST_RESULT_LIMIT) if not user_id else limit
+
+    # final_results가 비어 있는 경우 방어적 폴백:
+    # - major_qualification_map 기반 상위 자격증들로 최소한 몇 개는 내려준다.
+    if not final_results and major_results:
+        logger.info(
+            "hybrid_recommendation: final_results empty; using major_results fallback. "
+            "major=%r, interest_provided=%r, major_rows=%d",
+            major,
+            interest_provided,
+            len(major_results),
+        )
+        fallback = []
+        for r in major_results[:effective_limit]:
+            fallback.append(
+                {
+                    "qual_id": r.qual_id,
+                    "qual_name": r.qual_name,
+                    "major_score": float(r.mapping_score or 0.0),
+                    "reason": r.reason or f"전공({major})과의 연관성이 높은 자격증입니다.",
+                    "semantic_similarity": 0.0,
+                    "hybrid_score": float(r.mapping_score or 0.0),
+                    "pass_rate": None,
+                    "rrf_score": None,
+                }
+            )
+        final_results = fallback
+
     # LLM re-ranking 후보로 최대 20개를 준비 (로그인 사용자) / 게스트는 그대로 잘라냄
     rrf_sorted = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)
     rerank_pool = rrf_sorted[:20] if user_id else rrf_sorted[:effective_limit]
