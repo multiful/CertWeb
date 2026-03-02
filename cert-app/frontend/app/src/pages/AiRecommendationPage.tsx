@@ -16,6 +16,7 @@ import {
     Target,
     Zap,
     GitMerge,
+    Layers,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,12 +64,12 @@ const AI_STATS = [
         desc: '키워드 + 시멘틱 융합',
     },
     {
-        label: '임베딩 차원',
-        value: '1,536',
-        unit: 'd',
-        icon: BrainCircuit,
+        label: '순위 융합 (RRF)',
+        value: 'RRF',
+        unit: '',
+        icon: Layers,
         color: 'indigo',
-        desc: 'OpenAI text-embedding-3',
+        desc: '벡터·풀텍스트 순위 융합',
     },
 ] as const;
 

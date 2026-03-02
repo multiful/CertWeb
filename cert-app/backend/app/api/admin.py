@@ -1,8 +1,9 @@
 """Admin API routes for automation."""
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from sqlalchemy.orm import Session
-from typing import Optional
+import asyncio
 import logging
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 
 from app.api.deps import get_db_session, verify_job_secret
 from app.schemas import (
@@ -13,6 +14,7 @@ from app.schemas import (
 )
 from app.redis_client import redis_client
 from app.crud import major_map_crud
+from app.database import SessionLocal
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -65,6 +67,46 @@ async def flush_cache(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to flush cache"
         )
+
+
+@router.post(
+    "/cache/flush-and-sync",
+    response_model=SyncStatsResponse,
+    summary="Flush Redis and re-sync from DB",
+    description="Flush all Redis cache then repopulate fastcert keys from DB (background). Use after data changes without restart."
+)
+async def flush_and_sync_cache(
+    _: bool = Depends(verify_job_secret)
+):
+    """Flush all cache and trigger background sync from DB (qualification + stats → fastcert:*)."""
+    if not redis_client.is_connected():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis not connected"
+        )
+    ok = redis_client.flush_all()
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to flush cache"
+        )
+
+    async def _run_sync():
+        from app.services.fast_sync_service import FastSyncService
+        db = SessionLocal()
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, FastSyncService.sync_all_to_redis, db)
+        finally:
+            db.close()
+
+    asyncio.create_task(_run_sync())
+    logger.info("Cache flushed; background Redis sync started.")
+    return SyncStatsResponse(
+        success=True,
+        message="Cache flushed. Background sync from DB started.",
+        processed=0
+    )
 
 
 @router.post(

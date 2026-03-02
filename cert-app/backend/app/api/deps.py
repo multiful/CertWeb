@@ -43,8 +43,11 @@ def verify_job_secret(x_job_secret: Optional[str] = Header(None)) -> bool:
 
 def check_rate_limit(request: Request) -> None:
     """Check rate limit for request."""
-    # Get client IP
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+    # Get client IP (request.client can be None under TestClient / some ASGI)
+    client_ip = request.headers.get(
+        "X-Forwarded-For",
+        getattr(request.client, "host", None) if request.client else "127.0.0.1",
+    )
     if client_ip and "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
     
@@ -74,7 +77,10 @@ def check_rate_limit(request: Request) -> None:
 
 def check_auth_rate_limit(request: Request) -> None:
     """Auth 전용 엄격 레이트 리밋 (send_code, login, password_reset 등). 분당 5회 등."""
-    client_ip = request.headers.get("X-Forwarded-For", request.client.host)
+    client_ip = request.headers.get(
+        "X-Forwarded-For",
+        getattr(request.client, "host", None) if request.client else "127.0.0.1",
+    )
     if client_ip and "," in client_ip:
         client_ip = client_ip.split(",")[0].strip()
     key = f"rate_limit_auth:{client_ip}"

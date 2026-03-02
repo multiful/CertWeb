@@ -111,6 +111,51 @@ async def _backoff_async(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+async def multi_query_expand_async(
+    query: str,
+    num_queries: int = 3,
+    model: str = "gpt-4o-mini",
+) -> List[str]:
+    """
+    Multi-Query Expansion: 사용자 질의를 num_queries개의 유사한 질문으로 확장.
+    하이브리드 검색 시 각 질문으로 검색 후 RRF 융합에 사용.
+    실패 시 [query]만 반환 (안전 폴백).
+    """
+    if not query or not query.strip():
+        return [query.strip() or "자격증"]
+    if not settings.OPENAI_API_KEY:
+        return [query.strip()]
+    try:
+        response = await async_client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "당신은 자격증·커리어 검색 전문가입니다. "
+                        "주어진 질문과 의미적으로 유사한 다른 질문을 한국어로 생성합니다. "
+                        "원문과 동일하지 않게, 같은 의도를 다른 표현으로 바꾼 질문만 나열하세요. "
+                        "한 줄에 하나의 질문만 출력하고, 요청한 개수만큼만 출력하세요."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"질문: {query.strip()}\n\n위와 유사한 질문을 정확히 {num_queries}개만 생성하세요 (번호 없이 한 줄에 하나).",
+                },
+            ],
+            max_tokens=300,
+            temperature=0.3,
+        )
+        content = (response.choices[0].message.content or "").strip()
+        lines = [ln.strip() for ln in content.splitlines() if ln.strip()][:num_queries]
+        if len(lines) >= 1:
+            return lines
+        return [query.strip()]
+    except Exception as e:
+        logger.warning("multi_query_expand_async failed (fallback): %s", e)
+        return [query.strip()]
+
+
 async def expand_query_async(
     major: str,
     interest: Optional[str],
