@@ -374,23 +374,6 @@ async def hybrid_recommendation(
             diff_lookup[qid] = s.get("avg_difficulty")
             pass_rate_lookup[qid] = s.get("latest_pass_rate")
 
-    # --- 4-1) 시멘틱 유사도 정규화 ---------------------------------------------
-    # hybrid_rrf_from_certificates_vectors 가 반환한 similarity는 RRF 합산 점수이므로
-    # 그대로 두면 값의 스케일이 매우 작게 나와 UI에서 모두 0으로 보일 수 있다.
-    # 전공/관심사 입력을 더 직관적으로 보여주기 위해 0~1 범위로 정규화 + 감마 보정한다.
-    if candidate_map:
-        max_semantic = max((c["semantic_similarity"] for c in candidate_map.values()), default=0.0)
-        if max_semantic > 0:
-            for c in candidate_map.values():
-                raw = float(c["semantic_similarity"]) / max_semantic  # 0~1
-                # 더 공격적인 감마 보정으로 작은 값도 크게 올린다.
-                # 예: 0.1 -> ~0.56, 0.25 -> ~0.71, 1.0 -> 1.0
-                scaled = raw ** 0.35
-                # 0이 아닌 경우에는 최소 0.35 이상으로 올려서 바가 확실히 보이게 함
-                if scaled > 0:
-                    scaled = max(0.35, scaled)
-                c["semantic_similarity"] = min(scaled, 1.0)
-
     # --- 5) RRF (Reciprocal Rank Fusion) 점수 계산 ---------------------------
     # 세 가지 순위 리스트를 RRF로 융합: major_score / semantic_similarity / major_sim
     RRF_K = 60
@@ -403,6 +386,29 @@ async def hybrid_recommendation(
     major_rank_map = {cid: i + 1 for i, cid in enumerate(major_ranked)}
     semantic_rank_map = {cid: i + 1 for i, cid in enumerate(semantic_ranked)}
     major_sim_rank_map = {cid: i + 1 for i, cid in enumerate(major_sim_ranked)}
+
+    # --- 5-1) 시멘틱 유사도 점수 재스케일 (랭크 기반) --------------------------
+    # RRF 내부 유사도 값 대신, 순위 정보를 사용해 0~1 범위로 고르게 분포시키기 위해
+    # semantic_rank_map을 기반으로 선형 스케일링 후 약한 감마 보정을 적용한다.
+    interest_provided = bool(interest and interest.strip())
+    n = len(candidate_map)
+    if n == 1:
+        # 후보가 하나뿐이면 관심사 유사도는 1.0
+        for c in candidate_map.values():
+            c["semantic_similarity"] = 1.0
+    elif n > 1:
+        max_rank = n
+        span = max_rank - 1
+        for cid, c in candidate_map.items():
+            rank = semantic_rank_map.get(cid, max_rank)
+            # 상위 순위일수록 1.0에 가깝고, 하위 순위일수록 0.0에 가깝게 매핑
+            base = 1.0 - (rank - 1) / span
+            # interest가 있을 때는 시멘틱 비중을 더 강조
+            if interest_provided:
+                base = base ** 0.6  # 약한 감마: 상위권과 하위권 차이를 키움
+            else:
+                base = base ** 0.8 * 0.8  # 관심사 없이도 너무 낮지 않게 유지
+            c["semantic_similarity"] = max(0.0, min(base, 1.0))
 
     interest_provided = bool(interest and interest.strip())
     # interest 있으면 semantic 가중치 높임 (2배), 없으면 균등
