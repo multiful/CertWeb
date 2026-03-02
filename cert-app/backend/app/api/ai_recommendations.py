@@ -366,6 +366,16 @@ async def hybrid_recommendation(
             diff_lookup[qid] = s.get("avg_difficulty")
             pass_rate_lookup[qid] = s.get("latest_pass_rate")
 
+    # --- 4-1) 시멘틱 유사도 정규화 ---------------------------------------------
+    # hybrid_rrf_from_certificates_vectors 가 반환한 similarity는 RRF 합산 점수이므로
+    # 그대로 두면 값의 스케일이 매우 작게 나와 UI에서 모두 0으로 보일 수 있다.
+    # 전공/관심사 입력을 더 직관적으로 보여주기 위해 0~1 범위로 선형 정규화한다.
+    if candidate_map:
+        max_semantic = max((c["semantic_similarity"] for c in candidate_map.values()), default=0.0)
+        if max_semantic > 0:
+            for c in candidate_map.values():
+                c["semantic_similarity"] = float(c["semantic_similarity"]) / max_semantic
+
     # --- 5) RRF (Reciprocal Rank Fusion) 점수 계산 ---------------------------
     # 세 가지 순위 리스트를 RRF로 융합: major_score / semantic_similarity / major_sim
     RRF_K = 60
@@ -395,12 +405,19 @@ async def hybrid_recommendation(
 
     # --- 6) 합격률 시그널 계산 ------------------------------------------------
     # 적정 합격률(25~55%) 구간에 점수 부스트, 너무 낮거나(< 5%) 너무 높으면(> 85%) 약간 감점
+    # 추가로, 매우 낮은 합격률(< 20%) 시험은 체감 난이도가 높다고 보고 가중치를 더 준다.
     def _pass_rate_factor(pr: Optional[float]) -> float:
         if pr is None:
             return 1.0  # 데이터 없으면 중립
         p = pr / 100.0
-        # 벨 곡선 중심 0.40, 최솟값 0.85 (감점 최대 15%)
-        return max(0.85, 1.05 - abs(p - 0.40) * 0.5)
+        base = max(0.85, 1.05 - abs(p - 0.40) * 0.5)
+        if p < 0.20:
+            base *= 1.15
+        elif p < 0.40:
+            base *= 1.05
+        elif p > 0.70:
+            base *= 0.90
+        return base
 
     # --- 7) 최종 스코어 (필터링 제거: 후보를 최대한 살려둔다) ----------------
     # min_semantic / major_score 기반 하드 필터는 잠시 비활성화하고,
