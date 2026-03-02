@@ -146,7 +146,7 @@ export function AiRecommendationPage() {
         setLoading(true);
         setError(null);
         try {
-            const res = await getHybridRecommendations(major, interest, 10, token);
+            const res = await getHybridRecommendations(major, interest, 15, token);
             setResults(res);
             // 결과를 sessionStorage에 캐싱 → 뒤로가기 시 재호출 없이 복원
             try {
@@ -462,7 +462,7 @@ export function AiRecommendationPage() {
                                         <h3 className="text-lg font-bold text-white">더 많은 자격증을 확인하려면</h3>
                                         <p className="text-slate-400 text-sm leading-relaxed">
                                             로그인하면 맞춤형 추천 결과를 <br />
-                                            <span className="text-blue-400 font-semibold">최대 10개</span>까지 확인할 수 있습니다.<br />
+                                            <span className="text-blue-400 font-semibold">최대 15개</span>까지 확인할 수 있습니다.<br />
                                             학년·취득 자격증 기반 난이도 조정도 지원됩니다.
                                         </p>
                                     </div>

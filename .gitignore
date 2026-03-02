@@ -82,3 +82,7 @@ docker-compose.override.yml
 *.temp
 .env.backup
 .env.*.backup
+
+# [Backend] 로컬 문서·마이그레이션 (배포 불필요, GitHub 미푸시)
+cert-app/backend/docs/
+cert-app/backend/migrations/

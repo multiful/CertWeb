@@ -349,7 +349,7 @@ export function RecommendationPage() {
               </div>
               <h3 className="text-lg font-bold text-white">데이터 기반 분석</h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                실제 합격률, 응시자 수, 난이도 데이터를 종합적으로 분석하여 신뢰할 수 있는 추천을 제공합니다.
+                합격률·응시자 수·난이도 등 실제 시험 데이터와 하이브리드 검색(RRF) 결과를 반영해 신뢰할 수 있는 추천을 제공합니다.
               </p>
             </CardContent>
           </Card>
@@ -361,7 +361,7 @@ export function RecommendationPage() {
               </div>
               <h3 className="text-lg font-bold text-white">전공 연관성</h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                입력하신 전공의 커리큘럼과 자격증 시험 과목의 연관성을 심층 분석하여 최적의 경로를 제시합니다.
+                전공·관심사를 반영한 시멘틱 검색과 키워드 매칭을 결합해, 자격증 시험 과목과의 연관성을 분석하여 최적의 취득 경로를 제시합니다.
               </p>
             </CardContent>
           </Card>
@@ -373,7 +373,7 @@ export function RecommendationPage() {
               </div>
               <h3 className="text-lg font-bold text-white">맞춤 성장 로드맵</h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                단순한 자격증 추천을 넘어, 사용자의 커리어 성장을 위한 단계별 자격증 취득 로드맵을 함께 고민합니다.
+                학년·취득 자격증을 반영한 난이도 조정과 함께, 전공 맞춤 추천으로 단계별 자격증 취득 로드맵을 제안합니다.
               </p>
             </CardContent>
           </Card>

@@ -43,6 +43,9 @@ function getTierMeta(tier: string | null | undefined) {
     return TIER_META[tier ?? ''] ?? TIER_META['Bronze'];
 }
 
+const MYPAGE_CACHE_KEY = 'certfinder-mypage-cache';
+const MYPAGE_CACHE_TTL_MS = 90 * 1000; // 90초: 탭 전환 후 복귀 시 캐시로 즉시 표시
+
 // ─── 프론트엔드 XP 계산 (백엔드 미배포 상태에서도 동작하는 폴백) ────────────
 const LOCAL_LEVEL_THRESHOLDS = [0, 5, 15, 35, 70, 120, 190, 290, 430];
 
@@ -186,8 +189,8 @@ export function MyPage() {
         ? popularMajorsFromApi
         : ['컴퓨터공학', '정보통신공학', '전자공학', '경영학', '경제학', '심리학', '간호학', '교육학'];
 
-    const loadData = async () => {
-        setDataLoading(true);
+    const loadData = async (showLoading = true) => {
+        if (showLoading) setDataLoading(true);
         try {
             const majorFromUser = user?.user_metadata?.detail_major;
 
@@ -214,16 +217,33 @@ export function MyPage() {
             setXpSummary(summaryRes);
 
             const finalMajor = profileData?.detail_major ?? majorFromUser;
+            let recList: any[];
             if (finalMajor && profileData?.detail_major !== majorFromUser) {
                 const recResFromProfile = await getRecommendations(finalMajor, 20);
-                setRecommendations(recResFromProfile.items || []);
+                recList = recResFromProfile.items || [];
             } else {
-                setRecommendations(recRes.items || []);
+                recList = recRes.items || [];
+            }
+            setRecommendations(recList);
+
+            try {
+                sessionStorage.setItem(MYPAGE_CACHE_KEY, JSON.stringify({
+                    userId: user?.id,
+                    ts: Date.now(),
+                    favorites: favRes.items.map((f: any) => f.qualification),
+                    recentCerts: recentData,
+                    profile: profileData,
+                    acquiredCerts: acquiredRes.items,
+                    xpSummary: summaryRes,
+                    recommendations: recList,
+                }));
+            } catch {
+                // sessionStorage 풀 등 무시
             }
         } catch (err: any) {
             console.error('Failed to load mypage data:', err);
         } finally {
-            setDataLoading(false);
+            if (showLoading) setDataLoading(false);
         }
     };
 
@@ -261,7 +281,28 @@ export function MyPage() {
             return;
         }
 
-        loadData();
+        let cached: { userId?: string; ts?: number; favorites?: any[]; recentCerts?: any[]; profile?: any; acquiredCerts?: any[]; xpSummary?: any; recommendations?: any[] };
+        try {
+            const raw = sessionStorage.getItem(MYPAGE_CACHE_KEY);
+            if (raw) cached = JSON.parse(raw);
+        } catch {
+            cached = {};
+        }
+        const isCacheValid = cached?.userId === user.id
+            && cached.ts != null
+            && (Date.now() - cached.ts) < MYPAGE_CACHE_TTL_MS;
+        if (isCacheValid && cached) {
+            setFavorites(cached.favorites ?? []);
+            setRecentCerts(cached.recentCerts ?? []);
+            setProfile(cached.profile ?? null);
+            setAcquiredCerts(cached.acquiredCerts ?? []);
+            setXpSummary(cached.xpSummary ?? null);
+            setRecommendations(cached.recommendations ?? []);
+            setDataLoading(false);
+            loadData(false);
+        } else {
+            loadData(true);
+        }
     }, [user, token, router, authLoading]);
 
     if (authLoading) {
