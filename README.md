@@ -41,10 +41,10 @@
 ### 3. AI 추천 (하이브리드 RAG)
 
 - **전공 + 관심사 입력**: 전공명·커리어 목표 기반 추천
-- **알고리즘**: Multi-Query Expansion → 전공 매핑 + 하이브리드 검색(벡터+풀텍스트, RRF) → 합격률·난이도 보정 → **LLM 리랭킹** + 맞춤 이유 생성
+- **알고리즘**: 전공 매핑 + 하이브리드 검색(벡터 + 풀텍스트, RRF) → 합격률·난이도 보정 → 규칙 기반 맞춤 이유 생성
 - **퍼지 전공 매칭**: DB에 없는 전공명은 pg_trgm 유사도로 근접 전공 사용
 - **취득 자격증 제외**: 로그인 시 이미 취득한 자격증은 추천 후보에서 제외
-- **게스트**: 비로그인 시 결과 3개 제한; 로그인 시 **최대 15개** 결과 + LLM 이유
+- **게스트**: 비로그인 시 결과 3개 제한; 로그인 시 **최대 15개** 결과 제공
 
 ### 4. 계정·마이페이지
 
@@ -70,7 +70,7 @@
 | **DB** | PostgreSQL (Supabase), pgvector |
 | **캐시** | Redis Cloud |
 | **Auth** | Supabase Auth (JWT, Google OAuth) |
-| **AI** | OpenAI text-embedding-3-small, GPT-4o-mini (쿼리 확장·리랭킹·이유 생성) |
+| **AI** | OpenAI text-embedding-3-small (검색·추천), 선택적 GPT 계열 모델(법령 요약·벡터 인덱싱 파이프라인) |
 | **배포** | Vercel (Frontend), Render (Backend) |
 | **이메일** | Naver SMTP (문의 폼) |
 
