@@ -44,7 +44,7 @@ function getTierMeta(tier: string | null | undefined) {
 }
 
 const MYPAGE_CACHE_KEY = 'certfinder-mypage-cache';
-const MYPAGE_CACHE_TTL_MS = 90 * 1000; // 90초: 탭 전환 후 복귀 시 캐시로 즉시 표시
+const MYPAGE_CACHE_TTL_MS = 5 * 60 * 1000; // 5분: 탭 전환 후 복귀 시 캐시로 즉시 표시
 
 // ─── 프론트엔드 XP 계산 (백엔드 미배포 상태에서도 동작하는 폴백) ────────────
 const LOCAL_LEVEL_THRESHOLDS = [0, 5, 15, 35, 70, 120, 190, 290, 430];
@@ -288,7 +288,8 @@ export function MyPage() {
         } catch {
             cached = {};
         }
-        const isCacheValid = cached?.userId === user.id
+        const isCacheValid = cached != null
+            && String(cached.userId) === String(user.id)
             && cached.ts != null
             && (Date.now() - cached.ts) < MYPAGE_CACHE_TTL_MS;
         if (isCacheValid && cached) {
@@ -299,11 +300,11 @@ export function MyPage() {
             setXpSummary(cached.xpSummary ?? null);
             setRecommendations(cached.recommendations ?? []);
             setDataLoading(false);
-            loadData(false);
-        } else {
-            loadData(true);
+            const timer = setTimeout(() => loadData(false), 50);
+            return () => clearTimeout(timer);
         }
-    }, [user, token, router, authLoading]);
+        loadData(true);
+    }, [user?.id, token, authLoading]);
 
     if (authLoading) {
         return (

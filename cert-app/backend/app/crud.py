@@ -122,12 +122,12 @@ class QualificationCRUD:
                     asc(func.avg(QualificationStats.pass_rate)).nulls_last()
                 )
             else:
-                # 난이도 정렬: 표시값은 pass_rate 역함수이므로 pass_rate 역순으로 정렬
-                # (difficulty_score 컬럼은 로딩 시점 계산값이라 표시값과 불일치 → pass_rate 사용)
+                # 난이도 정렬: difficulty_score 기준 (표시 avg_difficulty와 동일 소스로 정렬)
+                # NULL은 마지막, sort_desc=True → 높은 순(어려운 순)
                 query = query.order_by(
-                    asc(func.avg(QualificationStats.pass_rate)).nulls_last()
+                    desc(func.avg(QualificationStats.difficulty_score)).nulls_last()
                     if sort_desc else
-                    desc(func.avg(QualificationStats.pass_rate)).nulls_last()
+                    asc(func.avg(QualificationStats.difficulty_score)).nulls_last()
                 )
         
         # Apply pagination
