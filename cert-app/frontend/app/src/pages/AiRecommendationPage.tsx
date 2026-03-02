@@ -413,7 +413,12 @@ export function AiRecommendationPage() {
                                         <div className="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
                                             <div
                                                 className="h-full bg-purple-500 transition-all"
-                                                style={{ width: `${res.semantic_similarity * 100}%` }}
+                                                style={{
+                                                    width: `${Math.max(
+                                                        10,
+                                                        Math.min(res.semantic_similarity, 1) * 100
+                                                    )}%`,
+                                                }}
                                             />
                                         </div>
                                     </div>

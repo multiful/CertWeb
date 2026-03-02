@@ -108,14 +108,19 @@ async def hybrid_recommendation(
         logger.warning("hybrid_recommendation: non-UUID user_id ignored: %r", user_id)
         user_id = None
 
-    try:
-        expanded_interest = await expand_query_async(major, interest)
-    except Exception as e:
-        logger.exception("hybrid_recommendation expand_query failed")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="쿼리 확장 서비스를 일시적으로 사용할 수 없습니다.",
-        ) from e
+    # 관심사가 있을 때만 LLM 기반 쿼리 확장을 사용하고,
+    # 단순 전공 추천(interest 없음)일 때는 LLM 호출을 생략해 속도를 높인다.
+    if interest:
+        try:
+            expanded_interest = await expand_query_async(major, interest)
+        except Exception as e:
+            logger.exception("hybrid_recommendation expand_query failed")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="쿼리 확장 서비스를 일시적으로 사용할 수 없습니다.",
+            ) from e
+    else:
+        expanded_interest = major
 
     # --- 1) 사용자 맥락 수집 (학년, 프로필 전공, 북마크/취득 자격증 난이도) -----------------
     grade_year: Optional[int] = None
@@ -440,11 +445,18 @@ async def hybrid_recommendation(
             base *= 0.90
         return base
 
-    # --- 7) 최종 스코어 (필터링 제거: 후보를 최대한 살려둔다) ----------------
-    # min_semantic / major_score 기반 하드 필터는 잠시 비활성화하고,
-    # 난이도·합격률 보정만 적용해 하이브리드 점수만 계산한다.
-    min_semantic = 0.0
+    # --- 7) 최종 스코어 (정규화 + 가중합) --------------------------------------
+    # major_score와 semantic_similarity를 0~1 범위로 정규화한 뒤
+    # 가중치를 두어 Hybrid Score를 계산하고, 여기에 난이도·합격률 보정을 곱한다.
     final_results: list[dict] = []
+
+    # major_score 정규화용 min/max
+    if candidate_map:
+        max_major = max(c["major_score"] for c in candidate_map.values())
+        min_major = min(c["major_score"] for c in candidate_map.values())
+        major_span = max_major - min_major
+    else:
+        max_major = min_major = major_span = 0.0
 
     for cid, c in candidate_map.items():
         diff = diff_lookup.get(cid)
@@ -457,14 +469,24 @@ async def hybrid_recommendation(
 
         pr_factor = _pass_rate_factor(pass_rate_lookup.get(cid))
 
-        # 최종 하이브리드 = RRF × 난이도 보정 × 합격률 보정 (정규화용으로 10배)
-        h_score = c["rrf_score"] * difficulty_factor * pr_factor * 10.0
+        # 0~1 범위로 정규화된 major / semantic
+        if major_span > 0:
+            major_norm = (c["major_score"] - min_major) / major_span
+        else:
+            major_norm = 1.0
+        sem_norm = max(0.0, min(c["semantic_similarity"], 1.0))
+
+        # 정합성 기본 점수: 전공 40%, 관심사 60%
+        base_match = 0.4 * major_norm + 0.6 * sem_norm
+
+        # 최종 하이브리드 = (전공/관심사 매칭) × 난이도 보정 × 합격률 보정
+        h_score = base_match * difficulty_factor * pr_factor
         c["hybrid_score"] = h_score
         c["pass_rate"] = pass_rate_lookup.get(cid)
         final_results.append(c)
 
     # --- 7-1) Hybrid Score 정규화 ---------------------------------------------
-    # UI에서 정합성(%)을 좀 더 직관적으로 보여주기 위해, 상위 점수를 기준으로 0.5~1.0 구간으로 재스케일링한다.
+    # UI에서 정합성(%)을 0~100 범위로 직관적으로 보여주기 위해, 0~1 구간으로 재스케일링한다.
     if final_results:
         max_h = max(c["hybrid_score"] for c in final_results)
         min_h = min(c["hybrid_score"] for c in final_results)
@@ -472,8 +494,7 @@ async def hybrid_recommendation(
             span = max_h - min_h if max_h != min_h else max_h
             for c in final_results:
                 base = (c["hybrid_score"] - min_h) / span if span > 0 else 1.0
-                # 0.5~1.0 사이로 압축하여 상위권과 하위권 차이를 명확히 보이게 함
-                c["hybrid_score"] = 0.5 + 0.5 * base
+                c["hybrid_score"] = max(0.0, min(base, 1.0))
 
     # --- 8) 1차 정렬 & 결과 수 제한 ------------------------------------------
     effective_limit = min(limit, GUEST_RESULT_LIMIT) if not user_id else limit
