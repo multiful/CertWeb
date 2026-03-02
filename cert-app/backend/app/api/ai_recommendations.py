@@ -557,30 +557,19 @@ async def hybrid_recommendation(
                     c["hybrid_score"] = max(0.0, min(frac, 1.0))
 
         # 최종 정렬된 하이브리드 점수를 기준으로 관심도 레벨(1~9)을 다시 계산
+        # 하드코딩된 순위 기반 레벨이 아니라, 실제 hybrid_score(0~1)에 기반한 비선형 매핑을 사용한다.
         ranked_for_interest = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)
         n_rank = len(ranked_for_interest)
         if n_rank == 1:
+            # 한 개만 있을 때는 최고 관심도로 간주
             ranked_for_interest[0]["interest_level"] = 9
         elif n_rank > 1:
-            if n_rank <= 3:
-                # 후보 수가 2~3개일 때는 단순히 9,8,7 정도로만 분배
-                levels = [9, 8, 7]
-                for idx, c in enumerate(ranked_for_interest):
-                    c["interest_level"] = levels[idx]
-            else:
-                # 상위 3개는 9,8,7로 고정하고, 나머지는 1~6 사이로 완만하게 분배
-                span_rest = n_rank - 3
-                for idx, c in enumerate(ranked_for_interest):
-                    if idx == 0:
-                        level = 9
-                    elif idx == 1:
-                        level = 8
-                    elif idx == 2:
-                        level = 7
-                    else:
-                        frac = 1.0 - ((idx - 3) / span_rest)  # 1~0
-                        level = 1 + int(round(frac * 5))      # 1~6
-                    c["interest_level"] = max(1, min(level, 9))
+            for c in ranked_for_interest:
+                frac = max(0.0, min(c["hybrid_score"], 1.0))  # 0~1
+                # 상위 점수 구간을 조금 더 넓게 주기 위해 루트 계열 곡선 사용
+                shaped = frac ** 0.7
+                level = 1 + int(round(shaped * 8))  # 1~9
+                c["interest_level"] = max(1, min(level, 9))
 
     # --- 8) 1차 정렬 & 결과 수 제한 ------------------------------------------
     effective_limit = min(limit, GUEST_RESULT_LIMIT) if not user_id else limit
