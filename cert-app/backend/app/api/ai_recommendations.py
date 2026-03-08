@@ -402,7 +402,11 @@ async def hybrid_recommendation(
                 use_enhanced_rag_result = True
                 logger.debug("hybrid_recommendation: using enhanced RAG, candidates=%d", len(global_results))
             except Exception as e:
-                logger.warning("enhanced RAG failed, falling back to current RAG: %s", e, exc_info=True)
+                logger.warning(
+                    "enhanced RAG failed, falling back to current RAG: %s (USE_ENHANCED_RAG=1 but RAG index may be missing on this host, e.g. data/rag_index/bm25.pkl)",
+                    e,
+                    exc_info=True,
+                )
 
         if not use_enhanced_rag_result:
             # 현재 RAG: certificates_vectors 기반 벡터+풀텍스트 RRF
