@@ -400,10 +400,14 @@ async def hybrid_recommendation(
                 m_sims = db.execute(major_sim_sql, {"vec": str(major_vector)}).fetchall()
                 major_sim_lookup = {r.qual_id: float(r.major_sim) for r in m_sims}
                 use_enhanced_rag_result = True
-                logger.debug("hybrid_recommendation: using enhanced RAG, candidates=%d", len(global_results))
+                logger.info(
+                    "hybrid_recommendation: using enhanced RAG, candidates=%d",
+                    len(global_results),
+                )
             except Exception as e:
                 logger.warning(
-                    "enhanced RAG failed, falling back to current RAG: %s (USE_ENHANCED_RAG=1 but RAG index may be missing on this host, e.g. data/rag_index/bm25.pkl)",
+                    "enhanced RAG failed, falling back to current RAG: %s: %s",
+                    type(e).__name__,
                     e,
                     exc_info=True,
                 )

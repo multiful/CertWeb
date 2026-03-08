@@ -118,20 +118,22 @@ backend/
 
 ### Current 모델 대비 성장
 
-- **Current 모델**: 이전 실서비스 기준 — 벡터 단일 검색 또는 벡터 + 임계값(0.4). BM25·RRF·리랭커 미적용.
-- **고도화 모델(Enhanced)**: Hybrid RAG — BM25 + Vector + RRF/Linear Fusion + Query Routing + Dense Rewrite + Cross-Encoder Reranker + Metadata Soft Score.
+- **Current 모델**: 이전 실서비스 기준 — 벡터 단일 검색(certificates_vectors) + 임계값 0.4. BM25·RRF·리랭커 미적용.
+- **고도화 모델(Enhanced)**: Hybrid RAG — BM25 + Vector + RRF + Dense Rewrite + Metadata Soft Score. **리랭커 미적용**으로 측정.
 
-동일 골든셋·동일 환경에서 측정한 **Current 대비 성장** 예시는 아래와 같다. (골든·버전에 따라 수치가 달라질 수 있음.)
+동일 골든셋·동일 환경에서 **리랭커 없이** 측정한 Current 대비 성장은 아래와 같다.
 
-| 지표 | Current (이전 실서비스) | 고도화(Enhanced) | 성장 |
-|------|--------------------------|------------------|------|
-| **MRR@4** | 0.809 | 0.838 | **약 +3.6%** |
-| **Recall@20 / Hit@20** | 기준선 | RRF·후보풀·BM25 튜닝으로 상승 | 최대화 방향으로 개선 |
-| **nDCG@20, nDCG@4** | 기준선 | BM25(b=0.5)·리랭커 조합으로 소폭 상승 | 개선 |
-| **Recall@10 / Precision@10 / F1** (8쿼리) | Current(0.4) | 고도화(0.3+Hybrid) | `compare_rag_three_way.py` 실행 시 베이스라인 대비 % 변화로 출력 |
+| 지표 | Current (벡터 단일, 임계값 0.4) | 고도화 (Hybrid, 리랭커 미적용) | 성장 |
+|------|---------------------------------|---------------------------------|------|
+| **Recall@5** | 0.167 | 0.556 | **+233%** |
+| **Recall@10** | 0.167 | 0.667 | **+300%** |
+| **Recall@20** | 0.278 | 0.778 | **+180%** |
+| **Hit@20** | 0.67 | 2.00 | **+200%** |
+| **Success@4** | 0.333 | 0.667 | **+100%** |
+| **MRR@4** | 0.083 | 0.667 | **+700%** |
 
-- MRR@4 수치는 RRF 구간에서 Vector 임계값(0.025)·Fusion 튜닝 적용 전후를 비교한 값이다.
-- Recall/Precision/F1의 Current 대비 변화는 `uv run python scripts/compare_rag_three_way.py` 실행 시 **베이스라인 대비 변화**로 확인할 수 있다.
+- 측정: `uv run python scripts/eval_current_vs_enhanced.py --golden data/reco_golden_hard3.jsonl --out data/current_vs_enhanced.json` (골든 `reco_golden_hard3.jsonl`, n=3).
+- 재측정: `--golden data/reco_golden_recommendation_18.jsonl` 등 다른 골든으로 실행하면 질의 수·도메인에 따라 수치가 달라진다.
 
 ### 선택 적용·Ablation
 
