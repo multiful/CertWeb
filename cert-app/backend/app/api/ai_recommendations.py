@@ -353,8 +353,8 @@ async def hybrid_recommendation(
                 major_results = []
 
         use_enhanced_rag_result = False
-        global_results: list = []
-        major_sim_lookup: dict = {}
+        global_results = []
+        major_sim_lookup = {}
 
         if USE_ENHANCED_RAG:
             try:
@@ -364,7 +364,7 @@ async def hybrid_recommendation(
                     top_k=HYBRID_GLOBAL_RESULTS_LIMIT,
                     use_reranker=False,
                 )
-                hybrid_rrf_scores: dict = {}
+                hybrid_rrf_scores = {}
                 for chunk_id, score in (rag_list or []):
                     part = (chunk_id or "").split(":")
                     if len(part) >= 1 and part[0].isdigit():
@@ -372,7 +372,7 @@ async def hybrid_recommendation(
                         if qid in acq_qual_ids:
                             continue
                         hybrid_rrf_scores[qid] = hybrid_rrf_scores.get(qid, 0.0) + float(score)
-                hybrid_qual_names: dict = {}
+                hybrid_qual_names = {}
                 if hybrid_rrf_scores:
                     qual_ids = list(hybrid_rrf_scores.keys())
                     try:
@@ -400,79 +400,15 @@ async def hybrid_recommendation(
                 m_sims = db.execute(major_sim_sql, {"vec": str(major_vector)}).fetchall()
                 major_sim_lookup = {r.qual_id: float(r.major_sim) for r in m_sims}
                 use_enhanced_rag_result = True
-                logger.debug(
-                    "hybrid_recommendation: using enhanced RAG, candidates=%d",
-                    len(global_results),
-                )
+                logger.debug("hybrid_recommendation: using enhanced RAG, candidates=%d", len(global_results))
             except Exception as e:
-                logger.warning(
-                    "enhanced RAG failed, falling back to current RAG: %s",
-                    e,
-                    exc_info=True,
-                )
+                logger.warning("enhanced RAG failed, falling back to current RAG: %s", e, exc_info=True)
 
         if not use_enhanced_rag_result:
             # 현재 RAG: certificates_vectors 기반 벡터+풀텍스트 RRF
-            # Dense 전용 query rewrite (app.rag 있으면 설정 시 구조화 질의로 임베딩, 없으면 expanded_interest 사용)
-            dense_query = expanded_interest
-            try:
-                from app.rag.config import get_rag_settings
-                from app.rag.utils.dense_query_rewrite import rewrite_for_dense
-                user_profile_for_rewrite: Optional[dict] = None
-                if user_id and (get_rag_settings().RAG_PERSONALIZED_DENSE_REWRITE_ENABLE or False):
-                    fav_qual_ids = [f.qual_id for f in fav_items]
-                    fav_names: List[str] = []
-                    fav_field_tokens: List[str] = []
-                    if fav_qual_ids:
-                        try:
-                            fav_rows = db.execute(
-                                text("SELECT qual_id, qual_name, main_field, ncs_large FROM qualification WHERE qual_id = ANY(:ids)"),
-                                {"ids": fav_qual_ids},
-                            ).fetchall()
-                            for r in fav_rows:
-                                if getattr(r, "qual_name", None):
-                                    fav_names.append(str(r.qual_name).strip())
-                                for fld in (getattr(r, "main_field", None), getattr(r, "ncs_large", None)):
-                                    if fld and str(fld).strip():
-                                        fav_field_tokens.append(str(fld).strip())
-                        except Exception:
-                            pass
-                    acq_names = []
-                    if acq_qual_ids:
-                        try:
-                            acq_rows = db.execute(
-                                text("SELECT qual_id, qual_name FROM qualification WHERE qual_id = ANY(:ids)"),
-                                {"ids": list(acq_qual_ids)},
-                            ).fetchall()
-                            for r in acq_rows:
-                                if getattr(r, "qual_name", None):
-                                    acq_names.append(str(r.qual_name).strip())
-                        except Exception:
-                            pass
-                    user_profile_for_rewrite = {
-                        "major": major,
-                        "grade_level": grade_year,
-                        "favorite_cert_names": fav_names[:10],
-                        "favorite_field_tokens": list(dict.fromkeys(fav_field_tokens))[:20],
-                        "acquired_qual_ids": list(acq_qual_ids),
-                        "acquired_cert_names": acq_names[:10],
-                    }
-                    if grade_year is None:
-                        user_profile_for_rewrite.pop("grade_level", None)
-                if get_rag_settings().RAG_DENSE_USE_QUERY_REWRITE and expanded_interest:
-                    try:
-                        rewritten = rewrite_for_dense(
-                            expanded_interest,
-                            profile=user_profile_for_rewrite if (user_profile_for_rewrite and get_rag_settings().RAG_PERSONALIZED_DENSE_REWRITE_ENABLE) else None,
-                        )
-                        if rewritten and rewritten.strip():
-                            dense_query = rewritten
-                    except Exception:
-                        if get_rag_settings().RAG_DENSE_QUERY_REWRITE_FALLBACK:
-                            dense_query = expanded_interest
-            except ImportError:
-                pass  # app.rag 없음: dense_query = expanded_interest 유지
-            multi_queries = [dense_query]
+            # Multi-Query Expansion (기존: 3개 유사 질의)
+            # 응답 속도와 결과 일관성을 위해, 현재는 확장 질의를 1개만 사용한다.
+            multi_queries = [expanded_interest]
             try:
                 query_vectors = await asyncio.gather(*[get_embedding_async(q) for q in multi_queries])
                 major_vector = await get_embedding_async(major)
@@ -494,7 +430,6 @@ async def hybrid_recommendation(
                 type("Row", (), {"qual_id": qid, "qual_name": hybrid_qual_names.get(qid, ""), "similarity": sc})()
                 for qid, sc in sorted(hybrid_rrf_scores.items(), key=lambda x: -x[1])[:HYBRID_GLOBAL_RESULTS_LIMIT]
             ]
-
             logger.debug(
                 "hybrid_recommendation.pool major=%r interest_provided=%r "
                 "top_per_query=%d hybrid_candidates=%d global_results=%d",
@@ -504,8 +439,6 @@ async def hybrid_recommendation(
                 len(hybrid_rrf_scores),
                 len(global_results),
             )
-
-            # 전공명 벡터 유사도: certificates_vectors에서 qual_id별 최고 유사도 사용
             major_sim_sql = text("""
                 SELECT qual_id, MAX(1 - (embedding <=> :vec)) AS major_sim
                 FROM certificates_vectors

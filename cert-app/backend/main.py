@@ -46,10 +46,7 @@ if settings.SENTRY_DSN and settings.SENTRY_DSN.strip():
 def _get_allowed_origins() -> list[str]:
     if settings.CORS_ORIGINS and settings.CORS_ORIGINS.strip():
         return [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
-    base = [
-        "https://cert-web-multifuls-projects.vercel.app",
-        "https://cert-web-sand.vercel.app",
-    ]
+    base = [ "https://cert-web-multifuls-projects.vercel.app", "https://cert-web-sand.vercel.app", ]
     if settings.DEBUG:
         base.extend(["http://localhost:5173", "http://127.0.0.1:5173"])
     return base

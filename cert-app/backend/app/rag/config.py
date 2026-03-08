@@ -48,7 +48,7 @@ class RAGSettings(BaseSettings):
     RAG_RERANK_SCORES_PATH: Optional[str] = None  # rerank_scores.jsonl 경로
     RAG_USE_CROSS_ENCODER_RERANKER: bool = False  # True면 hybrid 후 경량 Cross-Encoder로 재정렬 (CPU 가능)
     RAG_CROSS_ENCODER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # CPU에서도 동작하는 소형 모델
-    RAG_RERANK_POOL_SIZE: int = 10  # RRF 상위 N개만 Cross-Encoder 입력. 10=지연 절반 수준, 20=최대 품질 (env로 오버라이드)
+    RAG_RERANK_POOL_SIZE: int = 30  # RRF 상위 N개만 Cross-Encoder 입력. 30=풀 확대(리랭커가 30개 안에서 top-4 선택). 10=지연 절반 (env로 오버라이드)
     # Rerank gating: "확신 높은 질의"는 리랭커 생략해 지연 절감. 기본 ON.
     # - enable=true: top1 >= top1_min_score 이고 (top1-top2) >= min_gap 이면 reranker 생략
     # - RRF 점수 스케일이 작음(대략 0.01~0.05). top1_min_score=0.02, min_gap=0.002 는 .env에서 조정 가능
