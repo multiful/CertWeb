@@ -12,7 +12,9 @@ import time
 from app.config import get_settings
 from app.database import check_database_connection
 from app.redis_client import redis_client
+from app.logging_config import log_audit
 from app.api import certs, recommendations, admin, favorites, acquired_certs, jobs, auth, majors, ai_recommendations, fast_certs
+from app.rag.api import rag_router
 from app.services.data_loader import data_loader
 
 # Configure logging
@@ -24,11 +26,30 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-# CORS 허용 오리진 (환경변수 없으면 기본값: Vercel 프로덕션 + DEBUG 시 localhost)
+# Sentry (optional)
+if settings.SENTRY_DSN and settings.SENTRY_DSN.strip():
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN.strip(),
+            environment=settings.SENTRY_ENVIRONMENT or "production",
+            integrations=[FastApiIntegration()],
+            traces_sample_rate=0.1,
+            send_default_pii=False,
+        )
+        logger.info("Sentry error tracking enabled")
+    except Exception as e:
+        logger.warning("Sentry init failed: %s", e)
+
+# CORS 허용 오리진 (환경변수 없으면 기본값: Vercel 프로덕션 + 샌드 + DEBUG 시 localhost)
 def _get_allowed_origins() -> list[str]:
     if settings.CORS_ORIGINS and settings.CORS_ORIGINS.strip():
         return [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
-    base = ["https://cert-web-multifuls-projects.vercel.app"]
+    base = [
+        "https://cert-web-multifuls-projects.vercel.app",
+        "https://cert-web-sand.vercel.app",
+    ]
     if settings.DEBUG:
         base.extend(["http://localhost:5173", "http://127.0.0.1:5173"])
     return base
@@ -180,6 +201,17 @@ async def add_process_time_and_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    client_ip = request.headers.get("X-Forwarded-For") or (getattr(request.client, "host", None) if request.client else None)
+    if client_ip and "," in str(client_ip):
+        client_ip = str(client_ip).split(",")[0].strip()
+    log_audit(
+        method=request.method,
+        path=request.url.path or "",
+        status_code=response.status_code,
+        duration_ms=process_time * 1000,
+        user_id=None,
+        client_ip=client_ip or "",
+    )
     return response
 
 
@@ -218,6 +250,7 @@ app.include_router(auth.router, prefix=v1_prefix)
 app.include_router(majors.router, prefix=v1_prefix)
 app.include_router(ai_recommendations.router, prefix=v1_prefix)
 app.include_router(fast_certs.router, prefix=v1_prefix)
+app.include_router(rag_router, prefix=v1_prefix)
 from app.api import contact
 app.include_router(contact.router, prefix=v1_prefix)
 

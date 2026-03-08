@@ -452,7 +452,8 @@ async def get_cert_trends(
 )
 async def get_trending_certs(
     limit: int = Query(10, ge=1, le=20),
-    db: Session = Depends(get_db_session)
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_rate_limit),
 ):
     """Get real-time trending certifications from Redis."""
     trending_data = redis_client.get_trending("trending_certs", limit)
@@ -513,39 +514,35 @@ async def get_trending_certs(
 async def rag_search(
     q: str = Query(..., min_length=2),
     limit: int = Query(5, ge=1, le=10),
-    db: Session = Depends(get_db_session)
+    db: Session = Depends(get_db_session),
+    _: None = Depends(check_rate_limit),
 ):
     """Perform RAG search with traffic score boosting. 단기 개선: match_threshold 적용으로 저관련 청크 제거."""
     from app.services.vector_service import vector_service
-    from app.config import get_settings
     settings = get_settings()
+    cache_key = redis_client.rag_ask_cache_key(query=q, filters={}, top_k=limit, baseline_id="current")
+    cached = redis_client.get(cache_key)
+    if cached is not None and isinstance(cached, dict):
+        return cached
     # 1. Vector similarity search (match_threshold: 설정값 이상만 반환)
     threshold = settings.RAG_MATCH_THRESHOLD if settings.RAG_MATCH_THRESHOLD > 0 else None
     vector_results = vector_service.similarity_search(
         db, q, limit=limit, match_threshold=threshold
     )
-    
     # 2. Traffic score fusion (Boost by Redis clicks)
     fusion_results = []
     for res in vector_results:
-        qual_id = res['qual_id']
-        # If qual_id is None (not matched yet), skip boosting
-        traffic_score = 0
-        if qual_id:
-            raw_score = redis_client.db.zscore("trending_certs", str(qual_id))
-            traffic_score = float(raw_score or 0) / 100.0 # Normalize boost
-        
-        # Combine scores
-        res['final_score'] = res['similarity'] + traffic_score
+        qual_id = res.get("qual_id")
+        traffic_score = 0.0
+        if qual_id and redis_client.client:
+            raw_score = redis_client.client.zscore("trending_certs", str(qual_id))
+            traffic_score = float(raw_score or 0) / 100.0
+        res["final_score"] = res.get("similarity", 0) + traffic_score
         fusion_results.append(res)
-    
-    # Sort by final score
-    fusion_results.sort(key=lambda x: x['final_score'], reverse=True)
-    
-    return {
-        "query": q,
-        "items": fusion_results
-    }
+    fusion_results.sort(key=lambda x: x["final_score"], reverse=True)
+    result = {"query": q, "items": fusion_results}
+    redis_client.set(cache_key, result, ttl=settings.CACHE_TTL_RAG)
+    return result
 
 
 @router.get(

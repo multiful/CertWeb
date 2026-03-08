@@ -8,8 +8,8 @@ psycopg2-binary==2.9.9
 alembic==1.13.1
 
 # Pydantic & Validation
-pydantic==2.5.3
-pydantic-settings==2.1.0
+pydantic==2.10.6
+pydantic-settings==2.10.1
 email-validator==2.1.0
 pgvector==0.4.2
 
@@ -33,8 +33,23 @@ python-dotenv==1.0.0
 python-dateutil==2.8.2
 openai==1.61.0
 
+# Error tracking (optional: set SENTRY_DSN to enable)
+sentry-sdk[fastapi]>=1.39.0
+
 # RAG & Chunking
 langchain-text-splitters>=0.3.0,<2
-langchain-core>=0.3.0
+langchain-core>=0.3.0,<0.4
 numpy>=1.24.0,<3
+
+# BM25 (sparse channel, ragas_eval enhanced_0.3_bm25)
+rank_bm25>=0.2.2
+
+# RAGAS 평가 (scripts/ragas_eval.py, ragas_eval_three_way.py)
+ragas==0.4.3
+datasets>=2.14.0
+
+# Dense(contrastive) + Reranker (compare_rag_hybrid_rerank.py). PyTorch 2.1 호환.
+
+# RAG Cross-Encoder Reranker (선택). RAG_USE_CROSS_ENCODER_RERANKER=true 시 사용.
+# sentence-transformers>=2.2.0
 

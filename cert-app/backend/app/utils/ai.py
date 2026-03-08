@@ -1,11 +1,15 @@
 """
 OpenAI Embedding 유틸. MLOps: 레이턴시·토큰 로깅, Sentry 연동을 위한 예외 분류.
+쿼리 임베딩 캐싱으로 반복 호출 시 API 비용/지연 절감.
 """
 import asyncio
+import hashlib
 import json
 import logging
+import threading
 import time
-from typing import List, Optional
+from collections import OrderedDict
+from typing import List, Optional, Tuple
 
 from openai import OpenAI, AsyncOpenAI
 
@@ -21,6 +25,64 @@ logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=settings.OPENAI_API_KEY)
 async_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+
+
+class EmbeddingCache:
+    """
+    쿼리 임베딩 LRU 캐시. API 호출 비용/지연 절감.
+    Thread-safe.
+    """
+    def __init__(self, max_size: int = 5000, ttl_seconds: int = 3600):
+        self._cache: OrderedDict[str, Tuple[List[float], float]] = OrderedDict()
+        self._max_size = max_size
+        self._ttl = ttl_seconds
+        self._lock = threading.Lock()
+        self._hits = 0
+        self._misses = 0
+
+    @staticmethod
+    def _make_key(text: str, model: str) -> str:
+        combined = f"{model}:{text}"
+        return hashlib.sha256(combined.encode("utf-8")).hexdigest()[:32]
+
+    def get(self, text: str, model: str) -> Optional[List[float]]:
+        key = self._make_key(text, model)
+        with self._lock:
+            if key not in self._cache:
+                self._misses += 1
+                return None
+            embedding, timestamp = self._cache[key]
+            if time.time() - timestamp > self._ttl:
+                del self._cache[key]
+                self._misses += 1
+                return None
+            self._cache.move_to_end(key)
+            self._hits += 1
+            return embedding
+
+    def set(self, text: str, model: str, embedding: List[float]) -> None:
+        key = self._make_key(text, model)
+        with self._lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+            self._cache[key] = (embedding, time.time())
+            while len(self._cache) > self._max_size:
+                self._cache.popitem(last=False)
+
+    def stats(self) -> dict:
+        with self._lock:
+            total = self._hits + self._misses
+            hit_rate = (self._hits / total * 100) if total > 0 else 0.0
+            return {
+                "size": len(self._cache),
+                "max_size": self._max_size,
+                "hits": self._hits,
+                "misses": self._misses,
+                "hit_rate_percent": round(hit_rate, 2),
+            }
+
+
+_embedding_cache = EmbeddingCache(max_size=5000, ttl_seconds=3600)
 
 
 def _log_embedding_usage(model: str, latency_ms: float, usage: object | None) -> None:
@@ -42,11 +104,20 @@ def get_embedding(
     text: str,
     model: str = "text-embedding-3-small",
     retries: int = 3,
+    use_cache: bool = True,
 ) -> List[float]:
-    """Get embedding for text using OpenAI (sync, with retry)."""
+    """Get embedding for text using OpenAI (sync, with retry + cache)."""
     if not settings.OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY is not set.")
     text = text.replace("\n", " ").strip() or " "
+    
+    # 캐시 조회
+    if use_cache:
+        cached = _embedding_cache.get(text, model)
+        if cached is not None:
+            logger.debug("embedding cache hit for text[:50]=%s...", text[:50])
+            return cached
+    
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
@@ -56,7 +127,13 @@ def get_embedding(
                 raise ValueError("OpenAI embedding returned no data")
             latency_ms = (time.perf_counter() - start) * 1000
             _log_embedding_usage(model, latency_ms, getattr(response, "usage", None))
-            return response.data[0].embedding
+            embedding = response.data[0].embedding
+            
+            # 캐시 저장
+            if use_cache:
+                _embedding_cache.set(text, model, embedding)
+            
+            return embedding
         except (APIError, APIConnectionError, RateLimitError) as e:
             last_err = e
             logger.warning("OpenAI embedding attempt %s/%s failed: %s", attempt + 1, retries, type(e).__name__)
@@ -70,6 +147,11 @@ def get_embedding(
                 raise
             time.sleep(2**attempt)
     raise RuntimeError("get_embedding unreachable") from last_err
+
+
+def get_embedding_cache_stats() -> dict:
+    """임베딩 캐시 통계 반환."""
+    return _embedding_cache.stats()
 
 
 async def get_embedding_async(
