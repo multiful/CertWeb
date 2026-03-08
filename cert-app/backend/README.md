@@ -1,58 +1,204 @@
-# 🚀 CertFinder Backend
-### 고성능 비동기 자격증 분석 API 서버
+# CertFinder Backend
+
+고성능 비동기 자격증 분석·추천 API 서버. **Hybrid RAG**(BM25 + Vector + RRF + Reranker) 기반 자격증 검색·추천과 Redis 기반 초고속 조회를 제공합니다.
 
 ---
 
-## 🏗 프로젝트 구조 (Project Structure)
+## 목차
+
+- [프로젝트 구조](#-프로젝트-구조)
+- [주요 기술 스택](#-주요-기술-스택)
+- [RAG 파이프라인 개요](#-rag-파이프라인-개요)
+- [RAG 고도화 방식 및 성과](#-rag-고도화-방식-및-성과)
+- [실행 방법](#-실행-방법)
+- [평가 및 골든셋](#-평가-및-골든셋)
+- [데이터·스크립트](#-데이터스크립트)
+- [참고 문서](#-참고-문서)
+
+---
+
+## 🏗 프로젝트 구조
 
 ```text
 backend/
 ├── app/
-│   ├── api/            # API 엔드 포인트 핸들러
-│   │   ├── auth.py     # 사용자 인증 및 프로필 관리
-│   │   ├── certs.py    # 자격증 조회 및 검색 (Standard)
-│   │   ├── fast_certs.py # Redis 기반 초고속 자격증 조회
-│   │   ├── jobs.py      # 직무 정보 조회
-│   │   └── recommendations.py # AI 및 전공 기반 추천
-│   ├── services/       # 비즈니스 로직 및 외부 연동
-│   │   ├── fast_sync_service.py # Redis Pipelining 벌크 동기화
-│   │   ├── law_update_pipeline.py # 법령 정보 및 벡터 DB 파이프라인
-│   │   └── vector_service.py # OpenAI Embedding 연동
-│   ├── utils/          # 공통 유틸리티
-│   │   ├── auth.py     # JWT 인증 유틸
-│   │   └── stream_producer.py # Redis Pub/Sub 이벤트 발행
-│   ├── redis_client.py # orjson 기반 고성능 Redis 클라이언트
-│   ├── database.py     # SQLAlchemy 엔진 및 세션 관리
-│   ├── models.py       # SQLAlchemy ORM 모델
-│   └── schemas/        # Pydantic 데이터 검증 모델
-├── main.py             # FastAPI 메인 실행 파일 및 Lifespan 관리
-├── requirements.txt    # 의존성 패키지 목록
-└── .env.example        # 환경 변수 템플릿
+│   ├── api/
+│   │   ├── auth.py           # 사용자 인증·프로필
+│   │   ├── certs.py          # 자격증 조회·검색 (Standard)
+│   │   ├── fast_certs.py     # Redis 기반 초고속 조회
+│   │   ├── ai_recommendations.py  # AI 추천 (Hybrid RAG 연동)
+│   │   ├── recommendations.py    # 전공·AI 기반 추천
+│   │   ├── jobs.py, majors.py, favorites.py, acquired_certs.py, admin.py, contact.py
+│   │   └── deps.py
+│   ├── rag/                  # RAG 검색·생성
+│   │   ├── api/routes.py     # POST /rag/ask
+│   │   ├── config.py         # RAG 하이퍼파라미터
+│   │   ├── retrieve/hybrid.py      # BM25+Vector RRF, Query Routing, Gating
+│   │   ├── retrieve/metadata_soft_score.py   # 직무·전공·분야 가산/감점
+│   │   ├── rerank/cross_encoder.py # Cross-Encoder 리랭커 (Dongjin-kr/ko-reranker)
+│   │   ├── generate/evidence_first.py, gating.py
+│   │   ├── index/            # BM25·Vector 인덱스 빌드
+│   │   ├── eval/             # Recall@k, MRR, nDCG, 골든 로더
+│   │   └── utils/            # Dense rewrite, HyDE, CoT, personalized query
+│   ├── services/
+│   │   ├── vector_service.py # OpenAI Embedding
+│   │   ├── fast_sync_service.py  # Redis 벌크 동기화
+│   │   └── data_loader.py
+│   ├── redis_client.py, database.py, models.py, schemas/, config.py
+│   └── utils/ai.py, auth.py, stream_producer.py
+├── scripts/
+│   ├── populate_certificates_vectors.py  # RAG용 certificates_vectors 채우기
+│   ├── clean_contrastive_dataset.py      # Contrastive 학습 데이터 정제 (qual_id, 5 neg, dedup)
+│   ├── clean_contrastive_dataset_v2.py   # v2: bad negative 교체, 의미 검증, audit
+│   ├── eval_hybrid_baseline.py, eval_by_query_type.py, run_dense_ablation.py
+│   ├── build_all_cert_corpus.py, align_contrastive_qual_ids_to_supabase.py
+│   └── compare_rag_three_way.py, eval_hyde_ablation.py, ...
+├── data/                     # 골든셋, 코퍼스, contrastive 학습 데이터
+├── main.py
+├── requirements.txt
+└── .env.example
 ```
 
 ---
 
-## ⚡ 주요 기술적 특징
+## ⚡ 주요 기술 스택
 
-1.  **Ultra-fast Serialization**: `orjson`을 전면 도입하여 대용량 자격증 리스트 반환 시 JSON 직렬화 병목을 제거했습니다.
-2.  **Redis-First Architecture**: 단순 캐싱을 넘어 `FastSyncService`를 통해 부팅 시 전체 인덱스를 Redis로 로드하여 하드웨어 성능을 극한으로 끌어올립니다.
-3.  **Real-time Cache Sync**: `StreamProducer`를 이용한 Redis Pub/Sub 기반의 실시간 캐시 갱신 모델을 구현했습니다.
-4.  **AI Hybrid Engine**: 벡터 검색(Semantic Search)과 전통적인 필터링을 결합한 하이브리드 추천 엔진을 제공합니다.
+| 영역 | 내용 |
+|------|------|
+| **API** | FastAPI, Pydantic, SQLAlchemy, Supabase(PostgreSQL) |
+| **캐시·속도** | Redis (orjson 직렬화), FastSyncService 부팅 시 전체 인덱스 로드, StreamProducer Pub/Sub |
+| **RAG** | BM25(한글 n-gram) + OpenAI Embedding, RRF/Linear Fusion, Query Routing, Dense Query Rewrite, Cross-Encoder Reranker(ko-reranker), Metadata·개인화 Soft Score |
+| **배포** | Render, UptimeRobot 모니터링 (규칙: `.cursor/rules/deployment.mdc` 참고) |
 
 ---
 
-reranker : Dongjin-kr/ko-reranker
+## 🔍 RAG 파이프라인 개요
 
-## Dense/Vector 검증 및 운영 기본값
+1. **질의 처리**  
+   Dense Query Rewrite(전공·학년·북마크·취득 반영), 짧은 쿼리 보조 키워드, Query Type 분류(키워드형/자연어형).
 
-- **표준 평가 골든셋**: `data/reco_golden_recommendation_18.jsonl` (18질의). 평가는 이 파일 기준으로 수행한다.
-- **Ablation**: `uv run python scripts/run_dense_ablation.py --golden data/reco_golden_recommendation_18.jsonl [--max-queries N] [--output-csv path]`
-- **Rewrite 품질**: `rewrite_for_dense` 출력은 평가 스크립트(`eval_contrastive_profile_once.py` 등) 실행 시 재질의가 반영된 retrieval로 간접 확인.
-- **Contrastive 데이터 검증**: `uv run python scripts/validate_contrastive_dataset.py --samples data/contrastive_train.jsonl [--triplets data/contrastive_triplets.jsonl] [--report path]`
-- 상세: [docs/DENSE_VECTOR_OPERATIONAL_DEFAULTS.md](docs/DENSE_VECTOR_OPERATIONAL_DEFAULTS.md)
+2. **검색**  
+   - **BM25**: 한글 2-gram, 자격명 부스팅, 추천용 purpose/직무 필드.  
+   - **Vector**: `certificates_vectors` dense_content 임베딩 검색, 임계값·게이팅.  
+   - **Query Routing**: 짧은 키워드 쿼리는 BM25 비중 확대, Vector 게이팅으로 오탐 억제.
 
-## 🛠 실행 방법 (Installation)
+3. **융합**  
+   RRF(Reciprocal Rank Fusion) 또는 Linear Fusion으로 BM25·Vector 순위 병합 → 상위 N명 후보(기본 95).
 
-1.  `.env` 파일 설정 (참고: `.env.example`)
-2.  의존성 설치: `pip install -r requirements.txt`
-3.  서버 실행: `uvicorn main:app --reload`
+4. **메타데이터·개인화**  
+   직무/전공/목적 일치 가산, 분야 이탈 감점. (선택) 개인화 soft score.
+
+5. **리랭커**  
+   Cross-Encoder(ko-reranker)로 후보 풀(기본 30) 재정렬 → 상위 4개 선택. Gating으로 확신 높은 질의는 리랭커 스킵(지연 절감).
+
+6. **생성**  
+   Evidence-first 프롬프트로 상위 청크 기반 답변 생성, Gating 조건 시 “근거 부족” 응답.
+
+---
+
+## 📈 RAG 고도화 방식 및 성과
+
+기준: **골든셋**(예: `reco_golden_recommendation_18.jsonl` 등) 기준 Recall@k, Hit@k, MRR@k, nDCG@k.  
+베이스라인 대비 아래 조합으로 단계적 개선을 적용했고, 수치는 동일 골든·환경에서의 상대적 변화를 반영합니다.
+
+### 적용한 고도화 방식
+
+| 구분 | 고도화 방식 | 설명 |
+|------|-------------|------|
+| **1. Hybrid 검색** | BM25 + Vector 병합 | 단일 벡터 검색 대비 키워드형·자연어형 모두 대응, Recall·Hit 상승. |
+| **2. RRF / Linear Fusion** | RRF K=30, 또는 Linear(λ*BM25+(1-λ)*Vector) | R@20·Hit@20·MRR@4 극대화를 위해 K·가중치 튜닝. Linear 적용 시 지표 추가 상승. |
+| **3. Vector 임계값** | `RAG_VECTOR_THRESHOLD=0.025` | 저유사도 노이즈 제거. RRF 구간에서 **MRR@4 0.809 → 0.838** 상승. |
+| **4. 후보 풀 확대** | RRF Top-N 90 → 95 | nDCG@20 소폭 상승 유지. |
+| **5. BM25 파라미터** | `b=0.5`, 한글 n-gram, 자격명 부스팅 | Hit@4·nDCG@20·nDCG@4 상승. |
+| **6. Dense Query Rewrite** | 전공·학년·북마크·취득 반영 재질의 | Vector 채널 정확도·추천 적합도 향상. |
+| **7. Query Routing + Gating** | 짧은 쿼리 BM25 강화, Vector min_score/gap 게이팅 | 짧은 키워드에서 Vector 오탐 억제, 상위 순위 보존. |
+| **8. Cross-Encoder Reranker** | Dongjin-kr/ko-reranker, 풀 30→Top 4 | 최종 노출 순위 품질 향상. Reranker Gating으로 확신 높은 질의는 스킵해 지연 절감. |
+| **9. Metadata Soft Score** | 직무·전공·목적 가산, 분야 이탈 감점 | RRF 후보 내 추천 적합 자격 상위 이동. |
+| **10. 리랭커 입력 보강** | 쿼리에 전공·목적·직무, passage에 자격명 접두사 | Reranker가 문맥을 반영해 재정렬. |
+
+### Current 모델 대비 성장
+
+- **Current 모델**: 이전 실서비스 기준 — 벡터 단일 검색 또는 벡터 + 임계값(0.4). BM25·RRF·리랭커 미적용.
+- **고도화 모델(Enhanced)**: Hybrid RAG — BM25 + Vector + RRF/Linear Fusion + Query Routing + Dense Rewrite + Cross-Encoder Reranker + Metadata Soft Score.
+
+동일 골든셋·동일 환경에서 측정한 **Current 대비 성장** 예시는 아래와 같다. (골든·버전에 따라 수치가 달라질 수 있음.)
+
+| 지표 | Current (이전 실서비스) | 고도화(Enhanced) | 성장 |
+|------|--------------------------|------------------|------|
+| **MRR@4** | 0.809 | 0.838 | **약 +3.6%** |
+| **Recall@20 / Hit@20** | 기준선 | RRF·후보풀·BM25 튜닝으로 상승 | 최대화 방향으로 개선 |
+| **nDCG@20, nDCG@4** | 기준선 | BM25(b=0.5)·리랭커 조합으로 소폭 상승 | 개선 |
+| **Recall@10 / Precision@10 / F1** (8쿼리) | Current(0.4) | 고도화(0.3+Hybrid) | `compare_rag_three_way.py` 실행 시 베이스라인 대비 % 변화로 출력 |
+
+- MRR@4 수치는 RRF 구간에서 Vector 임계값(0.025)·Fusion 튜닝 적용 전후를 비교한 값이다.
+- Recall/Precision/F1의 Current 대비 변화는 `uv run python scripts/compare_rag_three_way.py` 실행 시 **베이스라인 대비 변화**로 확인할 수 있다.
+
+### 선택 적용·Ablation
+
+- **HyDE**: Ablation에서 베이스라인 대비 상승했으나 운영에서는 오탐·비용 고려로 **기본 OFF**.
+- **CoT / Step-back / BM25 PRF**: 방법론 확장용 옵션, 기본 OFF. 필요 시 `app/rag/config.py` 및 평가 스크립트로 비교 가능.
+
+---
+
+## 🛠 실행 방법
+
+1. **환경**  
+   `.env` 설정 (참고: `.env.example`).  
+   Python: `uv` 사용 시 `uv run`으로 실행.
+
+2. **의존성**  
+   `pip install -r requirements.txt` 또는 `uv pip install -r requirements.txt`
+
+3. **서버**  
+   `uvicorn main:app --reload`  
+   (규칙: `.cursor/rules/use-uv.mdc`에 따라 venv 내 `uv` 경로 사용 가능)
+
+4. **RAG 인덱스**  
+   BM25·Vector 인덱스 갱신:  
+   `uv run python scripts/populate_certificates_vectors.py`  
+   `python -m app.rag index` (BM25 인덱스 빌드)
+
+---
+
+## 📊 평가 및 골든셋
+
+- **표준 골든셋**: `data/reco_golden_recommendation_18.jsonl` (18질의). 확장 골든은 `data/reco_golden_*.jsonl` 등.
+- **Hybrid 베이스라인 (Reranker OFF/ON)**  
+  `uv run python scripts/eval_hybrid_baseline.py --golden data/reco_golden_recommendation_18.jsonl`
+- **질의 유형별 Recall/MRR**  
+  `uv run python scripts/eval_by_query_type.py` (골든 경로는 스크립트 인자 참고)
+- **Dense Ablation**  
+  `uv run python scripts/run_dense_ablation.py --golden data/reco_golden_recommendation_18.jsonl [--max-queries N] [--output-csv path]`
+- **3축 비교 (베이스라인 / 현재 / 고도화)**  
+  `uv run python scripts/compare_rag_three_way.py`
+
+상세 운영 기본값·평가 절차: `docs/DENSE_VECTOR_OPERATIONAL_DEFAULTS.md` (해당 문서가 있는 경우).
+
+---
+
+## 📁 데이터·스크립트
+
+| 용도 | 파일·스크립트 |
+|------|----------------|
+| **RAG 코퍼스** | `data/all_cert_corpus.json` (Supabase export 기반: `scripts/build_all_cert_corpus.py --from-db`) |
+| **Contrastive 학습** | `data/contrastive_profile_train_merged_supabase_ids.json` |
+| **정제 v1** | `uv run python scripts/clean_contrastive_dataset.py --train data/... --corpus data/all_cert_corpus.json` → qual_id 보정, negative 5개, dedup, audit |
+| **정제 v2** | `uv run python scripts/clean_contrastive_dataset_v2.py --train data/... --corpus data/all_cert_corpus.json` → bad negative 교체, negative_type 의미 검증, positive 확장 플래그, 템플릿 중복 탐지, audit |
+| **Contrastive 검증** | `uv run python scripts/validate_contrastive_dataset.py --samples data/...` |
+| **qual_id 정렬** | `scripts/align_contrastive_qual_ids_to_supabase.py` (corpus 기준 qual_id 매핑) |
+
+---
+
+## 📚 참고 문서
+
+- **RAG 고도화 가이드**: `RAG_IMPROVEMENT.md` — 벡터 vs 키워드 진단, 청킹·벡터·키워드·리랭커 순서, Gating·캐시, RAGAS 등.
+- **배포·CORS·환경변수**: `.cursor/rules/deployment.mdc`
+- **Reranker (HF Space)**: `scripts/hf_space_reranker/README.md`
+- **all_cert_corpus 빌드**: `scripts/README_ALL_CERT_CORPUS.md`
+
+---
+
+## Reranker
+
+- **모델**: Dongjin-kr/ko-reranker (Cross-Encoder)
+- **역할**: RRF 상위 30개 후보 재정렬 → Top 4 선택. Gating 적용 시 확신 높은 질의는 스킵.

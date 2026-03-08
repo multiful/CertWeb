@@ -1,3 +1,8 @@
+# -----------------------------------------------------------------------------
+# Render / 프로덕션 전용. API 서버에 필요한 패키지만 포함.
+# 로컬에서 스크립트·평가 실행 시: pip install -r requirements-dev.txt
+# -----------------------------------------------------------------------------
+
 # FastAPI
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
@@ -26,7 +31,7 @@ python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 
-# CORS
+# CORS & Env
 python-dotenv==1.0.0
 
 # Utilities
@@ -36,20 +41,9 @@ openai==1.61.0
 # Error tracking (optional: set SENTRY_DSN to enable)
 sentry-sdk[fastapi]>=1.39.0
 
-# RAG & Chunking
-langchain-text-splitters>=0.3.0,<2
-langchain-core>=0.3.0,<0.4
+# RAG 런타임: BM25 + 벡터 검색. (청킹/인덱스 빌드는 로컬 스크립트에서만 사용)
 numpy>=1.24.0,<3
-
-# BM25 (sparse channel, ragas_eval enhanced_0.3_bm25)
 rank_bm25>=0.2.2
 
-# RAGAS 평가 (scripts/ragas_eval.py, ragas_eval_three_way.py)
-ragas==0.4.3
-datasets>=2.14.0
-
-# Dense(contrastive) + Reranker (compare_rag_hybrid_rerank.py). PyTorch 2.1 호환.
-
-# RAG Cross-Encoder Reranker (선택). RAG_USE_CROSS_ENCODER_RERANKER=true 시 사용.
+# RAG 로컬 리랭커는 선택. 원격 API 사용 시 불필요.
 # sentence-transformers>=2.2.0
-

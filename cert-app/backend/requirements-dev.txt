@@ -1,0 +1,17 @@
+# -----------------------------------------------------------------------------
+# 로컬/스크립트/평가 전용. Render에는 설치하지 않음.
+# 사용: uv pip install -r requirements.txt -r requirements-dev.txt
+# -----------------------------------------------------------------------------
+
+-r requirements.txt
+
+# RAG 인덱스 빌드 시 청킹 (app/rag/ingest/chunker.py)
+langchain-text-splitters>=0.3.0,<2
+langchain-core>=0.3.0,<0.4
+
+# RAGAS 평가 (scripts/ragas_eval*.py)
+ragas==0.4.3
+datasets>=2.14.0
+
+# 로컬 Cross-Encoder 리랭커 사용 시
+# sentence-transformers>=2.2.0

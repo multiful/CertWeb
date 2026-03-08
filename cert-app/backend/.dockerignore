@@ -1,0 +1,28 @@
+# Render/배포 시 이미지에 넣지 않을 항목 (빌드 컨텍스트·용량 절감)
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+__pycache__
+*.py[cod]
+.venv
+venv
+*.md
+!README.md
+
+# 스크립트·데이터·평가 (배포 불필요)
+scripts/
+data/
+**/reranker_*.jsonl
+**/cert_*.jsonl
+RAG_IMPROVEMENT.md
+docs/
+migrations/
+
+# IDE·테스트
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+*.log
