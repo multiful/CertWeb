@@ -87,5 +87,21 @@ docker-compose.override.yml
 cert-app/backend/docs/
 cert-app/backend/migrations/
 
-# [Backend] 로컬/평가용 스크립트 (배포 불필요, GitHub 미푸시)
-cert-app/backend/scripts/
+# [Backend] 평가/실험용 (배포 불필요, 커밋 생략)
+cert-app/backend/reranker_*.jsonl
+cert-app/backend/RAG_IMPROVEMENT.md
+cert-app/backend/scripts/eval_*.py
+cert-app/backend/scripts/ragas_*.py
+cert-app/backend/scripts/run_*.py
+cert-app/backend/scripts/weight_*.py
+cert-app/backend/scripts/threshold_*.py
+cert-app/backend/scripts/rebuild_*.py
+cert-app/backend/scripts/colab_*.py
+cert-app/backend/scripts/suggest_*.py
+cert-app/backend/scripts/validate_*.py
+cert-app/backend/scripts/make_*.py
+cert-app/backend/scripts/debug_*.py
+cert-app/backend/scripts/bm25_*.py
+cert-app/backend/scripts/multi_*.py
+cert-app/backend/scripts/update_*.py
+cert-app/backend/scripts/hf_space_reranker/

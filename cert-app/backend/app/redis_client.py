@@ -292,6 +292,22 @@ class RedisClient:
         param_str = json.dumps(filtered, sort_keys=True, default=str)
         return hashlib.md5(param_str.encode()).hexdigest()[:12]
 
+    @staticmethod
+    def rag_ask_cache_key(
+        query: str,
+        filters: Optional[dict] = None,
+        top_k: int = 5,
+        baseline_id: str = "current",
+    ) -> str:
+        """RAG 응답 캐시 키: (query + filters + top_k + baseline_id) 해시로 통일."""
+        h = RedisClient.hash_query_params(
+            query=(query or "").strip(),
+            filters=json.dumps(filters or {}, sort_keys=True, default=str),
+            top_k=top_k,
+            baseline_id=baseline_id,
+        )
+        return f"rag:ask:v1:{h}"
+
 
 # Global Redis client instance
 redis_client = RedisClient()

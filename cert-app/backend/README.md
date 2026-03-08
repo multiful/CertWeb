@@ -41,6 +41,16 @@ backend/
 
 ---
 
+reranker : Dongjin-kr/ko-reranker
+
+## Dense/Vector 검증 및 운영 기본값
+
+- **표준 평가 골든셋**: `data/reco_golden_recommendation_18.jsonl` (18질의). 평가는 이 파일 기준으로 수행한다.
+- **Ablation**: `uv run python scripts/run_dense_ablation.py --golden data/reco_golden_recommendation_18.jsonl [--max-queries N] [--output-csv path]`
+- **Rewrite 품질**: `rewrite_for_dense` 출력은 평가 스크립트(`eval_contrastive_profile_once.py` 등) 실행 시 재질의가 반영된 retrieval로 간접 확인.
+- **Contrastive 데이터 검증**: `uv run python scripts/validate_contrastive_dataset.py --samples data/contrastive_train.jsonl [--triplets data/contrastive_triplets.jsonl] [--report path]`
+- 상세: [docs/DENSE_VECTOR_OPERATIONAL_DEFAULTS.md](docs/DENSE_VECTOR_OPERATIONAL_DEFAULTS.md)
+
 ## 🛠 실행 방법 (Installation)
 
 1.  `.env` 파일 설정 (참고: `.env.example`)

@@ -1,8 +1,9 @@
-/** Hooks for recommendation data fetching */
+/** Hooks for recommendation data fetching (React Query) */
 
-import { useState, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { RecommendationListResponse } from '@/types';
 import { getRecommendations, getAvailableMajors, getPopularMajors } from '@/lib/api';
+import { recommendationKeys } from '@/lib/queryKeys';
 
 interface UseRecommendationsReturn {
   data: RecommendationListResponse | null;
@@ -14,26 +15,21 @@ export function useRecommendations(
   major: string,
   limit: number = 10
 ): UseRecommendationsReturn {
-  const [data, setData] = useState<RecommendationListResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
+  const {
+    data,
+    isLoading: loading,
+    error,
+  } = useQuery({
+    queryKey: recommendationKeys.byMajor(major, limit),
+    queryFn: () => getRecommendations(major, limit),
+    enabled: major.trim().length > 0,
+  });
 
-  useEffect(() => {
-    if (!major.trim()) {
-      setData(null);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    getRecommendations(major, limit)
-      .then(setData)
-      .catch((err) => setError(err instanceof Error ? err : new Error('Unknown error')))
-      .finally(() => setLoading(false));
-  }, [major, limit]);
-
-  return { data, loading, error };
+  return {
+    data: data ?? null,
+    loading,
+    error: error instanceof Error ? error : error ? new Error(String(error)) : null,
+  };
 }
 
 interface UseMajorsReturn {
@@ -43,37 +39,41 @@ interface UseMajorsReturn {
 }
 
 export function useMajors(): UseMajorsReturn {
-  const [majors, setMajors] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  const {
+    data,
+    isLoading: loading,
+    error,
+  } = useQuery({
+    queryKey: recommendationKeys.majors(),
+    queryFn: async () => {
+      const res = await getAvailableMajors();
+      return res.majors ?? [];
+    },
+  });
 
-  useEffect(() => {
-    getAvailableMajors()
-      .then((data) => setMajors(data.majors))
-      .catch((err) => setError(err instanceof Error ? err : new Error('Unknown error')))
-      .finally(() => setLoading(false));
-  }, []);
-
-  return { majors, loading, error };
+  return {
+    majors: data ?? [],
+    loading,
+    error: error instanceof Error ? error : error ? new Error(String(error)) : null,
+  };
 }
 
 export function usePopularMajors(limit: number = 12): UseMajorsReturn {
-  const [majors, setMajors] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  const {
+    data,
+    isLoading: loading,
+    error,
+  } = useQuery({
+    queryKey: recommendationKeys.popularMajors(limit),
+    queryFn: async () => {
+      const res = await getPopularMajors(limit);
+      return res.majors ?? [];
+    },
+  });
 
-  useEffect(() => {
-    getPopularMajors(limit)
-      .then((data) => {
-        setMajors(data.majors || []);
-        setError(null);
-      })
-      .catch((err) => {
-        setMajors([]);
-        setError(err instanceof Error ? err : new Error('Unknown error'));
-      })
-      .finally(() => setLoading(false));
-  }, [limit]);
-
-  return { majors, loading, error };
+  return {
+    majors: data ?? [],
+    loading,
+    error: error instanceof Error ? error : error ? new Error(String(error)) : null,
+  };
 }

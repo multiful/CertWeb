@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     CACHE_TTL_DETAIL: int = 1800  # 30 minutes
     CACHE_TTL_STATS: int = 3600  # 1 hour
     CACHE_TTL_RECOMMENDATIONS: int = 600  # 10 minutes
-    
+    CACHE_TTL_RAG: int = 600  # RAG /search/rag, /rag/ask 응답 캐시 (10분)
+
     # Rate Limiting
     RATE_LIMIT_REQUESTS: int = 200
     RATE_LIMIT_WINDOW: int = 60  # seconds
@@ -47,7 +48,12 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: str = ""
 
     # RAG: 유사도 임계값 (이하면 결과에서 제외). 0이면 미적용.
+    # 선정 근거: docs/RAG_고도화_총정리.md §2-2 참고.
     RAG_MATCH_THRESHOLD: float = 0.4
+
+    # 에러 트래킹 (비어 있으면 Sentry 비활성)
+    SENTRY_DSN: str = ""
+    SENTRY_ENVIRONMENT: str = "production"
 
     # 문의 수신 이메일 (contact API)
     CONTACT_EMAIL: str = ""
