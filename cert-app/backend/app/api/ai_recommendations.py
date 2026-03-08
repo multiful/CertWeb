@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 import time
 from typing import List, Optional
@@ -35,6 +36,9 @@ logger = logging.getLogger(__name__)
 HYBRID_TOP_PER_QUERY = 30            # certificates_vectors에서 질의당 가져올 상위 결과 수
 HYBRID_GLOBAL_RESULTS_LIMIT = 80     # RRF 이후 전역 후보에서 사용할 상위 결과 수
 HYBRID_CANDIDATE_TRIM_LIMIT = 120    # major/semantic 통합 후 유지할 최대 후보 수
+
+# 고도화 RAG( app.rag hybrid_retrieve ) ON/OFF. 1/true/yes 이면 ON, 아니면 현재 RAG(certificates_vectors) 사용.
+USE_ENHANCED_RAG = os.environ.get("USE_ENHANCED_RAG", "").strip().lower() in ("1", "true", "yes")
 
 
 @router.get("/semantic-search", response_model=SemanticSearchResponse)
@@ -101,6 +105,7 @@ async def hybrid_recommendation(
     # 입력 정제 — 프론트엔드에서 줄바꿈(\n) 등 공백 문자가 붙어올 수 있음
     major = major.strip()
     interest = interest.strip() if interest else None
+    interest_provided = bool(interest and interest.strip())
     if not major:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="major는 비어있을 수 없습니다.")
 
@@ -193,6 +198,36 @@ async def hybrid_recommendation(
 
     RRF_K = 60
 
+    def _classify_query_and_expand(q_text: str) -> tuple[float, float, str]:
+        """
+        질의 타입에 따라 Dense/Sparse 가중치와 풀텍스트용 확장 질의를 결정.
+        - w_d: Dense(OpenAI) 가중치
+        - w_s: Sparse(키워드) 가중치
+        - expanded: 풀텍스트에 사용할 문자열 (간단한 동의어 확장 포함)
+        """
+        q = (q_text or "").strip()
+        base = q
+        # 간단한 동의어/키워드 확장 (plainto_tsquery에 들어가므로 공백 구분만 사용)
+        if "정보처리기사" in q:
+            base = "정보처리기사 정보처리"
+        elif q.upper() == "SQL" or "SQL" in q:
+            base = "SQL 데이터베이스"
+        elif "간호" in q:
+            base = "간호사 간호"
+
+        tokens = q.split()
+        is_short = len(tokens) <= 2 and len(q) <= 8
+        has_cert_suffix = any(s in q for s in ["기사", "산업기사", "기능사"])
+        is_keywordy = is_short or has_cert_suffix or q.upper() == "SQL" or "컴퓨터" in q
+
+        if is_keywordy:
+            # 토큰이 명확한 쿼리: Sparse 비중을 조금 더 높인다.
+            w_d, w_s = 1.0, 1.2
+        else:
+            # 설명형/서술형 쿼리: Dense 비중을 높인다.
+            w_d, w_s = 1.3, 0.7
+        return w_d, w_s, base
+
     def _hybrid_rrf_from_certificates_vectors(
         db: Session,
         queries: List[str],
@@ -203,12 +238,17 @@ async def hybrid_recommendation(
     ) -> tuple[dict[int, float], dict[int, str]]:
         """
         certificates_vectors에서 벡터 검색 + tsvector 풀텍스트 검색을 결합하고
-        RRF: Score = 1/(60+rank_vector) + 1/(60+rank_text) 로 융합.
+        RRF: Score = w_d/(K+rank_vector) + w_s/(K+rank_text) 로 융합.
         반환: (qual_id -> RRF 점수 합계, qual_id -> qual_name)
         """
         qual_rrf: dict[int, float] = {}
         qual_names: dict[int, str] = {}
+        use_github_rrf = os.environ.get("RECOMMENDATION_USE_GITHUB_RRF") == "1"
         for qi, (q_text, q_vec) in enumerate(zip(queries, query_vectors)):
+            if use_github_rrf:
+                w_d, w_s, expanded_q = 1.0, 1.0, (q_text or "").strip()
+            else:
+                w_d, w_s, expanded_q = _classify_query_and_expand(q_text)
             # 벡터 검색 (HNSW cosine), 거리 순으로 정렬 후 qual_id별 첫 등장 순위 사용
             vec_sql = text("""
                 SELECT qual_id, name, 1 - (embedding <=> :vec) AS similarity
@@ -244,7 +284,7 @@ async def hybrid_recommendation(
                         ORDER BY rank DESC
                         LIMIT :limit
                     """.format(exclude="AND qual_id != ALL(:exclude_ids)" if exclude_qual_ids else ""))
-                    params_ft = {"q": q_text, "limit": top_per_query}
+                    params_ft = {"q": expanded_q, "limit": top_per_query}
                     if exclude_qual_ids:
                         params_ft["exclude_ids"] = exclude_qual_ids
                     ft_rows = db.execute(ft_sql, params_ft).fetchall()
@@ -261,12 +301,18 @@ async def hybrid_recommendation(
                             qual_names[r.qual_id] = getattr(r, "name", "") or ""
                 text_rank_map = {qid: i + 1 for i, qid in enumerate(text_rank_list)}
 
-            # RRF: 1/(K+rank_vector) + 1/(K+rank_text)
+            # RRF: w_d/(K+rank_vector) + w_s/(K+rank_text) [GitHub는 1/(K+r1)+1/(K+r2)만]
             all_qids = set(vec_rank_map) | set(text_rank_map)
             for qid in all_qids:
                 rv = vec_rank_map.get(qid, 9999)
                 rt = text_rank_map.get(qid, 9999)
-                s = 1.0 / (RRF_K + rv) + 1.0 / (RRF_K + rt)
+                if use_github_rrf:
+                    s = 1.0 / (RRF_K + rv) + 1.0 / (RRF_K + rt)
+                else:
+                    s = w_d * (1.0 / (RRF_K + rv)) + w_s * (1.0 / (RRF_K + rt))
+                    name = qual_names.get(qid, "")
+                    if name and q_text and q_text.replace(" ", "") in name.replace(" ", ""):
+                        s += 0.05
                 qual_rrf[qid] = qual_rrf.get(qid, 0.0) + s
 
         return qual_rrf, qual_names
@@ -285,71 +331,192 @@ async def hybrid_recommendation(
         major_results = db.execute(major_sql, {"major": major}).fetchall()
 
         if not major_results:
-            fuzzy_sql = text("""
-                SELECT DISTINCT ON (q.qual_id)
-                       q.qual_id, q.qual_name, q.qual_type, q.main_field,
-                       mq.score AS mapping_score,
-                       mq.weight AS mapping_weight,
-                       mq.reason,
-                       similarity(mq.major, :major) AS fuzzy_sim
-                FROM qualification q
-                JOIN major_qualification_map mq ON q.qual_id = mq.qual_id
-                WHERE similarity(mq.major, :major) > 0.35
-                ORDER BY q.qual_id, mq.score DESC
-                LIMIT 60
+            try:
+                fuzzy_sql = text("""
+                    SELECT DISTINCT ON (q.qual_id)
+                           q.qual_id, q.qual_name, q.qual_type, q.main_field,
+                           mq.score AS mapping_score,
+                           mq.weight AS mapping_weight,
+                           mq.reason,
+                           similarity(mq.major, :major) AS fuzzy_sim
+                    FROM qualification q
+                    JOIN major_qualification_map mq ON q.qual_id = mq.qual_id
+                    WHERE similarity(mq.major, :major) > 0.35
+                    ORDER BY q.qual_id, mq.score DESC
+                    LIMIT 60
+                """)
+                major_results = db.execute(fuzzy_sql, {"major": major}).fetchall()
+                if major_results:
+                    logger.info("fuzzy major match for %r: found %d certs (trgm fallback)", major, len(major_results))
+            except Exception as fuzzy_err:
+                logger.warning("fuzzy major search skipped for %r: %s", major, fuzzy_err)
+                major_results = []
+
+        use_enhanced_rag_result = False
+        global_results: list = []
+        major_sim_lookup: dict = {}
+
+        if USE_ENHANCED_RAG:
+            try:
+                from app.rag.retrieve.hybrid import hybrid_retrieve
+                rag_list = hybrid_retrieve(
+                    db, expanded_interest,
+                    top_k=HYBRID_GLOBAL_RESULTS_LIMIT,
+                    use_reranker=False,
+                )
+                hybrid_rrf_scores: dict = {}
+                for chunk_id, score in (rag_list or []):
+                    part = (chunk_id or "").split(":")
+                    if len(part) >= 1 and part[0].isdigit():
+                        qid = int(part[0])
+                        if qid in acq_qual_ids:
+                            continue
+                        hybrid_rrf_scores[qid] = hybrid_rrf_scores.get(qid, 0.0) + float(score)
+                hybrid_qual_names: dict = {}
+                if hybrid_rrf_scores:
+                    qual_ids = list(hybrid_rrf_scores.keys())
+                    try:
+                        name_rows = db.execute(
+                            text("SELECT qual_id, qual_name FROM qualification WHERE qual_id = ANY(:ids)"),
+                            {"ids": qual_ids},
+                        ).fetchall()
+                        hybrid_qual_names = {r.qual_id: (r.qual_name or "").strip() for r in name_rows}
+                    except Exception:
+                        pass
+                    for qid in hybrid_rrf_scores:
+                        if qid not in hybrid_qual_names:
+                            hybrid_qual_names[qid] = ""
+                global_results = [
+                    type("Row", (), {"qual_id": qid, "qual_name": hybrid_qual_names.get(qid, ""), "similarity": sc})()
+                    for qid, sc in sorted(hybrid_rrf_scores.items(), key=lambda x: -x[1])[:HYBRID_GLOBAL_RESULTS_LIMIT]
+                ]
+                major_vector = await get_embedding_async(major)
+                major_sim_sql = text("""
+                    SELECT qual_id, MAX(1 - (embedding <=> :vec)) AS major_sim
+                    FROM certificates_vectors
+                    WHERE embedding IS NOT NULL
+                    GROUP BY qual_id
+                """)
+                m_sims = db.execute(major_sim_sql, {"vec": str(major_vector)}).fetchall()
+                major_sim_lookup = {r.qual_id: float(r.major_sim) for r in m_sims}
+                use_enhanced_rag_result = True
+                logger.debug(
+                    "hybrid_recommendation: using enhanced RAG, candidates=%d",
+                    len(global_results),
+                )
+            except Exception as e:
+                logger.warning(
+                    "enhanced RAG failed, falling back to current RAG: %s",
+                    e,
+                    exc_info=True,
+                )
+
+        if not use_enhanced_rag_result:
+            # 현재 RAG: certificates_vectors 기반 벡터+풀텍스트 RRF
+            # Dense 전용 query rewrite (app.rag 있으면 설정 시 구조화 질의로 임베딩, 없으면 expanded_interest 사용)
+            dense_query = expanded_interest
+            try:
+                from app.rag.config import get_rag_settings
+                from app.rag.utils.dense_query_rewrite import rewrite_for_dense
+                user_profile_for_rewrite: Optional[dict] = None
+                if user_id and (get_rag_settings().RAG_PERSONALIZED_DENSE_REWRITE_ENABLE or False):
+                    fav_qual_ids = [f.qual_id for f in fav_items]
+                    fav_names: List[str] = []
+                    fav_field_tokens: List[str] = []
+                    if fav_qual_ids:
+                        try:
+                            fav_rows = db.execute(
+                                text("SELECT qual_id, qual_name, main_field, ncs_large FROM qualification WHERE qual_id = ANY(:ids)"),
+                                {"ids": fav_qual_ids},
+                            ).fetchall()
+                            for r in fav_rows:
+                                if getattr(r, "qual_name", None):
+                                    fav_names.append(str(r.qual_name).strip())
+                                for fld in (getattr(r, "main_field", None), getattr(r, "ncs_large", None)):
+                                    if fld and str(fld).strip():
+                                        fav_field_tokens.append(str(fld).strip())
+                        except Exception:
+                            pass
+                    acq_names = []
+                    if acq_qual_ids:
+                        try:
+                            acq_rows = db.execute(
+                                text("SELECT qual_id, qual_name FROM qualification WHERE qual_id = ANY(:ids)"),
+                                {"ids": list(acq_qual_ids)},
+                            ).fetchall()
+                            for r in acq_rows:
+                                if getattr(r, "qual_name", None):
+                                    acq_names.append(str(r.qual_name).strip())
+                        except Exception:
+                            pass
+                    user_profile_for_rewrite = {
+                        "major": major,
+                        "grade_level": grade_year,
+                        "favorite_cert_names": fav_names[:10],
+                        "favorite_field_tokens": list(dict.fromkeys(fav_field_tokens))[:20],
+                        "acquired_qual_ids": list(acq_qual_ids),
+                        "acquired_cert_names": acq_names[:10],
+                    }
+                    if grade_year is None:
+                        user_profile_for_rewrite.pop("grade_level", None)
+                if get_rag_settings().RAG_DENSE_USE_QUERY_REWRITE and expanded_interest:
+                    try:
+                        rewritten = rewrite_for_dense(
+                            expanded_interest,
+                            profile=user_profile_for_rewrite if (user_profile_for_rewrite and get_rag_settings().RAG_PERSONALIZED_DENSE_REWRITE_ENABLE) else None,
+                        )
+                        if rewritten and rewritten.strip():
+                            dense_query = rewritten
+                    except Exception:
+                        if get_rag_settings().RAG_DENSE_QUERY_REWRITE_FALLBACK:
+                            dense_query = expanded_interest
+            except ImportError:
+                pass  # app.rag 없음: dense_query = expanded_interest 유지
+            multi_queries = [dense_query]
+            try:
+                query_vectors = await asyncio.gather(*[get_embedding_async(q) for q in multi_queries])
+                major_vector = await get_embedding_async(major)
+            except Exception as emb_err:
+                logger.exception("hybrid_recommendation embedding failed")
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="임베딩 서비스를 일시적으로 사용할 수 없습니다.",
+                ) from emb_err
+            hybrid_rrf_scores, hybrid_qual_names = _hybrid_rrf_from_certificates_vectors(
+                db,
+                multi_queries,
+                query_vectors,
+                exclude_ids_list,
+                top_per_query=HYBRID_TOP_PER_QUERY,
+                use_fulltext=interest_provided,
+            )
+            global_results = [
+                type("Row", (), {"qual_id": qid, "qual_name": hybrid_qual_names.get(qid, ""), "similarity": sc})()
+                for qid, sc in sorted(hybrid_rrf_scores.items(), key=lambda x: -x[1])[:HYBRID_GLOBAL_RESULTS_LIMIT]
+            ]
+
+            logger.debug(
+                "hybrid_recommendation.pool major=%r interest_provided=%r "
+                "top_per_query=%d hybrid_candidates=%d global_results=%d",
+                major,
+                interest_provided,
+                HYBRID_TOP_PER_QUERY,
+                len(hybrid_rrf_scores),
+                len(global_results),
+            )
+
+            # 전공명 벡터 유사도: certificates_vectors에서 qual_id별 최고 유사도 사용
+            major_sim_sql = text("""
+                SELECT qual_id, MAX(1 - (embedding <=> :vec)) AS major_sim
+                FROM certificates_vectors
+                WHERE embedding IS NOT NULL
+                GROUP BY qual_id
             """)
-            major_results = db.execute(fuzzy_sql, {"major": major}).fetchall()
-            if major_results:
-                logger.info("fuzzy major match for %r: found %d certs (trgm fallback)", major, len(major_results))
-
-        # Multi-Query Expansion (기존: 3개 유사 질의)
-        # 응답 속도와 결과 일관성을 위해, 현재는 확장 질의를 1개만 사용한다.
-        # (expand_query_async 에서 이미 충분히 풍부한 문장을 생성하므로 중복 LLM 호출을 줄인다.)
-        multi_queries = [expanded_interest]
-        try:
-            query_vectors = await asyncio.gather(*[get_embedding_async(q) for q in multi_queries])
-            major_vector = await get_embedding_async(major)
-        except Exception as emb_err:
-            logger.exception("hybrid_recommendation embedding failed")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="임베딩 서비스를 일시적으로 사용할 수 없습니다.",
-            ) from emb_err
-        hybrid_rrf_scores, hybrid_qual_names = _hybrid_rrf_from_certificates_vectors(
-            db,
-            multi_queries,
-            query_vectors,
-            exclude_ids_list,
-            top_per_query=HYBRID_TOP_PER_QUERY,
-            use_fulltext=interest_provided,
-        )
-        global_results = [
-            type("Row", (), {"qual_id": qid, "qual_name": hybrid_qual_names.get(qid, ""), "similarity": sc})()
-            for qid, sc in sorted(hybrid_rrf_scores.items(), key=lambda x: -x[1])[:HYBRID_GLOBAL_RESULTS_LIMIT]
-        ]
-
-        logger.debug(
-            "hybrid_recommendation.pool major=%r interest_provided=%r "
-            "top_per_query=%d hybrid_candidates=%d global_results=%d",
-            major,
-            interest_provided,
-            HYBRID_TOP_PER_QUERY,
-            len(hybrid_rrf_scores),
-            len(global_results),
-        )
-
-        # 전공명 벡터 유사도: certificates_vectors에서 qual_id별 최고 유사도 사용
-        major_sim_sql = text("""
-            SELECT qual_id, MAX(1 - (embedding <=> :vec)) AS major_sim
-            FROM certificates_vectors
-            WHERE embedding IS NOT NULL
-            GROUP BY qual_id
-        """)
-        try:
-            m_sims = db.execute(major_sim_sql, {"vec": str(major_vector)}).fetchall()
-            major_sim_lookup = {r.qual_id: float(r.major_sim) for r in m_sims}
-        except Exception:
-            major_sim_lookup = {}
+            try:
+                m_sims = db.execute(major_sim_sql, {"vec": str(major_vector)}).fetchall()
+                major_sim_lookup = {r.qual_id: float(r.major_sim) for r in m_sims}
+            except Exception:
+                major_sim_lookup = {}
     except Exception as e:
         logger.exception("hybrid_recommendation DB query failed")
         raise HTTPException(
@@ -454,7 +621,6 @@ async def hybrid_recommendation(
             level = max(1, min(level, 9))
             interest_levels[cid] = level
 
-    interest_provided = bool(interest and interest.strip())
     # interest 있으면 semantic 가중치 높임 (2배), 없으면 균등
     w_sem = 2.0 if interest_provided else 1.0
     w_maj = 1.0
