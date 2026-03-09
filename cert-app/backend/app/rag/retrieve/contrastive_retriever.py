@@ -99,7 +99,7 @@ def diagnose_contrastive_status() -> Dict[str, str]:
 
 def _embed_via_api(query: str):
     """RAG_CONTRASTIVE_EMBEDDING_URL로 POST하여 768-dim 벡터 반환. L2 정규화 적용. 실패 시 None."""
-    url = _embedding_url
+    url = (_embedding_url or "").strip().rstrip("/")
     if not url:
         return None
     try:
@@ -107,30 +107,42 @@ def _embed_via_api(query: str):
         import numpy as np
         settings = get_rag_settings()
         token = (getattr(settings, "RAG_CONTRASTIVE_EMBEDDING_TOKEN", None) or "").strip()
-        headers = {}
+        headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         body = {"inputs": query.strip()}
+        # HF Space 등: 루트 먼저 시도, 404면 /embed 시도 (콜드스타트/경로 차이 대응)
+        to_try = [url, f"{url}/", f"{url}/embed"]
+        last_error = None
         with httpx.Client(timeout=30.0) as client:
-            r = client.post(url, json=body, headers=headers or None)
-        r.raise_for_status()
-        data = r.json()
-        if isinstance(data, list):
-            vec = data[0] if data and isinstance(data[0], list) else data
-        elif isinstance(data, dict) and "embedding" in data:
-            vec = data["embedding"]
-        else:
-            vec = data
-        if not vec or not isinstance(vec, (list, tuple)):
-            return None
-        arr = np.array(vec, dtype=np.float32).flatten()
-        if arr.size != _embedding_dim:
-            return None
-        # FAISS가 inner product on L2 normalized vectors 이면 정규화 필요
-        norm = np.linalg.norm(arr)
-        if norm > 1e-9:
-            arr = arr / norm
-        return arr.reshape(1, -1)
+            for base in to_try:
+                try:
+                    r = client.post(base, json=body, headers=headers)
+                    if r.status_code != 200:
+                        last_error = f"HTTP {r.status_code}"
+                        continue
+                    data = r.json()
+                    if isinstance(data, list):
+                        vec = data[0] if data and isinstance(data[0], list) else data
+                    elif isinstance(data, dict) and "embedding" in data:
+                        vec = data["embedding"]
+                    else:
+                        vec = data
+                    if not vec or not isinstance(vec, (list, tuple)):
+                        continue
+                    arr = np.array(vec, dtype=np.float32).flatten()
+                    if arr.size != _embedding_dim:
+                        continue
+                    norm = np.linalg.norm(arr)
+                    if norm > 1e-9:
+                        arr = arr / norm
+                    return arr.reshape(1, -1)
+                except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as e:
+                    last_error = e
+                    continue
+        if last_error:
+            logger.warning("contrastive retriever: remote embedding failed: %s", last_error)
+        return None
     except Exception as e:
         logger.warning("contrastive retriever: remote embedding failed: %s", e)
         return None
