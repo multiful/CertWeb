@@ -23,8 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { getHybridRecommendations, getAvailableMajors } from '@/lib/api';
+import { getHybridRecommendations, getAvailableMajors, getRagEvalMetrics } from '@/lib/api';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/hooks/useAuth';
 import type { HybridRecommendationResponse } from '@/types';
@@ -49,14 +48,6 @@ const AI_STATS = [
         desc: '임베딩 완료된 국가 자격증',
     },
     {
-        label: '평균 정합성',
-        value: '87',
-        unit: '%',
-        icon: Target,
-        color: 'green',
-        desc: '상위 추천 결과 기준',
-    },
-    {
         label: '검색 파이프라인',
         value: 'BM25 · Vector · Contrastive',
         unit: '',
@@ -74,48 +65,62 @@ const AI_STATS = [
     },
 ] as const;
 
-const PERFORMANCE_METRICS = [
-    {
-        category: '이미지/파일 최적화',
-        feature: '홈 트렌드 섹션 지연 로딩',
-        metric: '홈 최초 진입 시 불필요한 트렌드 API 호출',
-        before: '항상 1회 호출',
-        after: '뷰포트 진입 시에만 1회 호출',
-        applied: '적용',
-    },
-    {
-        category: 'API 응답 최적화',
-        feature: 'AI 추천 결과 세션 캐시',
-        metric: '동일 전공·관심사로 뒤로가기 후 재진입 시 API 호출',
-        before: '페이지 재진입마다 1회',
-        after: '세션 내 0회 (캐시 재사용)',
-        applied: '적용',
-    },
-    {
-        category: 'API 응답 최적화',
-        feature: '전공별 AI 미리보기 캐시',
-        metric: '동일 전공 탭 재클릭 시 추천 API 호출',
-        before: '탭 클릭마다 1회',
-        after: '최초 1회 이후 0회',
-        applied: '적용',
-    },
-    {
-        category: 'RAG/Rerank 캐시',
-        feature: 'Reranker (query, doc) 캐시',
-        metric: '동일 검색 쿼리 재실행 시 외부 리랭킹 API 호출',
-        before: '결과 재계산마다 1회',
-        after: '캐시 hit 시 0회',
-        applied: '적용',
-    },
-    {
-        category: '검토 예정 기능',
-        feature: '이미지 썸네일 WebP 변환',
-        metric: '목록·상세 썸네일 평균 응답 바이트',
-        before: '측정 예정',
-        after: '측정 예정',
-        applied: '미적용 (계측 후 결정)',
-    },
-] as const;
+/** 골든 8개 기준 RAG 평가: 베이스라인 대비 MRR, Recall@5, Recall@10 및 향상률 */
+function RagEvalMetricsCard() {
+    const [metrics, setMetrics] = useState<{
+        golden_n?: number;
+        baseline?: { 'Recall@5'?: number; 'Recall@10'?: number; MRR?: number };
+        enhanced_reranker?: { 'Recall@5'?: number; 'Recall@10'?: number; MRR?: number };
+        pct_vs_baseline?: { 'Recall@5'?: number | null; 'Recall@10'?: number | null; MRR?: number | null };
+    } | null>(null);
+    useEffect(() => {
+        getRagEvalMetrics()
+            .then(setMetrics)
+            .catch(() => setMetrics(null));
+    }, []);
+    const hasData = metrics?.baseline && metrics?.enhanced_reranker && (metrics.baseline.MRR != null || metrics.enhanced_reranker.MRR != null);
+    if (!metrics || !hasData) {
+        return (
+            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 mt-4">
+                <p className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                    <Target className="w-4 h-4 text-emerald-400" />
+                    RAG 평가 (골든 8개)
+                </p>
+                <p className="text-[11px] text-slate-500 mt-2">평가 데이터를 불러오는 중이거나, 백엔드에서 갱신 후 표시됩니다.</p>
+            </div>
+        );
+    }
+    const base = metrics.baseline ?? {};
+    const enh = metrics.enhanced_reranker ?? {};
+    const pct = metrics.pct_vs_baseline ?? {};
+    const fmt = (v: number | undefined) => (v != null ? (v * 100).toFixed(1) + '%' : '—');
+    const pctStr = (v: number | null | undefined) => (v != null ? (v >= 0 ? `+${v}%` : `${v}%`) : '—');
+    return (
+        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 mt-4 space-y-4">
+            <p className="text-sm font-bold text-slate-300 flex items-center gap-2">
+                <Target className="w-4 h-4 text-emerald-400" />
+                RAG 평가 (골든 {metrics.golden_n ?? 8}개)
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">MRR</p>
+                    <p className="text-lg font-black text-white mt-0.5">베이스라인 {fmt(base.MRR)} → 고도화 {fmt(enh.MRR)}</p>
+                    <p className="text-xs font-semibold text-emerald-400 mt-1">{pctStr(pct.MRR)}</p>
+                </div>
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Recall@5</p>
+                    <p className="text-lg font-black text-white mt-0.5">베이스라인 {fmt(base['Recall@5'])} → 고도화 {fmt(enh['Recall@5'])}</p>
+                    <p className="text-xs font-semibold text-emerald-400 mt-1">{pctStr(pct['Recall@5'])}</p>
+                </div>
+                <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 col-span-2 sm:col-span-1">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Recall@10</p>
+                    <p className="text-lg font-black text-white mt-0.5">베이스라인 {fmt(base['Recall@10'])} → 고도화 {fmt(enh['Recall@10'])}</p>
+                    <p className="text-xs font-semibold text-emerald-400 mt-1">{pctStr(pct['Recall@10'])}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 export function AiRecommendationPage() {
     const [major, setMajor] = useState('');
@@ -387,7 +392,7 @@ export function AiRecommendationPage() {
                                                 </Badge>
                                             )}
                                             <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20">
-                                                정합성 {Math.round(res.hybrid_score * 100)}%
+                                                정합성 {Math.min(100, Math.round((res.hybrid_score ?? 0) * 100))}%
                                             </Badge>
                                         </div>
                                     </div>
@@ -451,11 +456,10 @@ export function AiRecommendationPage() {
                                             <div
                                                 className="h-full bg-blue-500 transition-all"
                                                 style={{
-                                                    // 백엔드 0~1 정규화 값 우선, 없으면 major_score/10 fallback
-                                                    width: `${(() => {
+                                                    width: `${Math.min(100, (() => {
                                                         const norm = res.major_score_normalized ?? Math.min(1, Math.max(0, res.major_score / 10));
-                                                        return 20 + 80 * norm;
-                                                    })()}%`,
+                                                        return 20 + 80 * Math.min(1, Math.max(0, norm));
+                                                    })())}%`,
                                                 }}
                                             />
                                         </div>
@@ -469,11 +473,10 @@ export function AiRecommendationPage() {
                                             <div
                                                 className="h-full bg-purple-500 transition-all"
                                                 style={{
-                                                    // 관심사-자격증 시멘틱 유사도(0~1)로 표시. 없으면 semantic_similarity fallback
-                                                    width: `${(() => {
+                                                    width: `${Math.min(100, (() => {
                                                         const norm = res.semantic_score_normalized ?? Math.min(1, Math.max(0, res.semantic_similarity ?? 0));
-                                                        return 20 + 80 * norm;
-                                                    })()}%`,
+                                                        return 20 + 80 * Math.min(1, Math.max(0, norm));
+                                                    })())}%`,
                                                 }}
                                             />
                                         </div>
@@ -580,63 +583,8 @@ export function AiRecommendationPage() {
                             })}
                         </div>
 
-                        {/* 성능 개선 지표 표 */}
-                        <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-3 mt-4">
-                            <div className="flex items-center justify-between flex-wrap gap-2">
-                                <p className="text-sm font-bold text-slate-300">
-                                    성능 개선 지표
-                                </p>
-                                <p className="text-[11px] text-slate-500">
-                                    기능별로 계측 결과를 기준으로 적용 여부를 관리합니다.
-                                </p>
-                            </div>
-                            <div className="rounded-xl border border-slate-800/80 bg-black/20 overflow-hidden">
-                                <Table className="min-w-full">
-                                    <TableHeader>
-                                        <TableRow className="bg-slate-900/70">
-                                            <TableHead className="text-[11px] text-slate-400">카테고리</TableHead>
-                                            <TableHead className="text-[11px] text-slate-400">기능</TableHead>
-                                            <TableHead className="text-[11px] text-slate-400">측정 항목</TableHead>
-                                            <TableHead className="text-[11px] text-slate-400 text-right">적용 전</TableHead>
-                                            <TableHead className="text-[11px] text-slate-400 text-right">적용 후</TableHead>
-                                            <TableHead className="text-[11px] text-slate-400 text-center">적용 여부</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {PERFORMANCE_METRICS.map((row) => (
-                                            <TableRow key={`${row.category}-${row.feature}`}>
-                                                <TableCell className="text-xs text-slate-400 align-top">
-                                                    {row.category}
-                                                </TableCell>
-                                                <TableCell className="text-xs text-slate-200 font-semibold align-top">
-                                                    {row.feature}
-                                                </TableCell>
-                                                <TableCell className="text-xs text-slate-400 align-top">
-                                                    {row.metric}
-                                                </TableCell>
-                                                <TableCell className="text-xs text-slate-500 text-right align-top">
-                                                    {row.before}
-                                                </TableCell>
-                                                <TableCell className="text-xs text-emerald-400 text-right align-top">
-                                                    {row.after}
-                                                </TableCell>
-                                                <TableCell className="text-[11px] text-center align-top">
-                                                    <span
-                                                        className={`inline-flex items-center justify-center px-2 py-0.5 rounded-full font-semibold ${
-                                                            row.applied.startsWith('적용')
-                                                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                                                                : 'bg-slate-800 text-slate-400 border border-slate-700'
-                                                        }`}
-                                                    >
-                                                        {row.applied}
-                                                    </span>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
-                            </div>
-                        </div>
+                        {/* RAG 평가 (골든 8개): 베이스라인 대비 MRR, Recall@5, Recall@10 */}
+                        <RagEvalMetricsCard />
 
                         {/* 정합성 점수 구성 바 — BM25 + Vector + Contrastive + RRF 파이프라인 반영 */}
                         <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
@@ -751,7 +699,7 @@ export function AiRecommendationPage() {
                                                             {idx + 1}
                                                         </div>
                                                         <Badge className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px]">
-                                                            정합성 {Math.round(res.hybrid_score * 100)}%
+                                                            정합성 {Math.min(100, Math.round((res.hybrid_score ?? 0) * 100))}%
                                                         </Badge>
                                                     </div>
                                                     <p className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors line-clamp-2 leading-snug">
@@ -770,7 +718,7 @@ export function AiRecommendationPage() {
                                                                 <div
                                                                     className="h-full bg-blue-500 rounded-full transition-all"
                                                                     style={{
-                                                                        width: `${(res.major_score_normalized ?? Math.min(1, (res.major_score ?? 0) / 10)) * 100}%`,
+                                                                        width: `${Math.min(100, (res.major_score_normalized ?? Math.min(1, (res.major_score ?? 0) / 10)) * 100)}%`,
                                                                     }}
                                                                 />
                                                             </div>
@@ -782,7 +730,7 @@ export function AiRecommendationPage() {
                                                                 <div
                                                                     className="h-full bg-purple-500 rounded-full transition-all"
                                                                     style={{
-                                                                        width: `${(res.semantic_score_normalized ?? Math.min(1, res.semantic_similarity ?? 0)) * 100}%`,
+                                                                        width: `${Math.min(100, (res.semantic_score_normalized ?? Math.min(1, res.semantic_similarity ?? 0)) * 100)}%`,
                                                                     }}
                                                                 />
                                                             </div>

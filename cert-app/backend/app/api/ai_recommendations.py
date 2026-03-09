@@ -1,9 +1,11 @@
 import asyncio
+import json
 import logging
 import os
 import re
 import time
-from typing import List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
@@ -603,12 +605,13 @@ async def hybrid_recommendation(
 
         pr_factor = _pass_rate_factor(pass_rate_lookup.get(cid))
 
-        # 0~1 범위로 정규화된 major / semantic (UI 전공 연관성·관심도 일치 바용)
+        # 0~1 범위로 정규화된 major / semantic (UI 전공 연관성·관심도 일치 바용). 표시가 100% 초과하지 않도록 엄격히 클램핑.
         if major_span > 0:
             major_norm = (c["major_score"] - min_major) / major_span
         else:
             major_norm = 1.0
-        sem_norm = max(0.0, min(c["semantic_similarity"], 1.0))
+        major_norm = max(0.0, min(1.0, major_norm))
+        sem_norm = max(0.0, min(1.0, float(c["semantic_similarity"])))
         c["major_score_normalized"] = major_norm
         c["semantic_score_normalized"] = sem_norm
 
@@ -617,11 +620,11 @@ async def hybrid_recommendation(
             base_match = 0.3 * major_norm + 0.7 * sem_norm
         else:
             base_match = 0.5 * major_norm + 0.5 * sem_norm
+        base_match = max(0.0, min(1.0, base_match))
 
-        # 최종 하이브리드 = (전공/관심사 매칭) × 난이도 보정 × 합격률 보정
-        # 절대 점수(0~1 클램핑)로 두어, 1등이 항상 100%가 아닌 직관적인 정합성 % 표시
+        # 최종 하이브리드 = (전공/관심사 매칭) × 난이도 보정 × 합격률 보정. 보정 곱이 1 초과할 수 있으므로 반드시 0~1 클램핑.
         h_score = base_match * difficulty_factor * pr_factor
-        c["hybrid_score"] = max(0.0, min(h_score, 1.0))
+        c["hybrid_score"] = max(0.0, min(1.0, h_score))
         c["pass_rate"] = pass_rate_lookup.get(cid)
         final_results.append(c)
 
@@ -657,14 +660,15 @@ async def hybrid_recommendation(
         )
         fallback = []
         for r in major_results[:effective_limit]:
+            raw = float(r.mapping_score or 0.0)
             fallback.append(
                 {
                     "qual_id": r.qual_id,
                     "qual_name": r.qual_name,
-                    "major_score": float(r.mapping_score or 0.0),
+                    "major_score": raw,
                     "reason": r.reason or f"전공({major})과의 연관성이 높은 자격증입니다.",
                     "semantic_similarity": 0.0,
-                    "hybrid_score": float(r.mapping_score or 0.0),
+                    "hybrid_score": max(0.0, min(1.0, raw)),
                     "pass_rate": None,
                     "rrf_score": None,
                     "interest_level": None,
@@ -772,3 +776,27 @@ async def hybrid_recommendation(
         logger.warning("hybrid_recommendation: failed to write cache for key %s", cache_key)
 
     return response
+
+
+def _rag_eval_metrics_path() -> Path:
+    """backend/data/rag_eval_metrics_8.json 경로 (실행 CWD가 backend일 때)."""
+    base = Path(__file__).resolve().parent.parent.parent
+    return base / "data" / "rag_eval_metrics_8.json"
+
+
+@router.get("/rag-eval-metrics")
+async def get_rag_eval_metrics() -> Dict[str, Any]:
+    """
+    골든 8개 기준 RAG 평가 메트릭. 베이스라인 대비 MRR, Recall@5, Recall@10 및 향상률.
+    데이터: data/rag_eval_metrics_8.json (eval 실행 후 스크립트로 갱신).
+    """
+    path = _rag_eval_metrics_path()
+    if not path.is_file():
+        return {"golden_n": 8, "baseline": {}, "enhanced_reranker": {}, "pct_vs_baseline": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        logger.warning("rag_eval_metrics read failed: %s", e)
+        return {"golden_n": 8, "baseline": {}, "enhanced_reranker": {}, "pct_vs_baseline": {}}
+    return data

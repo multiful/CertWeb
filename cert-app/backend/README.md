@@ -231,6 +231,8 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 상세 운영 기본값·평가 절차: `docs/DENSE_VECTOR_OPERATIONAL_DEFAULTS.md` (해당 문서가 있는 경우).
 
+- **성능 개선 지표(적용 전/후, 캐시 등)**: `docs/PERFORMANCE_IMPROVEMENT_METRICS.md` — 기능별 계측 항목 및 적용 여부, Reranker 캐싱 필수, 리랭커 적용 시 성능 저하 원인 분석.
+
 ---
 
 ## 📁 데이터·스크립트
