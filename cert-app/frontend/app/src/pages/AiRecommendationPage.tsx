@@ -56,20 +56,20 @@ const AI_STATS = [
         desc: '상위 추천 결과 기준',
     },
     {
-        label: '검색 방식',
-        value: 'BM25+Vector+Contrastive',
+        label: '검색 파이프라인',
+        value: 'BM25 · Vector · Contrastive',
         unit: '',
         icon: GitMerge,
         color: 'purple',
-        desc: 'RRF 융합 (키워드·시멘틱·Contrastive)',
+        desc: '3-way RRF (키워드·시멘틱·Contrastive)',
     },
     {
-        label: '순위 융합 (RRF)',
-        value: 'RRF',
+        label: '순위 융합·리랭킹',
+        value: 'RRF + Reranker',
         unit: '',
         icon: Layers,
         color: 'indigo',
-        desc: '벡터·풀텍스트 순위 융합',
+        desc: 'RRF Top30 → Cross-Encoder 리랭킹',
     },
 ] as const;
 
@@ -522,8 +522,10 @@ export function AiRecommendationPage() {
                                             <Icon className="w-4 h-4" />
                                         </div>
                                         <div>
-                                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">{stat.label}</p>
-                                            <p className="text-2xl font-black text-white mt-0.5">
+                                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest break-words leading-tight">
+                                                {stat.label}
+                                            </p>
+                                            <p className="text-xl md:text-2xl font-black text-white mt-0.5 break-words leading-tight">
                                                 {stat.value}
                                                 {stat.unit && <span className="text-sm font-semibold text-slate-500 ml-1">{stat.unit}</span>}
                                             </p>
