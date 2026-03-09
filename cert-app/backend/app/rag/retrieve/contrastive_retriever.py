@@ -111,8 +111,7 @@ def _embed_via_api(query: str):
         if token:
             headers["Authorization"] = f"Bearer {token}"
         body = {"inputs": query.strip()}
-        # HF Space 등: 루트 먼저 시도, 404면 /embed 시도 (콜드스타트/경로 차이 대응)
-        to_try = [url, f"{url}/", f"{url}/embed"]
+        to_try = [url, f"{url}/", f"{url}/embed"]  # 404 시 대체 경로 재시도
         last_error = None
         with httpx.Client(timeout=30.0) as client:
             for base in to_try:

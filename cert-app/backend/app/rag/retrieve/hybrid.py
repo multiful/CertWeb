@@ -293,6 +293,9 @@ def hybrid_retrieve(
     use_query_weights: bool = False,
     use_reranker: Optional[bool] = None,
     user_profile: Optional[UserProfile] = None,
+    rrf_w_bm25: Optional[float] = None,
+    rrf_w_dense1536: Optional[float] = None,
+    rrf_w_contrastive768: Optional[float] = None,
 ) -> List[Tuple[str, float]]:
     """
     BM25 + Vector를 RRF로 병합.
@@ -300,6 +303,7 @@ def hybrid_retrieve(
     - alpha 지정 시: BM25=alpha, Vector=1-alpha.
     - use_reranker: None이면 RAG_USE_CROSS_ENCODER_RERANKER 설정 따름, True/False면 강제.
     - user_profile: 있으면 RAG_PERSONALIZED_* 설정 시 개인화 rewrite/soft score 적용. 없으면 기존 경로.
+    - rrf_w_bm25 / rrf_w_dense1536 / rrf_w_contrastive768: 3-way RRF 시 가중치 오버라이드(None이면 설정값 사용).
     filters 있으면 메타데이터 필터. 반환: [(chunk_id, score), ...]
     """
     settings = get_rag_settings()
@@ -472,10 +476,9 @@ def hybrid_retrieve(
     fusion_method = (getattr(settings, "RAG_FUSION_METHOD", None) or "rrf").strip().lower()
     rrf_k = _rrf_k()
     if getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and contrastive_results:
-        # 3-way weighted RRF: BM25 + dense1536 + contrastive768 (가중치: RAG_RRF_W_*)
-        w_b = getattr(settings, "RAG_RRF_W_BM25", 1.0)
-        w_v = getattr(settings, "RAG_RRF_W_DENSE1536", 1.0)
-        w_c = getattr(settings, "RAG_RRF_W_CONTRASTIVE768", 1.2)
+        w_b = rrf_w_bm25 if rrf_w_bm25 is not None else getattr(settings, "RAG_RRF_W_BM25", 1.0)
+        w_v = rrf_w_dense1536 if rrf_w_dense1536 is not None else getattr(settings, "RAG_RRF_W_DENSE1536", 1.0)
+        w_c = rrf_w_contrastive768 if rrf_w_contrastive768 is not None else getattr(settings, "RAG_RRF_W_CONTRASTIVE768", 1.2)
         combined = _rrf_merge_n(
             [bm25_scores, vector_results, contrastive_results],
             weights=[w_b, w_v, w_c],

@@ -87,10 +87,16 @@ def _run_enhanced_reranker_rag(
     top_k: int,
     gold_ids: set,
     alpha: Optional[float] = None,
+    rrf_w_bm25: Optional[float] = None,
+    rrf_w_dense1536: Optional[float] = None,
+    rrf_w_contrastive768: Optional[float] = None,
 ) -> tuple:
-    """Enhanced RAG: RRF Top30 후보, 상위 20개 pool만 Cross-Encoder 입력 → Top4. alpha 있으면 BM25/Vector 고정 가중치. 반환 (chunk_ids, latency_ms)."""
+    """Enhanced RAG: RRF 후보 + Cross-Encoder → Top4. 3-way 시 가중치 오버라이드 가능. 반환 (chunk_ids, latency_ms)."""
     start = time.perf_counter()
-    candidates = hybrid_retrieve(db, query, top_k=top_k, filters=None, alpha=alpha, use_reranker=True)
+    candidates = hybrid_retrieve(
+        db, query, top_k=top_k, filters=None, alpha=alpha, use_reranker=True,
+        rrf_w_bm25=rrf_w_bm25, rrf_w_dense1536=rrf_w_dense1536, rrf_w_contrastive768=rrf_w_contrastive768,
+    )
     chunk_ids = [c[0] for c in candidates]
     latency = (time.perf_counter() - start) * 1000
     return chunk_ids, latency
@@ -200,9 +206,12 @@ def run_eval_three_way(
             else:
                 ids_c = []
 
-            # Enhanced Reranker (RRF Top30 후보, 상위 20개 pool + Cross-Encoder → Top4)
+            # Enhanced Reranker (RRF 후보 + Cross-Encoder → Top4; 3-way 시 가중치 오버라이드)
             if "enhanced_reranker" in pipelines:
-                ids_er, lat_er = _run_enhanced_reranker_rag(db, q, top_k, gold_ids, alpha=enhanced_alpha)
+                ids_er, lat_er = _run_enhanced_reranker_rag(
+                    db, q, top_k, gold_ids, alpha=enhanced_alpha,
+                    rrf_w_bm25=rrf_w_bm25, rrf_w_dense1536=rrf_w_dense1536, rrf_w_contrastive768=rrf_w_contrastive768,
+                )
                 agg["enhanced_reranker"]["recall5"].append(recall_at_k(ids_er, gold_ids, 5))
                 agg["enhanced_reranker"]["recall10"].append(recall_at_k(ids_er, gold_ids, 10))
                 agg["enhanced_reranker"]["precision5"].append(precision_at_k(ids_er, gold_ids, 5))
