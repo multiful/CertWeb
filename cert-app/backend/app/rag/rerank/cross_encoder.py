@@ -1,9 +1,8 @@
 """
-경량 Cross-Encoder Reranker (로컬 모델 또는 원격 API).
+Reranker: HF Space API 전용 (로컬 Cross-Encoder 미사용).
 
-- 로컬: sentence_transformers CrossEncoder 로드 (CPU 가능). RAG_CROSS_ENCODER_MODEL에 경로/모델명.
-- 원격 API: RAG_CROSS_ENCODER_MODEL이 http(s):// 로 시작하면 해당 URL로 POST 요청 (HF Space 등).
-  ONNX/경량화는 리랭커가 돌아가는 쪽(예: HF Space 앱)에서 적용. 본 코드는 POST로 query+passages 전달만 함.
+- RAG_RERANKER_API_URL에 HF Space inference URL 설정 시 해당 URL로 POST (query, passages) → scores.
+- 모델: multifuly/certweb-reranker-model, Space: multifuly/certweb-reranker.
 
 API 규약 (원격 모드):
   POST {url}
@@ -22,7 +21,6 @@ from typing import Dict, List, Optional, Tuple
 from app.rag.rerank.cache import RerankerCache, get_reranker_cache
 
 logger = logging.getLogger(__name__)
-_reranker = None
 
 
 def _is_reranker_api_url(value: str) -> bool:
@@ -127,24 +125,6 @@ def _rerank_via_api(
     return out
 
 
-def _get_reranker(model_name: str):
-    """싱글톤 CrossEncoder. 로드 실패 시 None (원인은 로그에 기록)."""
-    global _reranker
-    if _reranker is not None:
-        return _reranker
-    try:
-        from sentence_transformers import CrossEncoder
-        _reranker = CrossEncoder(model_name)
-        return _reranker
-    except Exception as e:
-        logger.exception(
-            "리랭커 모델 로드 실패 (model=%s). OOM이면 배치 축소/GPU 사용, 호환 문제면 RAG_CROSS_ENCODER_MODEL 확인: %s",
-            model_name,
-            e,
-        )
-        return None
-
-
 def rerank_with_cross_encoder(
     query: str,
     pairs: List[Tuple[str, str]],
@@ -157,39 +137,27 @@ def rerank_with_cross_encoder(
     pairs: [(chunk_id, text), ...]
     반환: [(chunk_id, score), ...] (점수 내림차순). 실패 시 빈 리스트.
 
-    RAG_CROSS_ENCODER_MODEL이 http(s):// 이면 로컬 모델 없이 해당 URL로 API 호출.
+    RAG_RERANKER_API_URL 또는 model_name이 http(s) URL이면 해당 URL로 API 호출 (HF Space).
     캐싱: use_cache=True이면 (query, doc_hash) pair 캐싱 적용 (기본: 설정에 따름).
     """
     if not query or not pairs:
         return []
     from app.rag.config import get_rag_settings
     settings = get_rag_settings()
-    name = (model_name or settings.RAG_CROSS_ENCODER_MODEL).strip()
+    url = (model_name or getattr(settings, "RAG_RERANKER_API_URL", "") or "").strip()
     
-    # 캐시 사용 여부 결정
+    if not url:
+        logger.debug("RAG_RERANKER_API_URL 미설정 — 리랭커 스킵")
+        return []
+    
     if use_cache is None:
         use_cache = getattr(settings, "RAG_RERANK_CACHE_ENABLE", True)
     
-    if _is_reranker_api_url(name):
-        return _rerank_via_api(name, query, pairs, top_k, use_cache=use_cache)
+    if _is_reranker_api_url(url):
+        return _rerank_via_api(url, query, pairs, top_k, use_cache=use_cache)
     
-    # 로컬 모델은 캐싱 없이 직접 호출 (로컬이라 빠름)
-    model = _get_reranker(name)
-    if model is None:
-        return []
-    try:
-        to_score = [(query, text) for _cid, text in pairs]
-        scores = model.predict(to_score)
-        if hasattr(scores, "tolist"):
-            scores = scores.tolist()
-        out = [(pairs[i][0], float(scores[i])) for i in range(len(pairs))]
-        out.sort(key=lambda x: -x[1])
-        if top_k is not None:
-            out = out[:top_k]
-        return out
-    except Exception as e:
-        logger.exception("리랭커 predict 실패 (query 길이=%d, pairs=%d): %s", len(query), len(pairs), e)
-        return []
+    logger.warning("RAG_RERANKER_API_URL이 URL 형식이 아님 — 리랭커 스킵 (로컬 모델 미지원)")
+    return []
 
 
 def get_reranker_cache_stats() -> Dict:

@@ -14,4 +14,4 @@
 - `RAG_CONTRASTIVE_INDEX_DIR=data/contrastive_index` (backend 루트 기준)
 - `RAG_CONTRASTIVE_MODEL=multifuly/cert-constrative-embedding`
 
-검증: `uv run python scripts/verify_contrastive_retriever.py`
+검증: `uv run python scripts/check_contrastive_connection.py` 또는 `uv run python scripts/test_contrastive_latency.py`

@@ -113,6 +113,9 @@ def run_eval_three_way(
     quiet: bool = False,
     max_queries: Optional[int] = None,
     pipelines: Optional[List[str]] = None,
+    rrf_w_bm25: Optional[float] = None,
+    rrf_w_dense1536: Optional[float] = None,
+    rrf_w_contrastive768: Optional[float] = None,
 ) -> Dict[str, Dict[str, float]]:
     """
     골든셋으로 4-way 실행 후 메트릭 집계. RRF Top30 후보, Reranker는 상위 20개 pool → Top4.
