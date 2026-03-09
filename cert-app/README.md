@@ -2,52 +2,53 @@
 
 **"무중력 속도(Ultra-low Latency)로 경험하는 맞춤형 자격증 추천 플랫폼"**
 
-안티그래비티(Anti-gravity) 프로젝트는 방대한 자격증 데이터를 가장 빠르고 정확하게 탐색하고, 사용자 전공 및 선호도에 맞춰 지능적으로 추천해주는 웹 서비스입니다. 
-대한민국 **1,000여 종**의 국가 기술 및 전문 자격증 데이터를 실시간으로 분석합니다.
+안티그래비티(Anti-gravity) 프로젝트는 방대한 자격증 데이터를 가장 빠르고 정확하게 탐색하고, 사용자 전공 및 선호도에 맞춰 지능적으로 추천해주는 웹 서비스입니다.
+대한민국 **1,101종**의 국가 기술 및 전문 자격증 데이터를 실시간으로 분석합니다.
 
 ---
 
 ## 주요 기능 (Features)
 
-1. **초저지연(Ultra-low Latency) 자격증 조회 시스템**
-   - **Redis 직접 동기화 & 캐싱**: DB 조회 없이 1ms 내의 응답 제공
-   - **orjson 직렬화**: FastAPI 엔드포인트에서 JSON 직렬화 오버헤드 극대화 억제
-2. **AI 기반 자격증 맞춤 추천 (Vector DB)**
-   - **pgvector & Supabase**: 자격증 요약 텍스트 임베딩을 이용한 시맨틱 유사도 검색
-   - **OpenAI API**: 사용자 전공과 관심사를 분석하여 가장 적합한 트랙 제안
+1. **초저지연·캐시 기반 자격증 조회**
+   - **Redis 캐싱**: 자격증 목록/상세/통계·필터 옵션·추천·RAG 검색 응답 캐시 (orjson 직렬화)
+   - **Rate limiting**: Redis 기반 요청 제한 (일반·인증 전용)
+   - **선택적 Fast path**: `fast_certs.py` — Redis 동기화 구독 시 초저지연 목록 응답 (Sync Worker 연동)
+2. **AI 기반 자격증 맞춤 추천 (Hybrid RAG)**
+   - **pgvector & Supabase**: `certificates_vectors` 임베딩 검색, BM25·Vector·Contrastive 3-way RRF, Cross-Encoder 리랭킹
+   - **OpenAI API**: 전공·관심사 분석, 시맨틱 검색, LLM 리랭킹·이유 생성
+   - **RAG 파이프라인**: `app/rag` — hybrid retrieve, rerank 캐시(Redis), evidence-first 생성
 3. **취득 자격증 & XP·레벨·티어 시스템**
-   - **취득 자격증 (Acquired Certs)**: 사용자가 취득한 자격증을 DB 목록에서 검색해 등록·관리 (`user_acquired_certs` 테이블)
-   - **난이도 기반 XP**: `app/utils/xp.py` — 자격증 난이도(1.0~9.9) 구간별 가중치 적용, 최소 0.5 XP 보장
-   - **9단계 레벨·티어**: Lv1~2 Bronze, Lv3~4 Silver, Lv5~6 Gold, Lv7~8 Platinum, Lv9 Diamond (solved.ac 스타일 보석 색상)
-   - **레벨 게이지바**: 마이페이지 ACQUIRED CERTS 카드 및 "내가 취득한 자격증" 섹션에서 티어·XP·다음 레벨 진행률 시각화
+   - **취득 자격증 (Acquired Certs)**: DB 검색으로 등록·관리 (`user_acquired_certs`), 마이페이지 취득 자격증·XP 요약
+   - **난이도 기반 XP**: `app/utils/xp.py` — 난이도 구간별 가중치, 최소 0.5 XP
+   - **9단계 레벨·티어**: Lv1~2 Bronze → Lv9 Diamond (solved.ac 스타일), 레벨 게이지바 시각화
 4. **인증 및 보안 (Auth & Security)**
-   - **Professional Inactivity Session Management**: 1시간 이상 비활동 시 자동 로그아웃 구현
-   - **Supabase Auth**: 안전한 JWT 기반 세션 관리 (자체 DB 연동 백업)
+   - **비활동 세션 관리**: 1시간 이상 비활동 시 자동 로그아웃
+   - **Supabase Auth**: JWT 세션, OTP·이메일/비밀번호, 프로필·전공·학년
 5. **모던 UI/UX (Frontend)**
-   - 최신 **React + Vite** 아키텍처 사용
-   - **TailwindCSS + Shadcn UI** 조합으로 빠르고 직관적인 사용자 경험 제공
-   - 마이페이지: 취득 자격증 목록 + XP 뱃지, 백엔드 summary 미제공 시 프론트엔드 로컬 XP/티어 계산 폴백
+   - **React + Vite**, TailwindCSS + Shadcn UI
+   - **TanStack Query (React Query)**: 자격증 목록/상세/통계·필터 옵션 캐시(staleTime 10분·1시간)
+   - 마이페이지: 취득 자격증, XP·티어, 관심·최근 본·전공 맞춤 추천, 세션/캐시 복원
 
 ---
 
 ## 기술 스택 (Tech Stack)
 
 ### **Frontend**
-- **Framework**: React 19, Vite 7 (초고속 빌드 및 HMR)
-- **Styling**: Tailwind CSS, Shadcn UI (Radix UI 기반 컴포넌트)
-- **State Management**: Context, Custom Hooks (`useAuth`, `useRecommendations`, `useMajors`, `usePopularMajors` 등)
-- **API Client**: Fetch API + Custom Wrapper (`src/lib/api.ts` — Auto-retry, Mock Fallback)
+- **Framework**: React 19, Vite 7
+- **Styling**: Tailwind CSS, Shadcn UI (Radix UI 기반)
+- **State & Server State**: Context, TanStack Query (`useCerts`, `useCertDetail`, `useFilterOptions` 등), Custom Hooks (`useAuth`, `useRecommendations`, `useMajors`, `usePopularMajors`)
+- **API Client**: Fetch + `src/lib/api.ts` (재시도, Mock Fallback)
 - **Routing**: Client-side Router (`src/lib/router.tsx`)
 
 ### **Backend**
-- **Framework**: FastAPI (Async 파이썬 웹 프레임워크)
+- **Framework**: FastAPI (Async)
 - **Database**: PostgreSQL (Supabase)
 - **ORM**: SQLAlchemy 2.x
-- **Vector Search**: pgvector (Supabase)
-- **Cache**: Redis (`redis-py` 싱글톤), `orjson` (초고속 JSON)
-- **Authentication**: Supabase Auth (OTP, 이메일/비밀번호)
-- **External API**: OpenAI API (AI 추천·시맨틱 검색)
-- **기타**: GZip·TrustedHost·CORS 미들웨어, Rate limiting, Admin API (`X-Job-Secret`)
+- **Vector Search**: pgvector (Supabase), `certificates_vectors`
+- **Cache & 공통**: Redis (`redis-py` 싱글톤, orjson), Rate limiting
+- **Auth**: Supabase Auth (OTP, 이메일/비밀번호)
+- **External API**: OpenAI API (임베딩·AI 추천·시맨틱·LLM 리랭킹)
+- **기타**: GZip·TrustedHost·CORS, Admin API (`X-Job-Secret`), RAG reranker 캐시(Redis)
 
 ---
 
@@ -58,8 +59,8 @@ cert-app/
 ├── backend/                         # FastAPI 백엔드
 │   ├── app/
 │   │   ├── api/                     # API 라우터
-│   │   │   ├── certs.py             # 자격증 검색·상세·통계·트렌딩·RAG 검색
-│   │   │   ├── fast_certs.py        # Redis 기반 초저지연 목록
+│   │   │   ├── certs.py             # 자격증 검색·상세·통계·트렌딩·RAG 검색·최근 본
+│   │   │   ├── fast_certs.py        # Redis 기반 초저지연 목록 (선택)
 │   │   │   ├── recommendations.py  # 전공 기반 추천, /me, /majors, /popular-majors, jobs 연동
 │   │   │   ├── ai_recommendations.py # AI 하이브리드 추천·시맨틱 검색
 │   │   │   ├── auth.py              # Supabase Auth, 프로필·OTP
@@ -67,79 +68,50 @@ cert-app/
 │   │   │   ├── favorites.py         # 즐겨찾기
 │   │   │   ├── jobs.py              # 직무 목록·상세
 │   │   │   ├── majors.py            # 전공 목록
-│   │   │   ├── admin.py             # Admin API (X-Job-Secret)
+│   │   │   ├── admin.py             # Admin API (X-Job-Secret), 캐시 무효화
 │   │   │   ├── contact.py           # 문의/피드백 메일
 │   │   │   └── deps.py              # DB 세션, rate limit, 인증 의존성
+│   │   ├── rag/                     # RAG 파이프라인
+│   │   │   ├── retrieve/            # hybrid(BM25+Vector+Contrastive), RRF, 메타데이터 필터
+│   │   │   ├── rerank/              # Cross-Encoder API, 캐시(Redis·LRU)
+│   │   │   ├── generate/            # evidence-first 답변 생성, gating
+│   │   │   ├── index/               # BM25 인덱스 빌더, vector_index
+│   │   │   ├── eval/                # 골든 평가, retrieval/generation 메트릭
+│   │   │   ├── api/routes.py        # RAG 질의 엔드포인트
+│   │   │   ├── config.py            # RAG_TOP_N, RERANK_POOL_SIZE 등
+│   │   │   └── utils/               # query 처리, dense rewrite, golden 매핑
 │   │   ├── schemas/                 # Pydantic 스키마
 │   │   ├── services/
 │   │   │   ├── data_loader.py       # CSV 기반 자격증 데이터 로더
 │   │   │   ├── fast_sync_service.py # DB → Redis 전체 동기화
-│   │   │   ├── vector_service.py    # pgvector 임베딩·유사도 검색
+│   │   │   ├── vector_service.py   # pgvector 임베딩·유사도 검색 (content/metadata 선택 조회)
 │   │   │   ├── law_update_pipeline.py # 법령/자격 요약 파이프라인
-│   │   │   └── email_service.py     # 문의 메일 발송
+│   │   │   └── email_service.py    # 문의 메일 발송
 │   │   ├── utils/                   # xp.py(레벨·티어), ai.py, auth.py, stream_producer.py
 │   │   ├── config.py, database.py, crud.py, models.py
-│   │   ├── redis_client.py          # 캐시·레이트리밋
-│   │   ├── redis_sync_worker.py     # cert_updates 구독 동기화
+│   │   ├── redis_client.py          # 캐시·레이트리밋·트렌딩·최근 본·RAG 캐시 키
+│   │   ├── redis_sync_worker.py     # cert_updates 구독 동기화 (선택)
 │   │   └── scheduler.py
-│   ├── scripts/
-│   │   └── populate_certificates_vectors.py   # RAG용 certificates_vectors 채우기
+│   ├── docs/                        # 성능 개선 지표, DB 쿼리·중복 호출·RAG 검토
 │   ├── main.py
-│   ├── init.sql                     # 스키마·샘플 데이터
+│   ├── init.sql                     # 스키마·인덱스·샘플 데이터
 │   ├── vector_migration.sql         # pgvector·certificates_vectors
-│   ├── rename_production_automation_names.sql
-│   ├── update_medical_device_ra_stats.sql
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── frontend/
 │   └── app/                         # Vite + React 앱
 │       ├── src/
 │       │   ├── components/          # UI (Shadcn), Layout, ChunkLoadError
-│       │   ├── hooks/               # useAuth, useRecommendations, useMajors, usePopularMajors
-│       │   ├── pages/               # Home, CertList, CertDetail, Recommendation, JobDetail, MyPage 등
-│       │   ├── lib/                 # api.ts, router.tsx, mockApi.ts, utils
-│       │   └── types/               # API 타입·추천 타입
+│       │   ├── hooks/               # useAuth, useCerts, useRecommendations, useMajors, usePopularMajors
+│       │   ├── pages/               # Home, CertList, CertDetail, Recommendation, AiRecommendation, JobList, JobDetail, MyPage 등
+│       │   ├── lib/                 # api.ts, router.tsx, queryKeys, mockApi.ts, utils
+│       │   └── types/               # API·추천 타입
 │       ├── package.json
 │       ├── vite.config.ts
 │       ├── tsconfig.*.json
 │       └── index.html
-└── docker-compose.yml               # backend, frontend, db, redis
+└── docker-compose.yml               # backend, frontend, db, redis (선택)
 ```
-
----
-
-## 설치 및 실행 (Setup & Run)
-
-### 1. 환경 변수 설정
-```bash
-# 백엔드
-cp backend/.env.example backend/.env
-# 필요 시 DATABASE_URL, REDIS_URL, SUPABASE_*, OPENAI_API_KEY 등 수정
-
-# 프론트엔드
-cp frontend/app/.env.example frontend/app/.env
-# VITE_API_BASE_URL 등 수정
-```
-
-### 2. 백엔드 실행
-```bash
-cd backend
-# 가상환경 생성 후 (선택) pip install -r requirements.txt
-# uv 사용 시:
-uv run uvicorn main:app --reload
-```
-- 기본 포트: **8000**  
-- API 문서: `http://localhost:8000/docs` (DEBUG=True 시)  
-- 헬스: `GET /health`
-
-### 3. 프론트엔드 실행
-```bash
-cd frontend/app
-npm install
-npm run dev
-```
-- 기본 포트: **5173** (Vite)
-- 빌드: `npm run build` (tsc -b && vite build)
 
 ---
 
@@ -154,30 +126,46 @@ npm run dev
 | `DELETE /api/v1/me/acquired-certs/{qual_id}` | 취득 자격증 제거 |
 
 **XP 계산** (`app/utils/xp.py`): 자격증 난이도(1.0~9.9) 구간별 가중치 → `난이도 + 보너스` (최소 0.5).  
-**레벨 임계값**: 0 → 5 → 15 → 35 → 70 → 120 → 190 → 290 → 430 XP (Lv1~9).  
-평균 난이도(5.0) 자격증 1개 ≈ 5 XP → Lv2 Bronze 도달.
+**레벨 임계값**: 0 → 5 → 15 → 35 → 70 → 120 → 190 → 290 → 430 XP (Lv1~9).
 
 ---
 
-## Redis 캐시 작동 원리
+## Redis 사용 (캐시·레이트리밋·트렌딩)
 
-이 서비스는 가장 빠른 사용자 경험을 제공하기 위해 **자격증 조회**를 극단적으로 최적화했습니다.
+Redis는 **캐시·레이트리밋·트렌딩·최근 본** 용도로 사용됩니다. (`app/redis_client.py`)
 
-1. **데이터 갱신 (Producer)**: 자격증 테이블에 CRUD가 발생할 경우 Redis Pub/Sub 채널(`cert_updates`)로 메시지 발행.
-2. **실시간 싱크 (Sync Worker)**: 초경량 Python 워커가 채널을 구독하여 즉시 데이터를 orjson으로 직렬화해 Redis RAM 캐시에 꽂아넣습니다. (`app/redis_sync_worker.py`)
-3. **가장 빠른 반환 (FastAPI Endpoint)**: 사용자가 앱에서 조회를 요청하면 백엔드(`app/api/fast_certs.py`)는 미들웨어나 모델 파싱조차 건너뛰고, Redis 비동기 풀(Pool)에서 원시 데이터를 꺼내 그대로 브라우저로 쏘아보냅니다.
+1. **API 응답 캐시 (orjson 직렬화)**
+   - 자격증 목록/개수/상세/통계/필터 옵션 (`certs:list:v7`, `certs:count:v7`, `certs:detail:*`, `certs:stats:*` 등)
+   - 추천 API (`recs:*`), RAG 검색 (`rag_ask:*`)
+   - TTL: 목록/추천 10분, 상세/통계 1시간 등 설정 가능
+2. **레이트 리밋**
+   - 일반 API·인증 API별 분당 요청 제한 (Redis 카운터)
+3. **트렌딩·최근 본**
+   - `trending_certs` (Sorted Set): 상세 조회 시 점수 증가, 트렌딩 목록 조회
+   - `user:{user_id}:recent_certs`: 로그인 사용자 최근 본 자격증 ID 목록
+4. **선택: 실시간 동기화**
+   - Pub/Sub 채널 `cert_updates` 구독 시 `redis_sync_worker.py`가 DB 변경을 Redis에 반영. `fast_certs.py`가 해당 캐시를 읽어 초저지연 목록 응답에 사용할 수 있음.
+
+Redis 미연결 시 캐시·트렌딩·레이트리밋은 비활성화되고, DB 직접 조회로 동작합니다.
 
 ---
 
 ## 기타 API 요약
-- **자격증**: `GET /api/v1/certs`, `GET /api/v1/certs/{id}`, `GET /api/v1/certs/trending/now`, `GET /api/v1/certs/search/rag`
+
+- **자격증**: `GET /api/v1/certs`, `GET /api/v1/certs/{id}`, `GET /api/v1/certs/trending/now`, `GET /api/v1/certs/search/rag`, `GET /api/v1/certs/recent/viewed`
 - **추천**: `GET /api/v1/recommendations?major=...`, `GET /api/v1/recommendations/me`, `GET /api/v1/recommendations/majors`, `GET /api/v1/recommendations/popular-majors`
 - **AI**: `GET /api/v1/recommendations/ai/hybrid-recommendation`, `GET /api/v1/recommendations/ai/semantic-search`
 - **직무**: `GET /api/v1/jobs`, `GET /api/v1/jobs/{id}`
 - **인증**: `GET /api/v1/auth/profile`, `PATCH /api/v1/auth/profile`, OTP·로그인·회원가입 등
 - **문의**: `POST /api/v1/contact`
 
-## 이슈 트래킹 및 기여 (Troubleshooting & Contribution)
-- 회원가입 인증 시 `check constraint "chk_userid_len"` 등 글자 수 제한이 걸리면, Supabase SQL Editor에서 해당 제약을 조정할 수 있습니다.
-- JWT 검증은 `app/utils/auth.py`에서 Supabase `/auth/v1/user` REST API에 위임해 호환성을 맞춥니다.
-- **시퀀스 중복 오류**: 대량 import 후 `qualification` 등 SERIAL 시퀀스가 꼬리면, `SELECT SETVAL(pg_get_serial_sequence('public.qualification','qual_id'), (SELECT MAX(qual_id) FROM qualification)+1);` 로 동기화합니다.
+---
+
+## 이슈 트래킹 및 트러블슈팅 (Troubleshooting)
+
+- **회원가입·제약**: `check constraint "chk_userid_len"` 등 글자 수 제한은 Supabase SQL Editor에서 제약 조정 가능.
+- **JWT 검증**: `app/utils/auth.py`에서 Supabase `/auth/v1/user` REST API에 위임.
+- **시퀀스 중복**: 대량 import 후 `qualification` 등 SERIAL 시퀀스 꼬리면  
+  `SELECT SETVAL(pg_get_serial_sequence('public.qualification','qual_id'), (SELECT MAX(qual_id) FROM qualification)+1);` 로 동기화.
+- **성능·캐시·RAG**: DB 쿼리 병목, Redis 캐시 전략, RAG 후보군·리랭커 풀, `/search/rag` content 제거 롤백 등은 `backend/docs/PERFORMANCE_IMPROVEMENT_METRICS.md` 참고.
+- **배포**: Render(Vercel)·Supabase·Redis Cloud·환경변수는 `.cursorskills` 또는 프로젝트 배포 규칙 참고.

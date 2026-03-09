@@ -90,11 +90,12 @@ def _run_enhanced_reranker_rag(
     rrf_w_bm25: Optional[float] = None,
     rrf_w_dense1536: Optional[float] = None,
     rrf_w_contrastive768: Optional[float] = None,
+    use_reranker: bool = True,
 ) -> tuple:
-    """Enhanced RAG: RRF 후보 + Cross-Encoder → Top4. 3-way 시 가중치 오버라이드 가능. 반환 (chunk_ids, latency_ms)."""
+    """Enhanced RAG: RRF 후보 + (옵션) Cross-Encoder → Top4. use_reranker=False면 검색만. 반환 (chunk_ids, latency_ms)."""
     start = time.perf_counter()
     candidates = hybrid_retrieve(
-        db, query, top_k=top_k, filters=None, alpha=alpha, use_reranker=True,
+        db, query, top_k=top_k, filters=None, alpha=alpha, use_reranker=use_reranker,
         rrf_w_bm25=rrf_w_bm25, rrf_w_dense1536=rrf_w_dense1536, rrf_w_contrastive768=rrf_w_contrastive768,
     )
     chunk_ids = [c[0] for c in candidates]
@@ -116,6 +117,7 @@ def run_eval_three_way(
     rrf_w_bm25: Optional[float] = None,
     rrf_w_dense1536: Optional[float] = None,
     rrf_w_contrastive768: Optional[float] = None,
+    use_reranker: bool = True,
 ) -> Dict[str, Dict[str, float]]:
     """
     골든셋으로 4-way 실행 후 메트릭 집계. RRF Top30 후보, Reranker는 상위 20개 pool → Top4.
@@ -209,11 +211,12 @@ def run_eval_three_way(
             else:
                 ids_c = []
 
-            # Enhanced Reranker (RRF 후보 + Cross-Encoder → Top4; 3-way 시 가중치 오버라이드)
+            # Enhanced Reranker (RRF 후보 + (옵션) Cross-Encoder → Top4; 3-way 시 가중치 오버라이드)
             if "enhanced_reranker" in pipelines:
                 ids_er, lat_er = _run_enhanced_reranker_rag(
                     db, q, top_k, gold_ids, alpha=enhanced_alpha,
                     rrf_w_bm25=rrf_w_bm25, rrf_w_dense1536=rrf_w_dense1536, rrf_w_contrastive768=rrf_w_contrastive768,
+                    use_reranker=use_reranker,
                 )
                 agg["enhanced_reranker"]["recall5"].append(recall_at_k(ids_er, gold_ids, 5))
                 agg["enhanced_reranker"]["recall10"].append(recall_at_k(ids_er, gold_ids, 10))

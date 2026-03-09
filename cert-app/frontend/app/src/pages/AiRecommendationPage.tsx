@@ -16,6 +16,7 @@ import {
     Zap,
     GitMerge,
     Layers,
+    TrendingUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,16 +63,34 @@ const AI_STATS = [
         color: 'indigo',
         desc: 'RRF Top30 → Cross-Encoder 리랭킹',
     },
+    {
+        label: '검색 품질 (MRR)',
+        value: '+700%',
+        unit: ' 향상',
+        icon: TrendingUp,
+        color: 'green',
+        desc: '원하는 자격증이 추천 상위에 얼마나 잘 나오는지 보는 지표. 높을수록 맞춤 추천이 잘 됩니다.',
+    },
 ] as const;
 
-/** 레거시(벡터 단일) 대비 고도화(Hybrid, BM25+Vector+RRF, 리랭커 없음) 성장 — 배 수만 표시 */
-const RAG_GROWTH_LABELS: { label: string; growth: string }[] = [
-    { label: 'Recall@5', growth: '2.3배 향상' },
-    { label: 'Recall@10', growth: '3배 향상' },
-    { label: 'Recall@20', growth: '1.8배 향상' },
-    { label: 'Hit@20', growth: '2배 향상' },
-    { label: 'Success@4', growth: '2배 향상' },
-    { label: 'MRR@4', growth: '7배 향상' },
+/** 베이스라인(벡터 단일) 대비 고도화 — 기존 대비 배 수 */
+const RAG_GROWTH_BASELINE: { label: string; growth: string }[] = [
+    { label: 'Recall@5', growth: '기존 3.3배' },
+    { label: 'Recall@10', growth: '기존 4배' },
+    { label: 'Recall@20', growth: '기존 2.8배' },
+    { label: 'Hit@20', growth: '기존 3배' },
+    { label: 'Success@4', growth: '기존 2배' },
+    { label: 'MRR@4', growth: '기존 8배' },
+];
+
+/** 레거시(Dense+Sparse RRF) 대비 고도화 — 평가지표 (갱신 시 반영) */
+const RAG_GROWTH_LEGACY_RRF: { label: string; growth: string }[] = [
+    { label: 'Recall@5', growth: '—' },
+    { label: 'Recall@10', growth: '—' },
+    { label: 'Recall@20', growth: '—' },
+    { label: 'Hit@20', growth: '—' },
+    { label: 'Success@4', growth: '—' },
+    { label: 'MRR@4', growth: '—' },
 ];
 
 export function AiRecommendationPage() {
@@ -584,15 +603,28 @@ export function AiRecommendationPage() {
                             <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800">
                                 검색: BM25 + Vector + Contrastive → RRF. 정합성 = (전공 + RRF 가중 평균) × 난이도·합격률 보정
                             </p>
-                            <div className="pt-3 border-t border-slate-800">
-                                <p className="text-[11px] font-bold text-slate-400 mb-2">레거시(벡터 단일) 대비 고도화( Hybrid, BM25+Vector+RRF, 리랭커 없음 )</p>
-                                <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                                    {RAG_GROWTH_LABELS.map(({ label, growth }) => (
-                                        <span key={label} className="text-[11px] text-slate-300">
-                                            <span className="text-slate-500">{label}</span>
-                                            <span className="ml-1.5 font-semibold text-emerald-400">{growth}</span>
-                                        </span>
-                                    ))}
+                            <div className="pt-3 border-t border-slate-800 space-y-4">
+                                <div>
+                                    <p className="text-[11px] font-bold text-slate-400 mb-2">베이스라인(벡터 단일) 대비</p>
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                                        {RAG_GROWTH_BASELINE.map(({ label, growth }) => (
+                                            <span key={label} className="text-[11px] text-slate-300">
+                                                <span className="text-slate-500">{label}</span>
+                                                <span className="ml-1.5 font-semibold text-emerald-400">{growth}</span>
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-[11px] font-bold text-slate-400 mb-2">레거시(Dense+Sparse RRF) 대비</p>
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                                        {RAG_GROWTH_LEGACY_RRF.map(({ label, growth }) => (
+                                            <span key={`rrf-${label}`} className="text-[11px] text-slate-300">
+                                                <span className="text-slate-500">{label}</span>
+                                                <span className="ml-1.5 font-semibold text-slate-500">{growth}</span>
+                                            </span>
+                                        ))}
+                                    </div>
                                 </div>
                             </div>
                         </div>

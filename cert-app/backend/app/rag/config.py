@@ -24,7 +24,7 @@ class RAGSettings(BaseSettings):
 
     # Retrieval: RRF Top30 → Reranker Top4 (Vector 단일 채널 고도화: 후보 확대)
     RAG_TOP_K: int = 4  # 최종 반환/생성에 사용할 청크 수 (reranker 출력)
-    RAG_TOP_N_CANDIDATES: int = 95  # RRF로 뽑을 후보 수 (Top95, 골든 평가에서 nDCG@20 소폭 상승으로 90→95 적용)
+    RAG_TOP_N_CANDIDATES: int = 95  # RRF로 뽑을 후보 수. 보수적: 변경 시 지표 재측정 후 적용·악화 시 복구. docs/PERFORMANCE_IMPROVEMENT_METRICS.md
     RAG_RRF_K: int = 60  # RRF 상수. 60=품질 개선 골든 n=34에서 전 지표 상승으로 적용. 논문(SIGIR'09) 표준
     RAG_FUSION_METHOD: str = "linear"  # "rrf" | "linear". linear=min-max 정규화 후 λ*BM25+(1-λ)*Vector (골든 평가에서 R@20·Hit@20·MRR@4 상승으로 적용)
     RAG_VECTOR_TOP_N_OVERRIDE: Optional[int] = None  # 설정 시 벡터만 이 수만큼 뽑음. 100 실험 시 지표 동일·비용만 증가해 미적용
@@ -51,9 +51,10 @@ class RAGSettings(BaseSettings):
     RAG_GATING_MIN_EVIDENCE_COUNT: int = 2  # 최소 근거 개수
 
     # Rerank (HF Space API 전용. 로컬 Cross-Encoder 미사용)
+    # 보수적 운영: RRF만 사용이 기본. Reranker 켤 때만 캐시·게이팅 필수. 변경 시 docs/PERFORMANCE_IMPROVEMENT_METRICS.md 참고.
     # 모델: multifuly/certweb-reranker-model, 서빙 Space: multifuly/certweb-reranker
     RAG_RERANK_SCORES_PATH: Optional[str] = None  # rerank_scores.jsonl 경로 (레거시)
-    RAG_USE_CROSS_ENCODER_RERANKER: bool = False  # True면 hybrid 후 Reranker API로 재정렬
+    RAG_USE_CROSS_ENCODER_RERANKER: bool = False  # True면 hybrid 후 Reranker API로 재정렬. 기본 False=RRF만 사용.
     RAG_RERANKER_MODEL_REPO_ID: str = "multifuly/certweb-reranker-model"  # Hub 모델 (참고용, 로컬 미로드)
     RAG_RERANKER_SPACE_REPO_ID: str = "multifuly/certweb-reranker"  # 서빙 Space (참고용)
     RAG_RERANKER_API_URL: str = ""  # 비우지 않으면 이 URL로 POST (query, passages) → scores. 기본값 없음(설정 필수)

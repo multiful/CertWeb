@@ -221,16 +221,6 @@ export async function semanticSearch(
   return await apiRequest<SemanticSearchResponse>(`/recommendations/ai/semantic-search?query=${encodeURIComponent(query)}&limit=${limit}`);
 }
 
-/** 골든 8개 기준 RAG 평가 메트릭 (베이스라인 대비 MRR, Recall@5, Recall@10) */
-export async function getRagEvalMetrics(): Promise<{
-  golden_n?: number;
-  baseline?: { 'Recall@5'?: number; 'Recall@10'?: number; MRR?: number; Avg_Latency_ms?: number };
-  enhanced_reranker?: { 'Recall@5'?: number; 'Recall@10'?: number; MRR?: number; Avg_Latency_ms?: number };
-  pct_vs_baseline?: { 'Recall@5'?: number | null; 'Recall@10'?: number | null; MRR?: number | null };
-}> {
-  return await apiRequest<any>('/recommendations/ai/rag-eval-metrics');
-}
-
 export async function getAvailableMajors(): Promise<{ majors: string[] }> {
   try {
     return await apiRequest<{ majors: string[] }>('/recommendations/majors');
