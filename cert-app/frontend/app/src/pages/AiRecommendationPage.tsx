@@ -57,11 +57,11 @@ const AI_STATS = [
     },
     {
         label: '검색 방식',
-        value: '하이브리드',
+        value: 'BM25+Vector+Contrastive',
         unit: '',
         icon: GitMerge,
         color: 'purple',
-        desc: '키워드 + 시멘틱 융합',
+        desc: 'RRF 융합 (키워드·시멘틱·Contrastive)',
     },
     {
         label: '순위 융합 (RRF)',
@@ -294,9 +294,14 @@ export function AiRecommendationPage() {
                 <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <div className="flex items-center justify-between flex-wrap gap-4">
                         <div className="space-y-1">
-                            <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+                            <h2 className="text-2xl font-bold text-white flex items-center gap-3 flex-wrap">
                                 <Sparkles className="w-6 h-6 text-yellow-500" />
                                 분석 결과
+                                {results.retrieval_pipeline === 'bm25_vector_contrastive_rrf' && (
+                                    <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px] font-normal">
+                                        BM25+Vector+Contrastive+RRF
+                                    </Badge>
+                                )}
                             </h2>
                             <p className="text-slate-400">
                                 {results.major} 전공과 {results.interest ? `"${results.interest}"` : "시스템 데이터"}를 결합한 추천입니다.
@@ -402,8 +407,11 @@ export function AiRecommendationPage() {
                                             <div
                                                 className="h-full bg-blue-500 transition-all"
                                                 style={{
-                                                    // major_score는 대략 0~10 범위라고 가정하고 0~1로 정규화 후 20~100%로 매핑
-                                                    width: `${20 + 80 * Math.min(Math.max(res.major_score / 10, 0), 1)}%`,
+                                                    // 백엔드 0~1 정규화 값 우선, 없으면 major_score/10 fallback
+                                                    width: `${(() => {
+                                                        const norm = res.major_score_normalized ?? Math.min(1, Math.max(0, res.major_score / 10));
+                                                        return 20 + 80 * norm;
+                                                    })()}%`,
                                                 }}
                                             />
                                         </div>
@@ -417,11 +425,10 @@ export function AiRecommendationPage() {
                                             <div
                                                 className="h-full bg-purple-500 transition-all"
                                                 style={{
-                                                    // interest_level 1~9를 20~100% 범위로 선형 매핑 (없으면 최소값)
+                                                    // 관심사-자격증 시멘틱 유사도(0~1)로 표시. 없으면 semantic_similarity fallback
                                                     width: `${(() => {
-                                                        const lvl = res.interest_level ?? 1;
-                                                        const clamped = Math.max(1, Math.min(lvl, 9));
-                                                        return 20 + 80 * ((clamped - 1) / 8);
+                                                        const norm = res.semantic_score_normalized ?? Math.min(1, Math.max(0, res.semantic_similarity ?? 0));
+                                                        return 20 + 80 * norm;
                                                     })()}%`,
                                                 }}
                                             />
@@ -527,47 +534,54 @@ export function AiRecommendationPage() {
                             })}
                         </div>
 
-                        {/* 정합성 점수 구성 바 */}
+                        {/* 정합성 점수 구성 바 — BM25 + Vector + Contrastive + RRF 파이프라인 반영 */}
                         <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
-                            <div className="flex items-center justify-between">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
                                 <p className="text-sm font-bold text-slate-300 flex items-center gap-2">
                                     <GitMerge className="w-4 h-4 text-purple-400" />
                                     정합성 점수 구성 (Hybrid Score)
                                 </p>
-                                <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20 text-[10px]">
-                                    하이브리드 알고리즘
-                                </Badge>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <Badge className="bg-purple-500/10 text-purple-400 border-purple-500/20 text-[10px]">
+                                        절대 매칭도
+                                    </Badge>
+                                    <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px]">
+                                        BM25+Vector+Contrastive+RRF
+                                    </Badge>
+                                </div>
                             </div>
                             <div className="space-y-3">
                                 <div className="space-y-1.5">
                                     <div className="flex items-center justify-between text-xs">
                                         <span className="text-blue-400 font-semibold flex items-center gap-1.5">
                                             <div className="w-2.5 h-2.5 rounded-sm bg-blue-500" />
-                                            전공 연관성 (Major Score)
+                                            전공 연관성 (Major)
                                         </span>
-                                        <span className="text-blue-400 font-bold">40%</span>
+                                        <span className="text-blue-400 font-bold">30~50%</span>
                                     </div>
                                     <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                         <div className="h-full w-[40%] bg-gradient-to-r from-blue-600 to-blue-400 rounded-full" />
                                     </div>
-                                    <p className="text-[11px] text-slate-600">전공 분야와 자격증 출제 범위 간 키워드 매칭 점수</p>
+                                    <p className="text-[11px] text-slate-600">전공 분야와 자격증 출제 범위 간 키워드·벡터 매칭 (관심사 없을 때 50%)</p>
                                 </div>
                                 <div className="space-y-1.5">
                                     <div className="flex items-center justify-between text-xs">
                                         <span className="text-purple-400 font-semibold flex items-center gap-1.5">
                                             <div className="w-2.5 h-2.5 rounded-sm bg-purple-500" />
-                                            AI 시멘틱 유사도 (Semantic Score)
+                                            관심도 일치 (RRF)
                                         </span>
-                                        <span className="text-purple-400 font-bold">60%</span>
+                                        <span className="text-purple-400 font-bold">50~70%</span>
                                     </div>
                                     <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                         <div className="h-full w-[60%] bg-gradient-to-r from-purple-600 to-indigo-400 rounded-full" />
                                     </div>
-                                    <p className="text-[11px] text-slate-600">1,536차원 벡터 공간에서 관심사와 자격증 설명의 코사인 유사도</p>
+                                    <p className="text-[11px] text-slate-600">
+                                        BM25 + Vector(Dense) + Contrastive → RRF 융합 점수 (관심 입력 시 70%)
+                                    </p>
                                 </div>
                             </div>
                             <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800">
-                                최종 정합성 = Major Score × 0.4 + Semantic Score × 0.6
+                                검색: BM25 + Vector + Contrastive → RRF. 정합성 = (전공 + RRF 가중 평균) × 난이도·합격률 보정
                             </p>
                         </div>
                     </div>
@@ -644,21 +658,31 @@ export function AiRecommendationPage() {
                                                             {res.reason}
                                                         </p>
                                                     )}
-                                                    {/* 미니 스코어 바 */}
+                                                    {/* 미니 스코어 바: 정규화 값 우선 */}
                                                     <div className="space-y-1.5 pt-1">
                                                         <div className="flex items-center gap-2">
                                                             <div className="w-2 h-2 rounded-sm bg-blue-500 shrink-0" />
                                                             <div className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
-                                                                <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${res.major_score * 10}%` }} />
+                                                                <div
+                                                                    className="h-full bg-blue-500 rounded-full transition-all"
+                                                                    style={{
+                                                                        width: `${(res.major_score_normalized ?? Math.min(1, (res.major_score ?? 0) / 10)) * 100}%`,
+                                                                    }}
+                                                                />
                                                             </div>
                                                             <span className="text-[10px] text-slate-600 w-8 shrink-0">전공</span>
                                                         </div>
                                                         <div className="flex items-center gap-2">
                                                             <div className="w-2 h-2 rounded-sm bg-purple-500 shrink-0" />
                                                             <div className="h-1 flex-1 bg-slate-800 rounded-full overflow-hidden">
-                                                                <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${res.semantic_similarity * 100}%` }} />
+                                                                <div
+                                                                    className="h-full bg-purple-500 rounded-full transition-all"
+                                                                    style={{
+                                                                        width: `${(res.semantic_score_normalized ?? Math.min(1, res.semantic_similarity ?? 0)) * 100}%`,
+                                                                    }}
+                                                                />
                                                             </div>
-                                                            <span className="text-[10px] text-slate-600 w-8 shrink-0">AI</span>
+                                                            <span className="text-[10px] text-slate-600 w-8 shrink-0">관심</span>
                                                         </div>
                                                     </div>
                                                 </div>

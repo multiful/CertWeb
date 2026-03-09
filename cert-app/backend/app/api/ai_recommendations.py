@@ -358,6 +358,8 @@ async def hybrid_recommendation(
 
         if USE_ENHANCED_RAG:
             try:
+                # 고도화 RAG: BM25 + Vector(dense1536) + Contrastive(768) → 3-way RRF.
+                # rag_list 반환 점수 = RRF(BM25, Vector, Contrastive) per chunk → qual_id별 합산.
                 from app.rag.retrieve.hybrid import hybrid_retrieve
                 rag_list = hybrid_retrieve(
                     db, expanded_interest,
@@ -601,12 +603,14 @@ async def hybrid_recommendation(
 
         pr_factor = _pass_rate_factor(pass_rate_lookup.get(cid))
 
-        # 0~1 범위로 정규화된 major / semantic
+        # 0~1 범위로 정규화된 major / semantic (UI 전공 연관성·관심도 일치 바용)
         if major_span > 0:
             major_norm = (c["major_score"] - min_major) / major_span
         else:
             major_norm = 1.0
         sem_norm = max(0.0, min(c["semantic_similarity"], 1.0))
+        c["major_score_normalized"] = major_norm
+        c["semantic_score_normalized"] = sem_norm
 
         # 정합성 기본 점수: interest가 있을 때는 관심사(semantic)를 더 강하게 반영
         if interest_provided:
@@ -615,49 +619,27 @@ async def hybrid_recommendation(
             base_match = 0.5 * major_norm + 0.5 * sem_norm
 
         # 최종 하이브리드 = (전공/관심사 매칭) × 난이도 보정 × 합격률 보정
+        # 절대 점수(0~1 클램핑)로 두어, 1등이 항상 100%가 아닌 직관적인 정합성 % 표시
         h_score = base_match * difficulty_factor * pr_factor
-        c["hybrid_score"] = h_score
+        c["hybrid_score"] = max(0.0, min(h_score, 1.0))
         c["pass_rate"] = pass_rate_lookup.get(cid)
         final_results.append(c)
 
-    # --- 7-1) Hybrid Score 정규화 + 관심도 레벨 산출 ---------------------------
-    # UI에서 정합성(%)을 0~100 범위로 직관적으로 보여주기 위해, 0~1 구간으로 재스케일링한다.
-    # 모든 하이브리드 점수가 동일한 경우에도 순위 기반으로 약간의 분산을 줘서
-    # 게이지가 전부 같은 값으로 보이지 않도록 한다.
-    max_h = 0.0
-    min_h = 0.0
+    # --- 7-1) 관심도 레벨(1~9) 산출 -------------------------------------------
+    # hybrid_score(절대 0~1) 기반 비선형 매핑. 정합성은 재정규화하지 않음.
+    max_h = min_h = 0.0
     if final_results:
         max_h = max(c["hybrid_score"] for c in final_results)
         min_h = min(c["hybrid_score"] for c in final_results)
-        if max_h > 0 and max_h != min_h:
-            span = max_h - min_h
-            for c in final_results:
-                base = (c["hybrid_score"] - min_h) / span
-                c["hybrid_score"] = max(0.0, min(base, 1.0))
-        elif max_h > 0:
-            # max_h == min_h > 0 인 경우: 순위 기반으로 0~1 사이에 균등 분산
-            ranked = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)
-            n_rank = len(ranked)
-            for idx, c in enumerate(ranked):
-                if n_rank == 1:
-                    c["hybrid_score"] = 1.0
-                else:
-                    frac = 1.0 - (idx / (n_rank - 1))
-                    c["hybrid_score"] = max(0.0, min(frac, 1.0))
-
-        # 최종 정렬된 하이브리드 점수를 기준으로 관심도 레벨(1~9)을 다시 계산
-        # 하드코딩된 순위 기반 레벨이 아니라, 실제 hybrid_score(0~1)에 기반한 비선형 매핑을 사용한다.
         ranked_for_interest = sorted(final_results, key=lambda x: x["hybrid_score"], reverse=True)
         n_rank = len(ranked_for_interest)
         if n_rank == 1:
-            # 한 개만 있을 때는 최고 관심도로 간주
             ranked_for_interest[0]["interest_level"] = 9
         elif n_rank > 1:
             for c in ranked_for_interest:
-                frac = max(0.0, min(c["hybrid_score"], 1.0))  # 0~1
-                # 상위 점수 구간을 조금 더 넓게 주기 위해 루트 계열 곡선 사용
+                frac = max(0.0, min(c["hybrid_score"], 1.0))
                 shaped = frac ** 0.7
-                level = 1 + int(round(shaped * 8))  # 1~9
+                level = 1 + int(round(shaped * 8))
                 c["interest_level"] = max(1, min(level, 9))
 
     # --- 8) 1차 정렬 & 결과 수 제한 ------------------------------------------
@@ -753,6 +735,8 @@ async def hybrid_recommendation(
                 pass_rate=c.get("pass_rate"),
                 rrf_score=c.get("rrf_score"),
                 llm_reason=False,
+                major_score_normalized=c.get("major_score_normalized"),
+                semantic_score_normalized=c.get("semantic_score_normalized"),
             )
         )
 
@@ -763,6 +747,7 @@ async def hybrid_recommendation(
         results=items,
         guest_limited=not bool(user_id),
         rag_mode="enhanced" if use_enhanced_rag_result else "current",
+        retrieval_pipeline="bm25_vector_contrastive_rrf" if use_enhanced_rag_result else "vector_fulltext_rrf",
     )
 
     # 메트릭 로깅: 처리 시간, 후보 수, 점수 분포 등 (개인정보 제외)

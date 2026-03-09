@@ -226,6 +226,9 @@ class HybridRecommendationItem(BaseModel):
     pass_rate: Optional[float] = None   # 최신 합격률 (0-100), 없으면 None
     rrf_score: Optional[float] = None   # Reciprocal Rank Fusion 점수
     llm_reason: bool = False            # LLM이 reason을 생성했으면 True
+    # UI 전공 연관성·관심도 일치 바용 0~1 정규화 값 (없으면 프론트에서 fallback)
+    major_score_normalized: Optional[float] = None
+    semantic_score_normalized: Optional[float] = None
 
 
 class HybridRecommendationResponse(BaseModel):
@@ -237,6 +240,8 @@ class HybridRecommendationResponse(BaseModel):
     guest_limited: bool = False
     # 현재 RAG(certificates_vectors) vs 고도화 RAG(app.rag hybrid_retrieve) 구분
     rag_mode: str = "current"  # "current" | "enhanced"
+    # 검색 파이프라인: enhanced 시 "bm25_vector_contrastive_rrf", 아니면 "vector_fulltext_rrf"
+    retrieval_pipeline: Optional[str] = None
 
 
 # ============== List Response Schemas ==============

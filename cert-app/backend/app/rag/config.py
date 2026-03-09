@@ -136,10 +136,11 @@ class RAGSettings(BaseSettings):
     RAG_PERSONALIZED_FAR_TOO_DIFFICULT_PENALTY: float = -0.15
     RAG_PERSONALIZED_FAR_TOO_EASY_PENALTY: float = -0.05
 
-    # Contrastive retriever (768-dim FAISS, BM25 + dense1536 + contrastive768 3-way RRF)
+    # Contrastive retriever (768-dim 한국어 bi-encoder + FAISS. BM25 + dense1536 + contrastive768 3-way RRF)
+    # Contrastive = 768-dim 한국어 전용 모델. 공식: Hub multifuly/cert-constrative-embedding (RAG_CONTRASTIVE_MODEL).
     RAG_CONTRASTIVE_ENABLE: bool = False  # True면 contrastive FAISS arm 추가, weighted RRF로 병합
-    RAG_CONTRASTIVE_MODEL: str = ""  # HuggingFace model id 또는 로컬 경로 (SentenceTransformer). RAG_CONTRASTIVE_EMBEDDING_URL 있으면 무시
-    RAG_CONTRASTIVE_EMBEDDING_URL: str = ""  # 비우지 않으면 질의 임베딩을 이 URL로 POST (HF Inference API 등). body: {"inputs": query}, 응답: [[float,...]] 768-dim
+    RAG_CONTRASTIVE_MODEL: str = ""  # Contrastive 전용 768-dim 모델. Hub: multifuly/cert-constrative-embedding. RAG_CONTRASTIVE_EMBEDDING_URL 있으면 무시
+    RAG_CONTRASTIVE_EMBEDDING_URL: str = ""  # 비우지 않으면 질의 임베딩을 이 URL로 POST (HF Space 등). body: {"inputs": query}, 응답: [[float,...]] 768-dim
     RAG_CONTRASTIVE_EMBEDDING_TOKEN: str = ""  # HF Inference API 등 인증 시 Bearer 토큰 (선택)
     RAG_CONTRASTIVE_INDEX_DIR: str = "data/contrastive_index"  # cert_index.faiss, cert_metadata.json 위치 (정식 경로)
     RAG_RRF_W_BM25: float = 1.0  # 3-way RRF 시 BM25 가중치

@@ -4,7 +4,6 @@ RRF Top30 후보, Reranker는 RRF 상위 20개 pool(RAG_RERANK_POOL_SIZE) → To
 """
 import csv
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -12,12 +11,10 @@ from sqlalchemy.orm import Session
 from app.rag.eval.golden import load_golden
 from app.rag.eval.common import normalize_gold_labels
 from app.rag.eval.retrieval_metrics import recall_at_k, precision_at_k, mrr, recall_at_k_qual, mrr_qual
-from app.rag.eval.generation_metrics import citation_coverage, hallucination_proxy
 from app.rag.retrieve.hybrid import hybrid_retrieve, _fetch_contents_by_chunk_ids
+from app.rag.retrieve.contrastive_retriever import prewarm_contrastive
 from app.rag.rerank.cross_encoder import rerank_with_cross_encoder
 from app.rag.config import get_rag_settings
-from app.rag.generate.evidence_first import generate_evidence_first_answer
-from app.rag.generate.gating import check_gating
 from app.rag.index.vector_index import get_vector_search
 from app.utils.rag_hybrid import enhanced_rag_03_hybrid
 from app.utils.ai import get_embedding
@@ -131,6 +128,11 @@ def run_eval_three_way(
 
     db = SessionLocal()
     golden = normalize_gold_labels(golden, db, drop_empty_gold=True)
+
+    # 3-way(contrastive) 평가 시 첫 질의에서 cold-start가 지연에 포함되지 않도록 한 번만 prewarm
+    settings = get_rag_settings()
+    if "enhanced_reranker" in (pipelines or []) and getattr(settings, "RAG_CONTRASTIVE_ENABLE", False):
+        prewarm_contrastive()
 
     per_query_results: List[Dict[str, Any]] = []
     try:

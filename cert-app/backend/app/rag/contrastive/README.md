@@ -1,6 +1,9 @@
 # Contrastive (768-dim) Retriever
 
-로컬 모델 파일은 제거됨. **Hub 모델** `multifuly/cert-constrative-embedding` 사용.
+**Contrastive = 768-dim 한국어 bi-encoder 전용.** 자격증 도메인 contrastive 학습 모델만 해당함.
+
+- **공식 모델:** Hub `multifuly/cert-constrative-embedding` (로컬 모델 파일 제거됨.)
+- **아님:** jhgan/ko-sroberta-multitask 등 일반 768-dim 한국어 모델은 contrastive가 아님. FAISS는 공식 모델로 구축됨.
 
 - **설정:** `.env` 에 `RAG_CONTRASTIVE_MODEL=multifuly/cert-constrative-embedding`, `RAG_CONTRASTIVE_INDEX_DIR=data/contrastive_index`
 - **문서:** `backend/docs/CONTRASTIVE_HUGGINGFACE_UPLOAD.md`, `backend/docs/CONTRASTIVE_USAGE_LOCAL.md`

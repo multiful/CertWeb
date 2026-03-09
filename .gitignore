@@ -37,11 +37,13 @@ ENV/
 # [Database & Storage]
 *.sqlite3
 **/dataset/
-# data/ 하위 전부 제외하되, Render 고도화 RAG용 인덱스·도메인 토큰 포함 가능
+# data/ 하위 전부 제외하되, Render 고도화 RAG용 인덱스·도메인 토큰·contrastive 인덱스 포함 가능
 **/data/*
 !**/data/rag_index/
 !**/data/rag_index/**
 !**/data/domain_tokens.json
+!**/data/contrastive_index/
+!**/data/contrastive_index/**
 certs_*.csv
 frontend/public/uploads/
 

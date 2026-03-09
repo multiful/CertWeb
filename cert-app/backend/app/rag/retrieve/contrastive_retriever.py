@@ -1,9 +1,14 @@
 """
-Contrastive retriever: 768-dim bi-encoder + FAISS 인덱스.
-BM25·dense1536과 별도 arm으로 검색 후 RRF로만 결합. 768→1536 변환 금지.
-로컬 CPU에서 query embedding, Hugging Face는 모델 저장소로만 사용.
+Contrastive retriever: 768-dim 한국어 bi-encoder + FAISS 인덱스.
 
-지연 완화: (1) 로드 실패 시 한 번만 시도하고 재시도 안 함(실패 캐시). (2) 정상 시 CPU 인코딩 ~100–500ms, 앱 기동 후 pre-warm 권장.
+- **Contrastive(공식):** RAG_CONTRASTIVE_MODEL에 지정한 모델. Hub 기준 `multifuly/cert-constrative-embedding`.
+  자격증 도메인 contrastive 학습으로 만든 768-dim SentenceTransformer. 이 모델만 contrastive임.
+- **일반 768-dim 한국어 모델**(예: jhgan/ko-sroberta-multitask)은 contrastive가 아님. FAISS 차원만 맞출 뿐,
+  인덱스는 contrastive 모델로 구축되었으므로 공식 모델 사용 권장.
+- BM25·dense1536과 별도 arm으로 검색 후 RRF로만 결합. 768→1536 변환 금지.
+- RAG_CONTRASTIVE_EMBEDDING_URL 설정 시 해당 URL로 질의 임베딩만 요청(로컬 모델 미로드).
+
+지연 완화: (1) 로드 실패 시 한 번만 시도. (2) 정상 시 CPU 인코딩 ~100–500ms, pre-warm 권장.
 """
 import json
 import logging
