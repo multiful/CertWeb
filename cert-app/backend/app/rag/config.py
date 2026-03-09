@@ -30,6 +30,12 @@ class RAGSettings(BaseSettings):
     RAG_VECTOR_TOP_N_OVERRIDE: Optional[int] = None  # 설정 시 벡터만 이 수만큼 뽑음. 100 실험 시 지표 동일·비용만 증가해 미적용
     RAG_ALPHA: float = 0.5  # hybrid: alpha*bm25_norm + (1-alpha)*vector_norm
     RAG_VECTOR_THRESHOLD: float = 0.02  # 유사도 임계값. 0.02=품질 개선 골든에서 MRR@4·nDCG@20 상승으로 적용
+    # 후보 수(N) 튜닝용 파라미터
+    # - RAG_BM25_TOP_N / RAG_CONTRASTIVE_TOP_N: None이면 RAG_TOP_N_CANDIDATES 사용
+    #   골든 평가·운영 로그를 기반으로 그리드 서치 후 적절한 값으로 오버라이드
+    RAG_BM25_TOP_N: Optional[int] = None
+    RAG_CONTRASTIVE_TOP_N: Optional[int] = None
+
     # 랜덤 서치로 찾은 최적 가중치 (설정 시 기본값으로 사용)
     RAG_CURRENT_W_D: Optional[float] = None  # Current RRF Dense 가중치
     RAG_CURRENT_W_S: Optional[float] = None  # Current RRF Sparse 가중치
@@ -58,6 +64,12 @@ class RAGSettings(BaseSettings):
     RAG_RERANK_GATING_ENABLE: bool = True
     RAG_RERANK_GATING_TOP1_MIN_SCORE: float = 0.02
     RAG_RERANK_GATING_MIN_GAP: float = 0.002
+    # 질의 타입·길이 기반 리랭커 게이팅: 쉬운/정형 쿼리는 리랭커 생략해 지연 절감
+    # - RAG_RERANK_ALLOWED_QUERY_TYPES: 리랭커를 사용할 query_type 목록 (comma-separated)
+    #   기본: natural, comparison, roadmap, mixed (자연어·비교·로드맵 위주)
+    # - RAG_RERANK_ALLOW_SHORT_KEYWORD: True면 짧은 키워드 쿼리(≤3단어)에도 리랭커 허용
+    RAG_RERANK_ALLOWED_QUERY_TYPES: str = "natural,comparison,roadmap,mixed"
+    RAG_RERANK_ALLOW_SHORT_KEYWORD: bool = False
     # §2-9 추천 적합도: 리랭커 입력에 전공·목적·직무·자격증명 반영 (True=추천 문맥 확장, False=query+passage만)
     RAG_RERANK_INPUT_ADD_CONTEXT: bool = True   # 쿼리에 "전공: X, 목적: Y, 직무: Z, 질의: ..." 추가
     RAG_RERANK_INPUT_ADD_QUAL_NAME: bool = True  # passage 앞에 "자격증: {qual_name}. " 접두사
@@ -146,6 +158,10 @@ class RAGSettings(BaseSettings):
     RAG_CONTRASTIVE_EMBEDDING_URL: str = ""  # 비우지 않으면 질의 임베딩을 이 URL로 POST (HF Space 등). body: {"inputs": query}, 응답: [[float,...]] 768-dim
     RAG_CONTRASTIVE_EMBEDDING_TOKEN: str = ""  # HF Inference API 등 인증 시 Bearer 토큰 (선택)
     RAG_CONTRASTIVE_INDEX_DIR: str = "data/contrastive_index"  # cert_index.faiss, cert_metadata.json 위치 (정식 경로)
+    # Contrastive arm 게이팅: 자연어·복합 목적 질의에만 Contrastive arm 사용해 비용·지연 절감
+    # - RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES: contrastive arm을 사용할 query_type 목록 (comma-separated)
+    #   기본: natural, comparison, roadmap, mixed, purpose_only
+    RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES: str = "natural,comparison,roadmap,mixed,purpose_only"
     RAG_RRF_W_BM25: float = 1.0  # 3-way RRF 시 BM25 가중치
     RAG_RRF_W_DENSE1536: float = 1.0  # 3-way RRF 시 dense(1536) 가중치
     RAG_RRF_W_CONTRASTIVE768: float = 1.2  # 3-way RRF 시 contrastive(768) 가중치

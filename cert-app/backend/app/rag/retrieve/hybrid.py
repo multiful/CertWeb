@@ -308,12 +308,21 @@ def hybrid_retrieve(
     """
     settings = get_rag_settings()
     top_n = settings.RAG_TOP_N_CANDIDATES
-    # 벡터만 더 많이 뽑을 때: RAG_VECTOR_TOP_N_OVERRIDE 설정 시 RRF 입력 다양성 확대
+    # 채널별 후보 수(N): 기본은 RAG_TOP_N_CANDIDATES, 필요 시 BM25/Contrastive만 별도 조정
+    bm25_top_n = getattr(settings, "RAG_BM25_TOP_N", None) or top_n
+    if isinstance(bm25_top_n, float):
+        bm25_top_n = int(bm25_top_n)
+    # 벡터만 더 많이/적게 뽑을 때: RAG_VECTOR_TOP_N_OVERRIDE 설정 시 RRF 입력 다양성/비용 조정
     vec_top_k = getattr(settings, "RAG_VECTOR_TOP_N_OVERRIDE", None) or top_n
     if isinstance(vec_top_k, float):
         vec_top_k = int(vec_top_k)
+    contrastive_top_n = getattr(settings, "RAG_CONTRASTIVE_TOP_N", None) or top_n
+    if isinstance(contrastive_top_n, float):
+        contrastive_top_n = int(contrastive_top_n)
     index_dir = bm25_index_path or (get_rag_index_dir() / "bm25.pkl")
     short_keyword = _is_short_query((query or "").strip())
+    # 질의 타입은 BM25 쿼리 확장·가중치·게이팅·contrastive/reranker 사용 여부에 공통으로 활용
+    query_type = classify_query_type(query, from_golden=None)
 
     # Vector (OpenAI embedding + pgvector). Dense query rewrite (개인화 시 profile 반영)
     vector_query = query
@@ -398,18 +407,17 @@ def hybrid_retrieve(
         try:
             bm25 = BM25Index(index_path=Path(index_dir))
             bm25.load()
-            qt = classify_query_type(query, from_golden=None)
             if getattr(settings, "RAG_BM25_MULTI_EXPANSION_ENABLE", False):
                 expansions = expand_query(query, max_expansions=4)
                 if len(expansions) <= 1:
-                    bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=qt)
-                    bm25_scores = bm25.search(bm25_query, k=top_n)
+                    bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=query_type)
+                    bm25_scores = bm25.search(bm25_query, k=bm25_top_n)
                 else:
-                    bm25_lists = [bm25.search(q, k=top_n) for q in expansions[:4]]
+                    bm25_lists = [bm25.search(q, k=bm25_top_n) for q in expansions[:4]]
                     bm25_scores = _rrf_merge_n(bm25_lists, rrf_k=_rrf_k())
             else:
-                bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=qt)
-                bm25_scores = bm25.search(bm25_query, k=top_n)
+                bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=query_type)
+                bm25_scores = bm25.search(bm25_query, k=bm25_top_n)
 
             if getattr(settings, "RAG_BM25_PRF_ENABLE", False) and bm25_scores:
                 prf_top_k = getattr(settings, "RAG_BM25_PRF_TOP_K", 5)
@@ -429,11 +437,36 @@ def hybrid_retrieve(
 
     # Contrastive 768 FAISS arm (별도 retriever, RRF로만 결합)
     contrastive_results: List[Tuple[str, float]] = []
-    if getattr(settings, "RAG_CONTRASTIVE_ENABLE", False):
-        try:
-            contrastive_results = contrastive_search((query or "").strip(), top_k=top_n)
-        except Exception:
-            logger.debug("contrastive_search failed (disabled or deps missing)", exc_info=True)
+    contrastive_enabled = getattr(settings, "RAG_CONTRASTIVE_ENABLE", False)
+    if contrastive_enabled:
+        # 질의 타입 기반 Contrastive 게이팅: 자연어·복합 목적 질의 위주로만 사용해 비용·지연 절감
+        allowed_types_raw = getattr(settings, "RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES", "") or ""
+        allowed_types = {t.strip() for t in allowed_types_raw.split(",") if t.strip()}
+        use_contrastive_for_query = True
+        if allowed_types:
+            use_contrastive_for_query = query_type in allowed_types
+        # 짧은 키워드·자격증명 위주 쿼리는 BM25+Vector로 충분한 경우가 많으므로 기본적으로 contrastive 비활성
+        if short_keyword and query_type in ("cert_name_included", "keyword"):
+            use_contrastive_for_query = False
+        if use_contrastive_for_query:
+            try:
+                logger.debug(
+                    "contrastive arm enabled (query_type=%s short=%s top_n=%d contrastive_top_n=%d)",
+                    query_type,
+                    short_keyword,
+                    top_n,
+                    contrastive_top_n,
+                )
+                contrastive_results = contrastive_search((query or "").strip(), top_k=contrastive_top_n)
+            except Exception:
+                logger.debug("contrastive_search failed (disabled or deps missing)", exc_info=True)
+        else:
+            logger.debug(
+                "contrastive arm skipped by gating (query_type=%s short=%s enabled=%s)",
+                query_type,
+                short_keyword,
+                contrastive_enabled,
+            )
 
     # Query Routing + Weighted RRF (쿼리 타입별·도메인별 가중치, 짧은 쿼리 시 Vector 게이팅)
     if use_query_weights or (alpha is None and getattr(settings, "RAG_ENHANCED_ALPHA", None) is None):
@@ -599,6 +632,29 @@ def hybrid_retrieve(
     # (선택) 경량 Cross-Encoder Reranker
     do_rerank = use_reranker if use_reranker is not None else getattr(settings, "RAG_USE_CROSS_ENCODER_RERANKER", False)
     if do_rerank:
+        # 1) 질의 타입·길이 기반 리랭커 게이팅: 쉬운/정형 쿼리는 리랭커 생략
+        allowed_types_raw = getattr(settings, "RAG_RERANK_ALLOWED_QUERY_TYPES", "") or ""
+        allowed_types = {t.strip() for t in allowed_types_raw.split(",") if t.strip()}
+        if allowed_types and query_type not in allowed_types:
+            logger.debug(
+                "reranker skipped by query_type gating (query_type=%s allowed=%s)",
+                query_type,
+                sorted(allowed_types),
+            )
+            return candidates[:top_k]
+        # 짧은 키워드(≤3단어) + 자격증명/키워드 위주 쿼리는 기본적으로 리랭커를 사용하지 않음
+        if (
+            short_keyword
+            and query_type in ("cert_name_included", "keyword")
+            and not getattr(settings, "RAG_RERANK_ALLOW_SHORT_KEYWORD", False)
+        ):
+            logger.debug(
+                "reranker skipped for short keyword query (query_type=%s short=%s)",
+                query_type,
+                short_keyword,
+            )
+            return candidates[:top_k]
+
         # 조건부 rerank: .env의 RAG_RERANK_GATING_* 적용. top1이 낮거나 격차가 작을 때만 rerank
         if settings.RAG_RERANK_GATING_ENABLE and len(candidates) >= 2:
             top1 = float(candidates[0][1])
@@ -606,6 +662,14 @@ def hybrid_retrieve(
             need_rerank = (
                 top1 < settings.RAG_RERANK_GATING_TOP1_MIN_SCORE
                 or (top1 - top2) < settings.RAG_RERANK_GATING_MIN_GAP
+            )
+            logger.debug(
+                "rerank gating check (top1=%.6f top2=%.6f min_score=%.6f min_gap=%.6f need_rerank=%s)",
+                top1,
+                top2,
+                settings.RAG_RERANK_GATING_TOP1_MIN_SCORE,
+                settings.RAG_RERANK_GATING_MIN_GAP,
+                need_rerank,
             )
             if not need_rerank:
                 return candidates[:top_k]

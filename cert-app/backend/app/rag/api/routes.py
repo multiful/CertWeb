@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db_session, check_rate_limit
 from app.rag.config import get_rag_settings
-from app.rag.retrieve.hybrid import hybrid_retrieve
+from app.rag.retrieve.hybrid import hybrid_retrieve, _fetch_contents_by_chunk_ids
 from app.rag.retrieve.cache import get_cached_rag_response, set_cached_rag_response
 from app.rag.rerank.cross_encoder import rerank_with_cross_encoder
 from app.rag.generate.evidence_first import generate_evidence_first_answer
@@ -46,28 +46,17 @@ def _chunk_ids_to_contents(
     db: Session,
     chunk_ids_with_scores: List[tuple],
 ) -> List[tuple]:
-    """(chunk_id, content, score) 리스트. content는 DB에서 조회."""
+    """
+    (chunk_id, content, score) 리스트.
+    content는 hybrid 모듈의 _fetch_contents_by_chunk_ids를 통해 한 번에 조회해 DB I/O를 최소화한다.
+    """
     if not chunk_ids_with_scores:
         return []
-    rows = []
+    chunk_ids = [cid for cid, _ in chunk_ids_with_scores]
+    contents = _fetch_contents_by_chunk_ids(db, chunk_ids)
+    rows: List[tuple] = []
     for cid, score in chunk_ids_with_scores:
-        if ":" in cid:
-            try:
-                qual_id, chunk_index = cid.split(":", 1)
-                qual_id, chunk_index = int(qual_id), int(chunk_index)
-            except ValueError:
-                rows.append((cid, "", score))
-                continue
-            r = db.execute(
-                text("SELECT content FROM certificates_vectors WHERE qual_id = :qid AND COALESCE(chunk_index, 0) = :cidx"),
-                {"qid": qual_id, "cidx": chunk_index},
-            ).fetchone()
-            if r:
-                rows.append((cid, r.content or "", score))
-            else:
-                rows.append((cid, "", score))
-        else:
-            rows.append((cid, "", score))
+        rows.append((cid, contents.get(cid, "") or "", score))
     return rows
 
 
@@ -129,6 +118,12 @@ async def rag_ask(
 
     top1_score = chunk_ids_with_scores[0][1] if chunk_ids_with_scores else 0.0
     gate = check_gating(top1_score, chunks_with_content, question)
+    logger.debug(
+        "rag_ask retrieval summary (baseline_id=%s top1_score=%.6f chunk_count=%d)",
+        body.baseline_id,
+        top1_score,
+        len(chunk_ids_with_scores),
+    )
     if gate.applied:
         resp_dict = {
             "answer": gate.answer,
@@ -136,7 +131,11 @@ async def rag_ask(
             "evidence_bullets": None,
             "gating_applied": True,
             "suggested_questions": gate.suggested_questions,
-            "debug": {"top1_score": top1_score, "chunk_count": len(chunk_ids_with_scores)},
+            "debug": {
+                "top1_score": top1_score,
+                "chunk_count": len(chunk_ids_with_scores),
+                "baseline_id": body.baseline_id,
+            },
         }
         set_cached_rag_response(question, resp_dict, filters=body.filters, top_k=body.top_k, baseline_id=body.baseline_id)
         return RAGAskResponse(
