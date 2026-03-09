@@ -6,7 +6,7 @@ BM25 쿼리 전처리 및 확장.
 - expand: 동의어/약어 확장 (자격증 도메인)
 - 현재 방식: RECOMMENDATION_QUERY_MAP n-gram 매칭 (docs/QUERY_EXPANSION_CURRENT.md)
 - 다른 방식: RAG_BM25_BASELINE_APPEND_ENABLE 시 비 cert-centric 추천 질의에 베이스라인 용어 추가
-- 비IT 도메인 쿼리(관광, 연어 등)일 때는 IT 베이스라인 미추가
+- 비IT 도메인 쿼리(관광, 언어 등)일 때는 IT 베이스라인 미추가
 """
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -461,7 +461,7 @@ def expand_query_single_string(
             and query_type not in CERT_CENTRIC_QUERY_TYPES
             and not has_non_it
         ):
-            # 8개: S@4/Hit@4/MRR 최고점. 비IT(관광·연어 등) 쿼리에는 IT 용어 미추가.
+            # 8개: S@4/Hit@4/MRR 최고점. 비IT(관광·언어 등) 쿼리에는 IT 용어 미추가.
             _baseline_terms = ["자격증", "정보처리", "SQLD", "ADsP", "IT", "취업", "실무", "로드맵"]
             for term in _baseline_terms:
                 if term and term.lower() not in seen:

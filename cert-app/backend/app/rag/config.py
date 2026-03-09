@@ -25,11 +25,11 @@ class RAGSettings(BaseSettings):
     # Retrieval: RRF Top30 → Reranker Top4 (Vector 단일 채널 고도화: 후보 확대)
     RAG_TOP_K: int = 4  # 최종 반환/생성에 사용할 청크 수 (reranker 출력)
     RAG_TOP_N_CANDIDATES: int = 95  # RRF로 뽑을 후보 수 (Top95, 골든 평가에서 nDCG@20 소폭 상승으로 90→95 적용)
-    RAG_RRF_K: int = 30  # RRF 상수. 30=골든 평가에서 R@20·Hit@20 최대. 논문(SIGIR'09) 표준은 60, 도메인별 튜닝 권장
+    RAG_RRF_K: int = 60  # RRF 상수. 60=품질 개선 골든 n=34에서 전 지표 상승으로 적용. 논문(SIGIR'09) 표준
     RAG_FUSION_METHOD: str = "linear"  # "rrf" | "linear". linear=min-max 정규화 후 λ*BM25+(1-λ)*Vector (골든 평가에서 R@20·Hit@20·MRR@4 상승으로 적용)
     RAG_VECTOR_TOP_N_OVERRIDE: Optional[int] = None  # 설정 시 벡터만 이 수만큼 뽑음. 100 실험 시 지표 동일·비용만 증가해 미적용
     RAG_ALPHA: float = 0.5  # hybrid: alpha*bm25_norm + (1-alpha)*vector_norm
-    RAG_VECTOR_THRESHOLD: float = 0.025  # 유사도 임계값. 0.025 적용 시 rrf MRR@4 0.809→0.838 상승
+    RAG_VECTOR_THRESHOLD: float = 0.02  # 유사도 임계값. 0.02=품질 개선 골든에서 MRR@4·nDCG@20 상승으로 적용
     # 랜덤 서치로 찾은 최적 가중치 (설정 시 기본값으로 사용)
     RAG_CURRENT_W_D: Optional[float] = None  # Current RRF Dense 가중치
     RAG_CURRENT_W_S: Optional[float] = None  # Current RRF Sparse 가중치
@@ -85,13 +85,14 @@ class RAGSettings(BaseSettings):
     # 후보 다양화·정렬 (다른 축 고도화)
     RAG_DEDUP_PER_CERT: bool = False  # True면 자격증(qual_id)당 최고점 청크 1개만 유지 후 재정렬 → 상위 목록이 서로 다른 자격증으로 다양해짐
     RAG_QUERY_TYPE_WEIGHTS_ENABLE: bool = False  # True면 query_type별 BM25/Vector 가중치 적용 (cert_name_included→BM25 강화, natural→Vector 강화)
+    RAG_DOMAIN_AWARE_WEIGHTS_ENABLE: bool = False  # True면 비IT 쿼리에 BM25 비중 상향(0.58/0.42). RAG_QUERY_TYPE_WEIGHTS_ENABLE와 함께 사용. 적용 후 평가로 유지 여부 결정.
 
     # Dense query rewrite (vector 채널만 적용, BM25/sparse 미적용)
     RAG_DENSE_USE_QUERY_REWRITE: bool = True
     RAG_DENSE_QUERY_REWRITE_FALLBACK: bool = True  # rewrite 실패 시 원본 query 사용
     RAG_DENSE_SHORT_QUERY_BOOST: bool = True       # True=짧은 쿼리(5단어 이하) 시 보조 키워드 라인 추가(다른 방식 확장)
     RAG_DENSE_MEDIUM_QUERY_BOOST: bool = False     # True=6~9단어일 때 보조 키워드 한 줄 추가(평가 시 vector_only 하락으로 OFF 유지)
-    RAG_DENSE_MULTI_QUERY_ENABLE: bool = False    # True=원본 쿼리+rewrite 각각 벡터 검색 후 RRF로 병합(다양성·recall 향상, 논문 multi-query)
+    RAG_DENSE_MULTI_QUERY_ENABLE: bool = True    # True=원본 쿼리+rewrite 각각 벡터 검색 후 RRF로 병합. 표준 골든 n=34에서 rrf_only 전 지표 상승으로 적용
     # BM25 PRF (Pseudo-Relevance Feedback): 1차 검색 상위 문서에서 확장어 추출 후 2차 검색, RRF 병합. 방법론 확장.
     RAG_BM25_PRF_ENABLE: bool = False  # True면 BM25 2회(원본+확장) 후 RRF로 하나의 BM25 리스트로 사용
     RAG_BM25_PRF_TOP_K: int = 5   # 1차 상위 K개 문서에서 확장어 추출
@@ -116,6 +117,9 @@ class RAGSettings(BaseSettings):
     RAG_METADATA_SOFT_MAJOR_BONUS: float = 0.14  # 전공 일치 가산 (목적과 동일 수준)
     RAG_METADATA_SOFT_TARGET_BONUS: float = 0.14  # 목적 일치 가산 상향(RRF 품질)
     RAG_METADATA_SOFT_FIELD_PENALTY: float = -0.20
+    # IT↔비IT 도메인 불일치 감점 (쿼리 IT인데 자격증 비IT, 또는 그 반대 → 감점으로 상대 순위 하락)
+    RAG_METADATA_DOMAIN_MISMATCH_ENABLE: bool = False  # True면 도메인 불일치 시 감점 적용. 실험 후 유지 여부 결정.
+    RAG_METADATA_DOMAIN_MISMATCH_PENALTY: float = -0.35  # 불일치 시 적용 감점
 
     # BM25 전용 개인화 (평가/챌린저용, production default OFF)
     RAG_BM25_PERSONALIZATION_ENABLED: bool = False

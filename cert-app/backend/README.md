@@ -164,7 +164,10 @@ backend/
 
 ## 📊 평가 및 골든셋
 
-- **표준 골든셋**: `data/reco_golden_recommendation_18.jsonl` (18질의). 확장 골든은 `data/reco_golden_*.jsonl` 등.
+- **표준 골든셋 (이 골든으로 평가)**: `data/reco_golden_recommendation_18.jsonl`
+  - **형식**: 질문은 **직무 희망만** (예: "데이터 분석 쪽으로 가고싶어", "통번역 관련 일 하고 싶어"). 학년·학과·취득/북마크 자격증은 **프로필**(로그인 사용자, 없을 수 있음)에서 가져와 재질의에 반영.
+  - **건수**: n=34 (프로필 없음 16건 + 프로필 있음 18건, IT·비IT 혼합).
+  - **이후 모든 RAG 평가는 이 골든셋 기준으로 수행.**
 - **Hybrid 베이스라인 (Reranker OFF/ON)**  
   `uv run python scripts/eval_hybrid_baseline.py --golden data/reco_golden_recommendation_18.jsonl`
 - **질의 유형별 Recall/MRR**  

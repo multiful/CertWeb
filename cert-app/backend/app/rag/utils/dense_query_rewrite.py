@@ -87,6 +87,49 @@ INTEREST_PATTERNS = [
     r"간호|의료|회계|금융|전기|전자|기계|건설",
 ]
 
+def _detect_non_it_domains(slots: Dict[str, str], original: str) -> List[str]:
+    """비IT 쿼리에서 도메인 키(관광, 간호, 회계 등)를 감지. BM25 확장 키와 동일한 키 사용."""
+    try:
+        from app.rag.utils.domain_tokens import get_non_it_bm25_expansion
+        expansion = get_non_it_bm25_expansion()
+    except Exception:
+        return []
+    combined = " ".join([
+        str(slots.get("전공", "")),
+        str(slots.get("희망직무", "")),
+        str(slots.get("관심분야", "")),
+        (original or ""),
+    ])
+    combined = (combined or "").strip()
+    detected = []
+    for domain_key in expansion.keys():
+        if domain_key in combined:
+            detected.append(domain_key)
+    return detected
+
+
+def _get_non_it_dense_keywords(slots: Dict[str, str], original: str) -> List[str]:
+    """비IT 벡터 쿼리 강화: 도메인별 확장 키워드를 모아 청크와 어휘 겹침을 늘린다."""
+    domains = _detect_non_it_domains(slots, original)
+    if not domains:
+        return []
+    try:
+        from app.rag.utils.domain_tokens import get_non_it_bm25_expansion
+        expansion = get_non_it_bm25_expansion()
+    except Exception:
+        return []
+    keywords = []
+    seen = set()
+    for key in domains:
+        for term in expansion.get(key, []):
+            if term not in seen:
+                seen.add(term)
+                keywords.append(term)
+    if keywords:
+        keywords.append("자격증")
+    return keywords
+
+
 # 재질의 시 IT 계열 보조 키워드(SQLD, 정보처리 등)를 넣을지 판단용.
 # data/domain_tokens.json 있으면 Supabase 데이터셋 기반, 없으면 기본값 사용.
 def _query_suggests_it_domain(slots: Dict[str, str], original: str) -> bool:
@@ -257,7 +300,7 @@ def _slots_to_structured_text(
         "관심역량: " + interest,
         "추천받고 싶은 자격증 유형: " + want_type,
     ]
-    # IT/데이터 계열 쿼리일 때만 보조·키워드 라인 추가 (관광·연어 등 비IT 쿼리에서 SQLD 오매칭 방지)
+    # IT/데이터 계열 쿼리일 때만 보조·키워드 라인 추가 (관광·언어 등 비IT 쿼리에서 SQLD 오매칭 방지)
     suggests_it = _query_suggests_it_domain(slots, original)
     # "다음 단계" / "미리 준비" 질의: 벡터 매칭을 위해 자격증 키워드 노출 (IT 쿼리만)
     if suggests_it and want_type and ("다음" in want_type or "준비" in want_type):
@@ -283,6 +326,11 @@ def _slots_to_structured_text(
                 lines.append("보조 키워드: 직무 로드맵 추천 정보처리")
         except Exception:
             pass
+    # 비IT 쿼리: 벡터 강화용 도메인 키워드 추가 (청크와 어휘 겹침 확대)
+    if not suggests_it:
+        non_it_kw = _get_non_it_dense_keywords(slots, original)
+        if non_it_kw:
+            lines.append("키워드: " + " ".join(non_it_kw))
     # 2) 학년: 슬롯에서 추출한 "N학년" 또는 profile
     grade_from_slot = (slots.get("학년") or "").strip()
     if grade_from_slot:

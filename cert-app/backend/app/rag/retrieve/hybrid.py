@@ -99,6 +99,18 @@ QUERY_TYPE_RRF_WEIGHTS: Dict[str, Tuple[float, float]] = {
     "comparison": (0.38, 0.62),
     "mixed": (0.30, 0.70),
 }
+# 비IT 쿼리 전용: BM25 강화(확장 골든 평가에서 비IT는 BM25가 유리). RAG_DOMAIN_AWARE_WEIGHTS_ENABLE 시 사용.
+NON_IT_RRF_WEIGHTS: Tuple[float, float] = (0.58, 0.42)
+
+
+def _query_suggests_it(query: str) -> bool:
+    """쿼리가 IT 도메인으로 보이면 True. 도메인 가중치/도메인 불일치 감점에 사용."""
+    try:
+        from app.rag.utils.dense_query_rewrite import extract_slots_for_dense, _query_suggests_it_domain
+        slots = extract_slots_for_dense(query)
+        return _query_suggests_it_domain(slots, query)
+    except Exception:
+        return True  # 실패 시 IT로 간주(기존 동작 유지)
 
 
 def _query_weights_by_type(query: str) -> Tuple[float, float]:
@@ -410,10 +422,13 @@ def hybrid_retrieve(
         except Exception:
             pass
 
-    # Query Routing + Weighted RRF (쿼리 타입별 가중치, 짧은 쿼리 시 Vector 게이팅)
+    # Query Routing + Weighted RRF (쿼리 타입별·도메인별 가중치, 짧은 쿼리 시 Vector 게이팅)
     if use_query_weights or (alpha is None and getattr(settings, "RAG_ENHANCED_ALPHA", None) is None):
         if getattr(settings, "RAG_QUERY_TYPE_WEIGHTS_ENABLE", False):
-            w_bm25, w_vector = _query_weights_by_type(query)
+            if getattr(settings, "RAG_DOMAIN_AWARE_WEIGHTS_ENABLE", False) and not _query_suggests_it(query):
+                w_bm25, w_vector = NON_IT_RRF_WEIGHTS  # 비IT: BM25 강화
+            else:
+                w_bm25, w_vector = _query_weights_by_type(query)
         else:
             w_bm25, w_vector = _query_weights_for_rrf(query)
         if short_keyword and bm25_scores and vector_results:
@@ -490,11 +505,16 @@ def hybrid_retrieve(
                     "target_bonus": getattr(settings, "RAG_METADATA_SOFT_TARGET_BONUS", 0.10),
                     "field_penalty": getattr(settings, "RAG_METADATA_SOFT_FIELD_PENALTY", -0.20),
                 }
+                if getattr(settings, "RAG_METADATA_DOMAIN_MISMATCH_ENABLE", False):
+                    soft_config["domain_mismatch_penalty"] = getattr(
+                        settings, "RAG_METADATA_DOMAIN_MISMATCH_PENALTY", -0.35
+                    )
+                query_is_it = _query_suggests_it(query) if getattr(settings, "RAG_METADATA_DOMAIN_MISMATCH_ENABLE", False) else None
                 scored = []
                 for cid, base_score in candidates:
                     qid = int(cid.split(":")[0]) if ":" in cid else None
                     qual_meta = meta.get(qid, {}) if qid is not None else {}
-                    soft = compute_metadata_soft_score(query_slots, qual_meta, soft_config)
+                    soft = compute_metadata_soft_score(query_slots, qual_meta, soft_config, query_is_it=query_is_it)
                     scored.append((cid, base_score + soft))
                 scored.sort(key=lambda x: -x[1])
                 candidates = scored

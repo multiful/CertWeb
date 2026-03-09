@@ -1,8 +1,8 @@
 """
 Metadata 기반 soft scoring: 직무/전공/추천대상 일치 시 가산, 분야 이탈 시 감점.
-하드 필터가 아닌 점수 보정으로 적용.
+IT↔비IT 도메인 불일치 시 감점(선택, RAG_METADATA_DOMAIN_MISMATCH_ENABLE).
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -13,6 +13,7 @@ DEFAULT_JOB_BONUS = 0.15
 DEFAULT_MAJOR_BONUS = 0.10
 DEFAULT_TARGET_BONUS = 0.10
 DEFAULT_FIELD_PENALTY = -0.20
+DEFAULT_DOMAIN_MISMATCH_PENALTY = -0.35
 
 
 def _normalize_tokens(s: str) -> set:
@@ -31,18 +32,21 @@ def _overlap_ratio(a: set, b: set) -> float:
 def compute_metadata_soft_score(
     query_slots: Dict[str, Any],
     qual_metadata: Dict[str, Any],
-    config: Dict[str, float] | None = None,
+    config: Dict[str, Any] | None = None,
+    query_is_it: Optional[bool] = None,
 ) -> float:
     """
     query_slots: rewrite에서 추출한 전공, 희망직무, 목적, 관심분야 등.
-    qual_metadata: qualification + related_majors 등 (main_field, ncs_large, related_majors).
-    config: RAG_METADATA_SOFT_JOB_BONUS 등 가중치. 없으면 기본값 사용.
+    qual_metadata: qualification + related_majors 등 (main_field, ncs_large, related_majors, is_it).
+    config: RAG_METADATA_SOFT_* 가중치. domain_mismatch_penalty 있으면 도메인 불일치 시 적용.
+    query_is_it: 쿼리가 IT 도메인인지. None이면 도메인 불일치 미적용.
     """
     cfg = config or {}
     job_bonus = float(cfg.get("job_bonus", DEFAULT_JOB_BONUS))
     major_bonus = float(cfg.get("major_bonus", DEFAULT_MAJOR_BONUS))
     target_bonus = float(cfg.get("target_bonus", DEFAULT_TARGET_BONUS))
     field_penalty = float(cfg.get("field_penalty", DEFAULT_FIELD_PENALTY))
+    domain_mismatch_penalty = float(cfg.get("domain_mismatch_penalty", 0.0))
 
     score = 0.0
     q_job = _normalize_tokens(str(query_slots.get("희망직무") or query_slots.get("관심분야") or ""))
@@ -66,6 +70,14 @@ def compute_metadata_soft_score(
         score += target_bonus * 0.5
     if q_job and qual_job and len(qual_job) > 0 and _overlap_ratio(q_job, qual_job) == 0 and len(q_job) >= 2:
         score += field_penalty * 0.5
+    # IT↔비IT 도메인 불일치 감점 (쿼리 IT인데 자격증 비IT, 또는 그 반대)
+    if (
+        query_is_it is not None
+        and domain_mismatch_penalty != 0.0
+        and qual_metadata.get("is_it") is not None
+        and query_is_it != qual_metadata["is_it"]
+    ):
+        score += domain_mismatch_penalty
     return score
 
 
@@ -101,6 +113,30 @@ def fetch_qual_metadata_bulk(db: Session, qual_ids: List[int]) -> Dict[int, Dict
             for qid, majors in by_qual.items():
                 if qid in out:
                     out[qid]["related_majors"] = [m for m in majors if m]
+        # IT/비IT 도메인 플래그 (도메인 불일치 감점용)
+        try:
+            from app.rag.utils.domain_tokens import get_it_tokens, get_non_it_tokens
+            it_tokens = get_it_tokens()
+            non_it_tokens = get_non_it_tokens()
+            for qid, meta in out.items():
+                text_parts = " ".join([
+                    str(meta.get("main_field") or ""),
+                    str(meta.get("ncs_large") or ""),
+                ] + [str(m) for m in (meta.get("related_majors") or [])])
+                is_it = None
+                for t in it_tokens:
+                    if t in text_parts:
+                        is_it = True
+                        break
+                if is_it is None:
+                    for t in non_it_tokens:
+                        if t in text_parts:
+                            is_it = False
+                            break
+                meta["is_it"] = is_it
+        except Exception:
+            for meta in out.values():
+                meta["is_it"] = None
     except Exception:
         pass
     return out
