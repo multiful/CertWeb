@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from app.rag.config import get_rag_settings
+from app.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,11 @@ _embedding_dim: int = 768
 _load_failed: bool = False
 # 원격 임베딩 URL 설정 시 로컬 모델 미로드
 _embedding_url: Optional[str] = None
+
+# Contrastive 캐시 설정 (버전 prefix 기반)
+_CONTRASTIVE_Q2V_PREFIX = "contrastive:q2v:v1"       # query -> embedding
+_CONTRASTIVE_RESULTS_PREFIX = "contrastive:results:v1"  # query+top_k -> [(chunk_id, score), ...]
+_CONTRASTIVE_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60  # 7일
 
 
 def diagnose_contrastive_status() -> Dict[str, str]:
@@ -110,7 +116,25 @@ def _embed_via_api(query: str):
         headers = {"Content-Type": "application/json"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        body = {"inputs": query.strip()}
+        qtext = (query or "").strip()
+        body = {"inputs": qtext}
+
+        # 1단계: Query -> Embedding 캐시 조회
+        cache_key = None
+        if redis_client.is_connected():
+            cache_key = redis_client.make_cache_key(_CONTRASTIVE_Q2V_PREFIX, qtext)
+            cached = redis_client.get(cache_key)
+            if cached is not None:
+                try:
+                    arr = np.asarray(cached, dtype=np.float32)
+                    if arr.ndim == 1:
+                        arr = arr.reshape(1, -1)
+                    # 캐시 값이 이미 정규화된 벡터라고 가정
+                    if arr.size == _embedding_dim:
+                        return arr
+                except Exception:
+                    # 캐시 깨진 경우에는 무시하고 재요청
+                    pass
         to_try = [url, f"{url}/", f"{url}/embed"]  # 404 시 대체 경로 재시도
         last_error = None
         with httpx.Client(timeout=30.0) as client:
@@ -135,7 +159,14 @@ def _embed_via_api(query: str):
                     norm = np.linalg.norm(arr)
                     if norm > 1e-9:
                         arr = arr / norm
-                    return arr.reshape(1, -1)
+                    arr = arr.reshape(1, -1)
+                    # 성공 시 캐시에 저장 (query → embedding)
+                    if cache_key is not None:
+                        try:
+                            redis_client.set(cache_key, arr.flatten().tolist(), ttl=_CONTRASTIVE_CACHE_TTL_SECONDS)
+                        except Exception:
+                            pass
+                    return arr
                 except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as e:
                     last_error = e
                     continue
@@ -261,7 +292,7 @@ def contrastive_search(query: str, top_k: int = 95) -> List[Tuple[str, float]]:
 
     import numpy as np
 
-    # Query embedding: 원격 URL 또는 로컬 모델
+    # Query embedding: 원격 URL 또는 로컬 모델 (+ 캐시)
     q = None
     if _embedding_url:
         q = _embed_via_api(query)
@@ -276,6 +307,22 @@ def contrastive_search(query: str, top_k: int = 95) -> List[Tuple[str, float]]:
     q = np.asarray(q, dtype=np.float32)
     if q.ndim == 1:
         q = q.reshape(1, -1)
+
+    # Query+top_k → 결과 캐시 (FAISS 검색 결과 자체 캐시)
+    cache_key = None
+    if redis_client.is_connected():
+        try:
+            cache_key = redis_client.make_cache_key(
+                _CONTRASTIVE_RESULTS_PREFIX,
+                (query or "").strip(),
+                top_k,
+            )
+            cached = redis_client.get(cache_key)
+            if cached is not None:
+                # cached: [[chunk_id, score], ...] 형태라고 가정
+                return [(str(cid), float(score)) for cid, score in cached]
+        except Exception:
+            cache_key = None
 
     k = min(top_k, _faiss_index.ntotal)
     if k <= 0:
@@ -299,5 +346,14 @@ def contrastive_search(query: str, top_k: int = 95) -> List[Tuple[str, float]]:
         chunk_id = f"{qual_id}:0"
         score = float(scores[0][i])
         out.append((chunk_id, score))
+
+    # 결과 캐시 저장
+    if cache_key is not None:
+        try:
+            # 리스트[튜플] → 리스트[list] 로 직렬화
+            serializable = [[cid, float(score)] for cid, score in out]
+            redis_client.set(cache_key, serializable, ttl=_CONTRASTIVE_CACHE_TTL_SECONDS)
+        except Exception:
+            pass
 
     return out

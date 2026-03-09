@@ -23,6 +23,7 @@ export function useRecommendations(
     queryKey: recommendationKeys.byMajor(major, limit),
     queryFn: () => getRecommendations(major, limit),
     enabled: major.trim().length > 0,
+    staleTime: 10 * 60 * 1000, // 10분: 같은 전공 재요청 시 캐시
   });
 
   return {
@@ -49,6 +50,7 @@ export function useMajors(): UseMajorsReturn {
       const res = await getAvailableMajors();
       return res.majors ?? [];
     },
+    staleTime: 10 * 60 * 1000, // 10분: 전공 목록 변경 적음
   });
 
   return {
@@ -69,6 +71,7 @@ export function usePopularMajors(limit: number = 12): UseMajorsReturn {
       const res = await getPopularMajors(limit);
       return res.majors ?? [];
     },
+    staleTime: 10 * 60 * 1000, // 10분: 인기 전공 목록
   });
 
   return {

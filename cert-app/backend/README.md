@@ -137,6 +137,61 @@ backend/
 - **HyDE**: Ablation에서 베이스라인 대비 상승했으나 운영에서는 오탐·비용 고려로 **기본 OFF**.
 - **CoT / Step-back / BM25 PRF**: 방법론 확장용 옵션, 기본 OFF. 필요 시 `app/rag/config.py` 및 평가 스크립트로 비교 가능.
 
+### 캐싱 전략 (Redis + LRU, RAG 전용)
+
+RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL)를 동시에 사용하기 때문에 **캐시 계층 설계가 곧 성능·비용·처리량 설계**입니다.
+
+- **1단계: Query → Embedding 캐시 (Contrastive)**  
+  - 위치: `app/rag/retrieve/contrastive_retriever.py`  
+  - 키: Redis `contrastive:q2v:v1:{hash(query_text)}`  
+  - 값: 정규화된 768-dim 벡터(list[float])  
+  - TTL: 기본 **7일** (`_CONTRASTIVE_CACHE_TTL_SECONDS`)  
+  - 무효화: Contrastive 모델/HF Space 교체 시 prefix(`v1`)만 올려 전체 무효화  
+  - 효과 (골든 상위 8개, `top_k=20`, contrastive-only):  
+    - Recall@20 / MRR@20: **0.8542 / 0.7708** (캐시 전후 동일)  
+    - Avg_ms: **836.0 → 67.1 ms**  
+    - P95_ms: **1600.0 → 43.2 ms**  
+    → 동일 질의 재사용 시, 임베딩/검색 지연이 **약 10~20배 감소**.
+
+- **2단계: Query + top_k → Contrastive 결과 캐시**  
+  - 위치: `contrastive_retriever.contrastive_search()`  
+  - 키: Redis `contrastive:results:v1:{hash(query_text, top_k)}`  
+  - 값: `[[chunk_id, score], ...]` 형식의 상위 결과 리스트  
+  - TTL: 기본 **7일**  
+  - 무효화: FAISS 인덱스 리빌드/교체 시 prefix만 올려 전체 무효화  
+  - 의미: HF Space 임베딩 + FAISS 검색까지 포함한 **완성된 후보 리스트**를 캐시하여, 동일 query/top_k 재요청 시 사실상 Redis read 수준 지연으로 응답.
+
+- **3단계: (query, chunk_id) → Reranker score 캐시 (LRU + Redis)**  
+  - 위치: `app/rag/rerank/cache.py` (`RerankerCache`), `app/rag/rerank/cross_encoder.py` (`_rerank_via_api`)  
+  - 키:  
+    - 로컬 LRU: `sha256(query ||| doc_hash)[:32]`  
+    - Redis: `rerank:v1:{sha256(query ||| doc_hash)[:32]}`  
+    - `doc_hash = sha256(passage_text)[:16]`  
+  - 값: 단일 float score (또는 `{ "score": float }`)  
+  - TTL: 기본 **1시간** (`RAG_RERANK_CACHE_TTL`, `.env`로 조절)  
+  - 무효화: Reranker 모델/HF Space 교체 시 prefix(`v1`)만 올려 전체 무효화  
+  - 동작:  
+    1. 로컬 LRU → Redis 순서로 `(query, passage)` pair score 조회  
+    2. miss인 pair만 HF Space로 batch 호출  
+    3. 응답 score를 LRU + Redis에 동시에 기록  
+  - 효과 (골든 상위 8개, `enhanced_reranker`, 3-way RRF 기준 2회차):  
+    - Baseline(2-way) Avg_Latency_ms: **558.5 ms**  
+    - Current(3-way) Avg_Latency_ms: **609.5 ms**  
+    → contrastive + reranker까지 포함한 3-way에서도 **Baseline 대비 추가 지연이 ~50 ms 수준**으로 수렴.
+
+- **4단계: RAG 응답 캐시 (질의 전체 응답)**  
+  - 위치: `app/rag/retrieve/cache.py`, `redis_client.rag_ask_cache_key()`  
+  - 키: `rag:ask:v1:{hash(query, filters, top_k, baseline_id)}`  
+  - 값: RAG 전체 응답(JSON 직렬화, 모델 출력 포함)  
+  - TTL: `RAG_CACHE_TTL` (기본 600초)  
+  - 용도: 동일 질의/필터 조합에 대해 **전체 RAG 파이프라인 실행 자체를 건너뛰는 계층**으로, 반복 질의가 많은 환경에서 처리량(throughput)을 크게 끌어올림.
+
+정리하면,
+
+- **Contrastive**: Query→Embedding + Query+top_k→Results 두 레이어 캐시로 HF Space 호출·FAISS 검색을 크게 줄이면서, 검색 품질(Recall/MRR)은 그대로 유지.  
+- **Reranker**: (query, passage) pair-level 캐시(LRU+Redis)로 동일 passage 재랭킹 비용을 제거하고, 후보 풀 구성이 조금 바뀌어도 재사용.  
+- **전체 RAG**: Query+Filters+top_k+baseline_id 단위 응답 캐시로, 자주 반복되는 추천 질의에 대해 end-to-end RAG 실행을 피함.
+
 ---
 
 ## 🛠 실행 방법

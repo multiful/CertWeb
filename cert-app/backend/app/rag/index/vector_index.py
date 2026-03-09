@@ -78,8 +78,23 @@ def get_vector_search(
 
     if is_non_it and vector_query != query and query.strip():
         # 비IT: 원문 검색 + 재작성 검색 후 RRF 병합
-        raw_results = vector_service.similarity_search(db, query.strip(), limit=top_k, match_threshold=th)
-        rew_results = vector_service.similarity_search(db, vector_query, limit=top_k, match_threshold=th)
+        # RAG 파이프라인에서는 content/metadata가 필요 없으므로 egress 절감을 위해 제외
+        raw_results = vector_service.similarity_search(
+            db,
+            query.strip(),
+            limit=top_k,
+            match_threshold=th,
+            include_content=False,
+            include_metadata=False,
+        )
+        rew_results = vector_service.similarity_search(
+            db,
+            vector_query,
+            limit=top_k,
+            match_threshold=th,
+            include_content=False,
+            include_metadata=False,
+        )
         list_a = _chunk_id_score(raw_results)
         list_b = _chunk_id_score(rew_results)
         merged = _rrf_merge_two(list_a, list_b, k=60)
@@ -90,5 +105,7 @@ def get_vector_search(
         vector_query,
         limit=top_k,
         match_threshold=th,
+        include_content=False,
+        include_metadata=False,
     )
     return _chunk_id_score(results)

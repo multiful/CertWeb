@@ -117,10 +117,17 @@ class VectorService:
         limit: int = 5,
         match_threshold: Optional[float] = None,
         exclude_qual_ids: Optional[List[int]] = None,
+        include_content: bool = True,
+        include_metadata: bool = True,
     ) -> List[Dict]:
         """
         벡터 유사도 검색 (코사인). match_threshold는 DB WHERE 절에서 적용.
         exclude_qual_ids: 이미 취득한 자격 등 검색 제외할 qual_id 목록.
+
+        include_content / include_metadata:
+            - False 로 두면 대용량 컬럼(content, metadata)을 실제로 읽지 않으므로
+              Supabase/Postgres egress 비용이 크게 줄어든다.
+            - RAG 파이프라인처럼 chunk_id·similarity만 필요할 때는 둘 다 False 권장.
         """
         from app.utils.ai import get_embedding
         q = (query_text or "").strip() or " "
@@ -133,16 +140,31 @@ class VectorService:
             return []
         max_distance = (1.0 - match_threshold) if (match_threshold is not None and match_threshold > 0) else 1.0
 
+        # Egress 최적화를 위해 대용량 컬럼 선택 여부를 동적으로 결정
+        select_columns = [
+            "v.qual_id",
+            "v.name",
+            "COALESCE(v.chunk_index, 0) as chunk_index",
+            "(1 - (v.embedding <=> :embedding)) as similarity",
+        ]
+        if include_content:
+            select_columns.insert(2, "v.content")  # name 뒤에 content 배치
+        else:
+            select_columns.insert(2, "NULL::text as content")
+        if include_metadata:
+            select_columns.insert(3, "v.metadata")
+        else:
+            select_columns.insert(3, "NULL::jsonb as metadata")
+
         sql = text("""
-            SELECT v.qual_id, v.name, v.content, v.metadata,
-                   COALESCE(v.chunk_index, 0) as chunk_index,
-                   (1 - (v.embedding <=> :embedding)) as similarity
+            SELECT {cols}
             FROM certificates_vectors v
             WHERE (v.embedding <=> :embedding) <= :max_distance
             {exclude_clause}
             ORDER BY v.embedding <=> :embedding
             LIMIT :limit
         """.format(
+            cols=", ".join(select_columns),
             exclude_clause="AND v.qual_id != ALL(:exclude_ids)" if exclude_qual_ids else ""
         ))
         params = {
@@ -154,17 +176,21 @@ class VectorService:
             params["exclude_ids"] = exclude_qual_ids
 
         results = db.execute(sql, params).fetchall()
-        return [
-            {
+        out: List[Dict[str, Any]] = []
+        for r in results:
+            item: Dict[str, Any] = {
                 "qual_id": r.qual_id,
                 "name": r.name,
-                "content": r.content,
                 "similarity": float(r.similarity),
-                "metadata": r.metadata,
                 "chunk_index": getattr(r, "chunk_index", 0) or 0,
             }
-            for r in results
-        ]
+            # content / metadata는 선택적으로만 포함
+            if include_content:
+                item["content"] = getattr(r, "content", None)
+            if include_metadata:
+                item["metadata"] = getattr(r, "metadata", None)
+            out.append(item)
+        return out
 
 
 vector_service = VectorService()

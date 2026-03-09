@@ -527,7 +527,14 @@ async def rag_search(
     # 1. Vector similarity search (match_threshold: 설정값 이상만 반환)
     threshold = settings.RAG_MATCH_THRESHOLD if settings.RAG_MATCH_THRESHOLD > 0 else None
     vector_results = vector_service.similarity_search(
-        db, q, limit=limit, match_threshold=threshold
+        db,
+        q,
+        limit=limit,
+        match_threshold=threshold,
+        # 프론트에는 name/qual_id/유사도만 주면 되므로 메타데이터는 제외,
+        # content는 간단한 미리보기가 필요할 수 있어 유지
+        include_content=True,
+        include_metadata=False,
     )
     # 2. Traffic score fusion (Boost by Redis clicks)
     fusion_results = []

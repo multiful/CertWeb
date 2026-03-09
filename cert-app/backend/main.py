@@ -202,6 +202,28 @@ async def add_process_time_and_security_headers(request: Request, call_next):
     response = await call_next(request)
     process_time = time.time() - start_time
     response.headers["X-Process-Time"] = str(process_time)
+
+    # HTTP 캐시: 읽기 전용·거의 안 변하는 GET에만 TTL 기반 Cache-Control (egress/재요청 감소)
+    if request.method == "GET" and response.status_code == 200:
+        path = (getattr(request, "url", None) and getattr(request.url, "path", None)) or request.scope.get("path") or ""
+        path = (path or "").rstrip("/")
+        prefix = (settings.API_V1_PREFIX or "/api/v1").rstrip("/")
+        if path.startswith(prefix):
+            rest = path[len(prefix) :].lstrip("/")
+            if rest == "certs":
+                response.headers["Cache-Control"] = f"public, max-age={settings.CACHE_TTL_LIST}"
+            elif rest.startswith("certs/filter-options"):
+                response.headers["Cache-Control"] = f"public, max-age={settings.CACHE_TTL_LIST}"
+            elif "/stats" in rest or "/trends" in rest:
+                response.headers["Cache-Control"] = f"public, max-age={settings.CACHE_TTL_STATS}"
+            elif rest.startswith("certs/") and "/" not in rest.replace("certs/", "", 1):
+                response.headers["Cache-Control"] = f"public, max-age={settings.CACHE_TTL_DETAIL}"
+            elif rest == "jobs":
+                response.headers["Cache-Control"] = "public, max-age=3600"
+            elif rest.startswith("jobs/") and "/" not in rest.replace("jobs/", "", 1):
+                response.headers["Cache-Control"] = "public, max-age=3600"
+            elif "recommendations/majors" in rest or "recommendations/popular-majors" in rest:
+                response.headers["Cache-Control"] = f"public, max-age={settings.CACHE_TTL_LIST}"
     if hasattr(request.state, "rate_limit_remaining"):
         response.headers["X-RateLimit-Remaining"] = str(request.state.rate_limit_remaining)
     # 보안 헤더

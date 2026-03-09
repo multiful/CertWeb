@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     
     # Cache TTL (seconds)
-    CACHE_TTL_LIST: int = 300  # 5 minutes
-    CACHE_TTL_DETAIL: int = 1800  # 30 minutes
+    CACHE_TTL_LIST: int = 600  # 10 minutes
+    CACHE_TTL_DETAIL: int = 3600  # 1 hour
     CACHE_TTL_STATS: int = 3600  # 1 hour
     CACHE_TTL_RECOMMENDATIONS: int = 600  # 10 minutes
     CACHE_TTL_RAG: int = 600  # RAG /search/rag, /rag/ask 응답 캐시 (10분)
