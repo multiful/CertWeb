@@ -14,8 +14,9 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql://postgres:password@localhost:5432/certdb"
     
-    # Redis
+    # Redis. REDIS_SOCKET_TIMEOUT: 단일 명령/파이프라인 타임아웃(초). bulk sync 시 2초는 부족할 수 있음
     REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_SOCKET_TIMEOUT: int = 10
     
     # Security (빈값이면 main.py startup 시 경고; .env에서 설정 필수)
     JOB_SECRET: str = ""
@@ -26,8 +27,9 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
     
-    # AI (OpenAI)
+    # AI (OpenAI). OPENAI_TIMEOUT: 임베딩/채팅 API 호출 타임아웃(초). 미설정 시 60
     OPENAI_API_KEY: str = ""
+    OPENAI_TIMEOUT: float = 60.0
     
     # Cache TTL (seconds)
     CACHE_TTL_LIST: int = 600  # 10 minutes

@@ -117,6 +117,23 @@ CONTRASTIVE_QUERY_TYPE_WEIGHTS: Dict[str, float] = {
 }
 
 
+def _three_way_weights_by_query_type(query: str, query_type: str, settings: Any) -> Tuple[float, float, float]:
+    """3-way RRF용 query_type·도메인 반영 가중치 (RAG_QUERY_TYPE_WEIGHTS_ENABLE 시). (w_bm25, w_dense, w_contrastive)."""
+    if getattr(settings, "RAG_DOMAIN_AWARE_WEIGHTS_ENABLE", False) and not _query_suggests_it(query):
+        b_ratio, v_ratio = NON_IT_RRF_WEIGHTS
+    else:
+        b_ratio, v_ratio = QUERY_TYPE_RRF_WEIGHTS.get(query_type, (0.30, 0.70))
+    c_mult = CONTRASTIVE_QUERY_TYPE_WEIGHTS.get(query_type, 1.0)
+    base_b = getattr(settings, "RAG_RRF_W_BM25", 1.0)
+    base_v = getattr(settings, "RAG_RRF_W_DENSE1536", 1.0)
+    base_c = getattr(settings, "RAG_RRF_W_CONTRASTIVE768", 1.2)
+    # b_ratio, v_ratio는 2-way용 비율(합 1). 0.5,0.5 기준으로 스케일해 3-way base에 반영
+    w_b = base_b * (b_ratio * 2.0)
+    w_v = base_v * (v_ratio * 2.0)
+    w_c = base_c * c_mult
+    return (w_b, w_v, w_c)
+
+
 def _query_suggests_it(query: str) -> bool:
     """쿼리가 IT 도메인으로 보이면 True. 도메인 가중치/도메인 불일치 감점에 사용."""
     try:
@@ -317,12 +334,14 @@ def hybrid_retrieve(
     contrastive_top_n_override: Optional[int] = None,
     vector_threshold_override: Optional[float] = None,
     channels_override: Optional[List[str]] = None,
+    force_reranker: bool = False,
 ) -> List[Tuple[str, float]]:
     """
     BM25 + Vector를 RRF로 병합.
     - use_query_weights=True: 쿼리 타입별 가중치(w_bm25/w_vector).
     - alpha 지정 시: BM25=alpha, Vector=1-alpha.
     - use_reranker: None이면 RAG_USE_CROSS_ENCODER_RERANKER 설정 따름, True/False면 강제.
+    - force_reranker: True면 질의 타입·점수 게이팅 무시하고 항상 리랭커 API 호출 (평가/디버깅용).
     - user_profile: 있으면 RAG_PERSONALIZED_* 설정 시 개인화 rewrite/soft score 적용. 없으면 기존 경로.
     - rrf_w_bm25 / rrf_w_dense1536 / rrf_w_contrastive768: 3-way RRF 시 가중치 오버라이드(None이면 설정값 사용).
     - channels_override: 채널 제한. ["bm25"], ["vector"], ["contrastive"] 또는 조합. None이면 3채널 모두 사용.
@@ -364,7 +383,8 @@ def hybrid_retrieve(
                 rewritten = rewrite_for_dense(query, profile=user_profile if use_personalized_rewrite else None)
                 if rewritten and rewritten.strip():
                     vector_query = rewritten
-            except Exception:
+            except Exception as e:
+                logger.debug("dense query rewrite failed, using original query: %s", e)
                 if getattr(settings, "RAG_DENSE_QUERY_REWRITE_FALLBACK", True):
                     vector_query = query
         if getattr(settings, "RAG_DENSE_MULTI_QUERY_ENABLE", False):
@@ -394,7 +414,8 @@ def hybrid_retrieve(
                         )
                         if lst:
                             cot_lists.append(lst)
-                    except Exception:
+                    except Exception as e:
+                        logger.debug("COT vector search for alt failed: %s", e)
                         continue
                 if cot_lists:
                     vector_results = _rrf_merge_n([vector_results] + cot_lists, rrf_k=_rrf_k())
@@ -411,8 +432,8 @@ def hybrid_retrieve(
                         vector_results = _rrf_merge(
                             vector_results, vec_sb, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug("stepback vector search failed: %s", e)
 
     # HyDE: 가상 문서 생성 후 벡터 검색, 3-way 병합 (방법론 확장). LONG_QUERY_ONLY면 짧은 쿼리(≤3단어)에서는 생략.
     hyde_results: List[Tuple[str, float]] = []
@@ -427,7 +448,8 @@ def hybrid_retrieve(
                 hyde_results = get_vector_search(
                     db, hyde_doc, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
                 )
-            except Exception:
+            except Exception as e:
+                logger.debug("HyDE vector search failed: %s", e)
                 hyde_results = []
 
     # BM25: single expansion 또는 multi-expansion(여러 확장 쿼리 검색 후 RRF). 선택 시 PRF.
@@ -461,8 +483,8 @@ def hybrid_retrieve(
                         bm25_scores = _rrf_merge(
                             bm25_scores, bm25_second, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
                         )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("BM25 search failed (index or expansion): %s", e)
 
     # Contrastive 768 FAISS arm (별도 retriever, RRF로만 결합)
     contrastive_results: List[Tuple[str, float]] = []
@@ -570,13 +592,18 @@ def hybrid_retrieve(
         else:
             combined = _rrf_merge_n(lists_to_merge, weights=weights_to_merge, rrf_k=rrf_k)
     elif getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and contrastive_results:
-        w_b = rrf_w_bm25 if rrf_w_bm25 is not None else getattr(settings, "RAG_RRF_W_BM25", 1.0)
-        w_v = rrf_w_dense1536 if rrf_w_dense1536 is not None else getattr(settings, "RAG_RRF_W_DENSE1536", 1.0)
-        w_c = rrf_w_contrastive768 if rrf_w_contrastive768 is not None else getattr(settings, "RAG_RRF_W_CONTRASTIVE768", 1.2)
-        if getattr(settings, "RAG_QUERY_TYPE_CONTRASTIVE_WEIGHTS_ENABLE", False):
-            mul = CONTRASTIVE_QUERY_TYPE_WEIGHTS.get(query_type)
-            if mul is not None:
-                w_c *= mul
+        if rrf_w_bm25 is not None and rrf_w_dense1536 is not None and rrf_w_contrastive768 is not None:
+            w_b, w_v, w_c = rrf_w_bm25, rrf_w_dense1536, rrf_w_contrastive768
+        elif getattr(settings, "RAG_QUERY_TYPE_WEIGHTS_ENABLE", False):
+            w_b, w_v, w_c = _three_way_weights_by_query_type(query, query_type, settings)
+        else:
+            w_b = rrf_w_bm25 if rrf_w_bm25 is not None else getattr(settings, "RAG_RRF_W_BM25", 1.0)
+            w_v = rrf_w_dense1536 if rrf_w_dense1536 is not None else getattr(settings, "RAG_RRF_W_DENSE1536", 1.0)
+            w_c = rrf_w_contrastive768 if rrf_w_contrastive768 is not None else getattr(settings, "RAG_RRF_W_CONTRASTIVE768", 1.2)
+            if getattr(settings, "RAG_QUERY_TYPE_CONTRASTIVE_WEIGHTS_ENABLE", False):
+                mul = CONTRASTIVE_QUERY_TYPE_WEIGHTS.get(query_type)
+                if mul is not None:
+                    w_c *= mul
         combined = _rrf_merge_n(
             [bm25_scores, vector_results, contrastive_results],
             weights=[w_b, w_v, w_c],
@@ -688,8 +715,8 @@ def hybrid_retrieve(
                     scored_pers.append((cid, base_score + personal))
                 scored_pers.sort(key=lambda x: -x[1])
                 candidates = scored_pers
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("personalized soft score failed: %s", e)
 
     # 메타데이터 필터
     if filters and candidates:
@@ -698,31 +725,31 @@ def hybrid_retrieve(
     # (선택) 경량 Cross-Encoder Reranker
     do_rerank = use_reranker if use_reranker is not None else getattr(settings, "RAG_USE_CROSS_ENCODER_RERANKER", False)
     if do_rerank:
-        # 1) 질의 타입·길이 기반 리랭커 게이팅: 쉬운/정형 쿼리는 리랭커 생략
-        allowed_types_raw = getattr(settings, "RAG_RERANK_ALLOWED_QUERY_TYPES", "") or ""
-        allowed_types = {t.strip() for t in allowed_types_raw.split(",") if t.strip()}
-        if allowed_types and query_type not in allowed_types:
-            logger.debug(
-                "reranker skipped by query_type gating (query_type=%s allowed=%s)",
-                query_type,
-                sorted(allowed_types),
-            )
-            return candidates[:top_k]
-        # 짧은 키워드(≤3단어) + 자격증명/키워드 위주 쿼리는 기본적으로 리랭커를 사용하지 않음
-        if (
-            short_keyword
-            and query_type in ("cert_name_included", "keyword")
-            and not getattr(settings, "RAG_RERANK_ALLOW_SHORT_KEYWORD", False)
-        ):
-            logger.debug(
-                "reranker skipped for short keyword query (query_type=%s short=%s)",
-                query_type,
-                short_keyword,
-            )
-            return candidates[:top_k]
+        # 1) 질의 타입·길이 기반 리랭커 게이팅 (force_reranker=True면 스킵)
+        if not force_reranker:
+            allowed_types_raw = getattr(settings, "RAG_RERANK_ALLOWED_QUERY_TYPES", "") or ""
+            allowed_types = {t.strip() for t in allowed_types_raw.split(",") if t.strip()}
+            if allowed_types and query_type not in allowed_types:
+                logger.info(
+                    "reranker skipped by query_type gating (query_type=%s allowed=%s)",
+                    query_type,
+                    sorted(allowed_types),
+                )
+                return candidates[:top_k]
+            if (
+                short_keyword
+                and query_type in ("cert_name_included", "keyword")
+                and not getattr(settings, "RAG_RERANK_ALLOW_SHORT_KEYWORD", False)
+            ):
+                logger.info(
+                    "reranker skipped for short keyword query (query_type=%s short=%s)",
+                    query_type,
+                    short_keyword,
+                )
+                return candidates[:top_k]
 
-        # 조건부 rerank: .env의 RAG_RERANK_GATING_* 적용. top1이 낮거나 격차가 작을 때만 rerank
-        if settings.RAG_RERANK_GATING_ENABLE and len(candidates) >= 2:
+        # 2) 조건부 rerank: top1/격차 게이팅 (force_reranker=True면 스킵 → 항상 API 호출)
+        if not force_reranker and settings.RAG_RERANK_GATING_ENABLE and len(candidates) >= 2:
             top1 = float(candidates[0][1])
             top2 = float(candidates[1][1])
             need_rerank = (

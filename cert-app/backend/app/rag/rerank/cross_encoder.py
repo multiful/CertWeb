@@ -61,6 +61,12 @@ def _rerank_via_api(
                 continue
         miss_pairs.append((chunk_id, text, doc_hash))
     
+    if cache and cached_scores:
+        logger.info(
+            "Reranker cache: %d hits, %d miss (캐시 적용됨)",
+            len(cached_scores), len(miss_pairs)
+        )
+    
     # 2) miss 항목만 API 호출
     api_scores: Dict[str, float] = {}  # chunk_id -> score
     if miss_pairs:
@@ -147,7 +153,7 @@ def rerank_with_cross_encoder(
     url = (model_name or getattr(settings, "RAG_RERANKER_API_URL", "") or "").strip()
     
     if not url:
-        logger.debug("RAG_RERANKER_API_URL 미설정 — 리랭커 스킵")
+        logger.warning("RAG_RERANKER_API_URL 미설정 — 리랭커 스킵 (원격 HF Space 사용 시 .env 또는 환경변수 설정 필요)")
         return []
     
     if use_cache is None:

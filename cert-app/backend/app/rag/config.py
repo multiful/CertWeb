@@ -29,10 +29,10 @@ class RAGSettings(BaseSettings):
     RAG_FUSION_METHOD: str = "linear"  # "rrf" | "linear". linear=min-max 정규화 후 λ*BM25+(1-λ)*Vector (골든 평가에서 R@20·Hit@20·MRR@4 상승으로 적용)
     RAG_VECTOR_TOP_N_OVERRIDE: Optional[int] = None  # 설정 시 벡터만 이 수만큼 뽑음. 100 실험 시 지표 동일·비용만 증가해 미적용
     RAG_ALPHA: float = 0.5  # hybrid: alpha*bm25_norm + (1-alpha)*vector_norm
-    RAG_VECTOR_THRESHOLD: float = 0.02  # 유사도 임계값. 0.02=품질 개선 골든에서 MRR@4·nDCG@20 상승으로 적용
-    # 후보 수(N). 채널별 K 분석 B80_V110_C80: Recall@5 0.569, MRR 0.694, 지연 절감. Vector=110은 RAG_TOP_N_CANDIDATES.
-    RAG_BM25_TOP_N: Optional[int] = 80
-    RAG_CONTRASTIVE_TOP_N: Optional[int] = 80
+    RAG_VECTOR_THRESHOLD: float = 0.01  # 유사도 임계값(실험: 0.02→0.01로 완화해 vector recall 확대). 악화 시 0.02 복귀
+    # 후보 수(N). B70_V110_C70 스윕에서 3-way R@5/MRR/H@5 개선으로 적용. Vector=110은 RAG_TOP_N_CANDIDATES.
+    RAG_BM25_TOP_N: Optional[int] = 70
+    RAG_CONTRASTIVE_TOP_N: Optional[int] = 70
 
     # 랜덤 서치로 찾은 최적 가중치 (설정 시 기본값으로 사용)
     RAG_CURRENT_W_D: Optional[float] = None  # Current RRF Dense 가중치
@@ -69,9 +69,9 @@ class RAGSettings(BaseSettings):
     # - RAG_RERANK_ALLOW_SHORT_KEYWORD: True면 짧은 키워드 쿼리(≤3단어)에도 리랭커 허용
     RAG_RERANK_ALLOWED_QUERY_TYPES: str = "natural,comparison,roadmap,mixed"
     RAG_RERANK_ALLOW_SHORT_KEYWORD: bool = False
-    # §2-9 추천 적합도: 리랭커 입력에 전공·목적·직무·자격증명 반영 (True=추천 문맥 확장, False=query+passage만)
-    RAG_RERANK_INPUT_ADD_CONTEXT: bool = True   # 쿼리에 "전공: X, 목적: Y, 직무: Z, 질의: ..." 추가
-    RAG_RERANK_INPUT_ADD_QUAL_NAME: bool = True  # passage 앞에 "자격증: {qual_name}. " 접두사
+    # §2-9 추천 적합도: 리랭커 입력 형식. reranker_train_from_contrastive.jsonl로 학습했다면 False 권장(학습 시와 동일).
+    RAG_RERANK_INPUT_ADD_CONTEXT: bool = False  # True면 쿼리에 "전공: X, 목적: Y, 질의: ..." 추가. 학습이 단순 질의였다면 False.
+    RAG_RERANK_INPUT_ADD_QUAL_NAME: bool = False  # True면 passage 앞에 "자격증: {qual_name}. " 추가. 학습이 "[자격증명:...]만"이었다면 False.
     RAG_INDEX_DIR: str = "data/rag_index"  # BM25 인덱스 등 디스크 저장 경로
 
     # Hybrid Query Routing + Vector Gating (짧은 키워드 쿼리에서 Vector 오탐 억제)
@@ -98,8 +98,9 @@ class RAGSettings(BaseSettings):
 
     # 후보 다양화·정렬 (다른 축 고도화)
     RAG_DEDUP_PER_CERT: bool = False  # True=자격증당 1개만 유지. 전체 골든 3모델 평가에서 Recall/MRR 악화로 False 유지
-    RAG_QUERY_TYPE_WEIGHTS_ENABLE: bool = False  # True면 query_type별 BM25/Vector 가중치 적용 (cert_name_included→BM25 강화, natural→Vector 강화)
-    RAG_DOMAIN_AWARE_WEIGHTS_ENABLE: bool = False  # True면 비IT 쿼리에 BM25 비중 상향(0.58/0.42). RAG_QUERY_TYPE_WEIGHTS_ENABLE와 함께 사용. 적용 후 평가로 유지 여부 결정.
+    RAG_QUERY_TYPE_WEIGHTS_ENABLE: bool = True  # True면 query_type별 BM25/Vector 가중치 (2-way·3-way 공통). 3-way 시 _three_way_weights_by_query_type 사용
+    RAG_DOMAIN_AWARE_WEIGHTS_ENABLE: bool = True  # True면 비IT 쿼리 BM25 비중 상향. QUERY_TYPE과 함께 평가
+    RAG_QUERY_TYPE_CONTRASTIVE_WEIGHTS_ENABLE: bool = True  # True면 3-way RRF 시 query_type별 Contrastive multiplier 적용. 스윕에서 지표 동일·지연 감소로 ON
 
     # Dense query rewrite (vector 채널만 적용, BM25/sparse 미적용)
     RAG_DENSE_USE_QUERY_REWRITE: bool = True
@@ -108,7 +109,7 @@ class RAGSettings(BaseSettings):
     RAG_DENSE_MEDIUM_QUERY_BOOST: bool = False     # True=6~9단어일 때 보조 키워드 한 줄 추가(평가 시 vector_only 하락으로 OFF 유지)
     RAG_DENSE_MULTI_QUERY_ENABLE: bool = True    # True=원본 쿼리+rewrite 각각 벡터 검색 후 RRF로 병합. 표준 골든 n=34에서 rrf_only 전 지표 상승으로 적용
     # BM25 PRF (Pseudo-Relevance Feedback): 1차 검색 상위 문서에서 확장어 추출 후 2차 검색, RRF 병합. 방법론 확장.
-    RAG_BM25_PRF_ENABLE: bool = False  # True면 BM25 2회(원본+확장) 후 RRF로 하나의 BM25 리스트로 사용
+    RAG_BM25_PRF_ENABLE: bool = False  # True면 BM25 2회(원본+확장) 후 RRF로 하나의 BM25 리스트로 사용. 평가 시 BM25/3-way 악화로 미적용.
     RAG_BM25_PRF_TOP_K: int = 5   # 1차 상위 K개 문서에서 확장어 추출
     RAG_BM25_PRF_N_TERMS: int = 10  # 추출할 확장어 개수
 

@@ -29,11 +29,13 @@ class RedisClient:
                     self.client = None
                     return
 
+            # socket_timeout: 단일 명령/파이프라인 한 번당 제한. bulk sync 시 여유 있게
+            socket_timeout = getattr(settings, "REDIS_SOCKET_TIMEOUT", 10)
             self.client = redis.from_url(
                 settings.REDIS_URL,
                 decode_responses=True,
-                socket_connect_timeout=2, # Faster timeout
-                socket_timeout=2,
+                socket_connect_timeout=5,
+                socket_timeout=socket_timeout,
                 health_check_interval=30,
             )
             self.client.ping()

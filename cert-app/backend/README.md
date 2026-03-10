@@ -1,6 +1,6 @@
 # CertFinder Backend
 
-고성능 비동기 자격증 분석·추천 API 서버. **Hybrid RAG**(BM25 + Vector + RRF + Reranker) 기반 자격증 검색·추천과 Redis 기반 초고속 조회를 제공합니다.
+**CertFinder** 자격증 검색·추천 API 백엔드. 고성능 비동기 서버로, **Hybrid RAG**(BM25 + Vector + Contrastive 3-way RRF + Reranker) 기반 검색·추천과 Redis 기반 초고속 조회를 제공합니다.
 
 ---
 
@@ -33,9 +33,9 @@ backend/
 │   ├── rag/                  # RAG 검색·생성
 │   │   ├── api/routes.py     # POST /rag/ask
 │   │   ├── config.py         # RAG 하이퍼파라미터
-│   │   ├── retrieve/hybrid.py      # BM25+Vector RRF, Query Routing, Gating
+│   │   ├── retrieve/hybrid.py      # BM25+Vector+Contrastive RRF, Query Routing, Gating
 │   │   ├── retrieve/metadata_soft_score.py   # 직무·전공·분야 가산/감점
-│   │   ├── rerank/cross_encoder.py # Reranker HF Space API (multifuly/certweb-reranker)
+│   │   ├── rerank/cross_encoder.py # Reranker HF Space API (CertFinder Reranker)
 │   │   ├── generate/evidence_first.py, gating.py
 │   │   ├── index/            # BM25·Vector 인덱스 빌드
 │   │   ├── eval/             # Recall@k, MRR, nDCG, 골든 로더
@@ -47,10 +47,13 @@ backend/
 │   ├── redis_client.py, database.py, models.py, schemas/, config.py
 │   └── utils/ai.py, auth.py, stream_producer.py
 ├── scripts/                     # 평가·적용 검증·데이터 파이프라인
-│   ├── eval_three_models_no_reranker.py   # 3모델 비교(베이스라인/레거시/고도화), CSV·보고서
-│   ├── bench_apply_verification.py        # RAG 응답 크기·get_list 지연 측정
-│   ├── export_rag_eval_metrics.py         # rag_eval_metrics_8.json 생성 (API /rag-eval-metrics용)
-│   └── (기타) audit_corpus_field_major.py, apply_corpus_rules_to_reranker_train.py 등 — docs/README.md 참고
+│   ├── eval_three_models_no_reranker.py   # 3모델 비교(baseline/current/enhanced_reranker), CSV·보고서
+│   ├── eval_channel_ablation.py          # 채널별 K/가중치 Ablation
+│   ├── eval_enhanced_only.py             # Enhanced 단일 파이프라인 평가
+│   ├── eval_reranker_on_off.py           # 리랭커 ON/OFF 비교
+│   ├── bench_apply_verification.py       # RAG 응답 크기·get_list 지연 측정
+│   ├── export_rag_eval_metrics.py       # rag_eval_metrics_8.json (API /rag-eval-metrics용)
+│   └── (기타) run_*_tuning.py, audit_corpus_*.py 등 — docs/README.md 참고
 ├── data/                     # 골든셋, 코퍼스, contrastive 학습 데이터
 ├── main.py
 ├── requirements.txt
@@ -65,7 +68,7 @@ backend/
 |------|------|
 | **API** | FastAPI, Pydantic, SQLAlchemy, Supabase(PostgreSQL) |
 | **캐시·속도** | Redis (orjson 직렬화), FastSyncService 부팅 시 전체 인덱스 로드, StreamProducer Pub/Sub |
-| **RAG** | BM25(한글 n-gram) + OpenAI Embedding, RRF/Linear Fusion, Query Routing, Dense Query Rewrite, Reranker(HF Space API, multifuly/certweb-reranker-model), Metadata·개인화 Soft Score |
+| **RAG** | BM25 + Vector + Contrastive 3-way RRF/Linear Fusion, Query Routing, Dense Query Rewrite, Reranker(HF Space API), Metadata·개인화 Soft Score |
 | **배포** | Render, UptimeRobot 모니터링 (규칙: `.cursor/rules/deployment.mdc` 참고) |
 
 ---
@@ -77,11 +80,12 @@ backend/
 
 2. **검색**  
    - **BM25**: 한글 2-gram, 자격명 부스팅, 추천용 purpose/직무 필드.  
-   - **Vector**: `certificates_vectors` dense_content 임베딩 검색, 임계값·게이팅.  
+   - **Vector**: `certificates_vectors` OpenAI 임베딩 검색, 임계값·게이팅.  
+   - **Contrastive**: 768-dim 질의·청크 임베딩(FAISS) 검색, Redis 캐시.  
    - **Query Routing**: 짧은 키워드 쿼리는 BM25 비중 확대, Vector 게이팅으로 오탐 억제.
 
 3. **융합**  
-   RRF(Reciprocal Rank Fusion) 또는 Linear Fusion으로 BM25·Vector 순위 병합 → 상위 N명 후보(기본 95).
+   RRF(K=60) 또는 Linear Fusion으로 BM25·Vector·Contrastive 3-way 순위 병합 → 상위 N개 후보(기본 110).
 
 4. **메타데이터·개인화**  
    직무/전공/목적 일치 가산, 분야 이탈 감점. (선택) 개인화 soft score.
@@ -104,20 +108,20 @@ backend/
 | 구분 | 고도화 방식 | 설명 |
 |------|-------------|------|
 | **1. Hybrid 검색** | BM25 + Vector 병합 | 단일 벡터 검색 대비 키워드형·자연어형 모두 대응, Recall·Hit 상승. |
-| **2. RRF / Linear Fusion** | RRF K=30, 또는 Linear(λ*BM25+(1-λ)*Vector) | R@20·Hit@20·MRR@4 극대화를 위해 K·가중치 튜닝. Linear 적용 시 지표 추가 상승. |
-| **3. Vector 임계값** | `RAG_VECTOR_THRESHOLD=0.025` | 저유사도 노이즈 제거. RRF 구간에서 **MRR@4 0.809 → 0.838** 상승. |
-| **4. 후보 풀 확대** | RRF Top-N 90 → 95 | nDCG@20 소폭 상승 유지. |
+| **2. RRF / Linear Fusion** | RRF K=60, 또는 Linear(λ*BM25+(1-λ)*Vector) | R@20·Hit@20·MRR@4 극대화를 위해 K·가중치 튜닝. Linear 적용 시 지표 추가 상승. |
+| **3. Vector 임계값** | `RAG_VECTOR_THRESHOLD=0.02` | 저유사도 노이즈 제거. RRF 구간에서 MRR·nDCG 상승. |
+| **4. 후보 풀 확대** | RRF Top-N 95 → 110 | MRR +3% 상승, 지연 +5% 수준(평가 스윕 기준). |
 | **5. BM25 파라미터** | `b=0.5`, 한글 n-gram, 자격명 부스팅 | Hit@4·nDCG@20·nDCG@4 상승. |
 | **6. Dense Query Rewrite** | 전공·학년·북마크·취득 반영 재질의 | Vector 채널 정확도·추천 적합도 향상. |
 | **7. Query Routing + Gating** | 짧은 쿼리 BM25 강화, Vector min_score/gap 게이팅 | 짧은 키워드에서 Vector 오탐 억제, 상위 순위 보존. |
-| **8. Reranker** | HF Space API (multifuly/certweb-reranker), 풀 30→Top 4 | 최종 노출 순위 품질 향상. Reranker Gating으로 확신 높은 질의는 스킵해 지연 절감. |
+| **8. Reranker** | HF Space API(CertFinder Reranker), 풀 30→Top 4 | 최종 노출 순위 품질 향상. Reranker Gating으로 확신 높은 질의는 스킵해 지연 절감. |
 | **9. Metadata Soft Score** | 직무·전공·목적 가산, 분야 이탈 감점 | RRF 후보 내 추천 적합 자격 상위 이동. |
 | **10. 리랭커 입력 보강** | 쿼리에 전공·목적·직무, passage에 자격명 접두사 | Reranker가 문맥을 반영해 재정렬. |
 
 ### Current 모델 대비 성장
 
 - **Current 모델**: 이전 실서비스 기준 — 벡터 단일 검색(certificates_vectors) + 임계값 0.4. BM25·RRF·리랭커 미적용.
-- **고도화 모델(Enhanced)**: Hybrid RAG — BM25 + Vector + RRF + Dense Rewrite + Metadata Soft Score. **리랭커 미적용**으로 측정.
+- **고도화 모델(Enhanced)**: Hybrid RAG — BM25 + Vector + **Contrastive** 3-way RRF + Dense Rewrite + Metadata Soft Score. **리랭커 미적용**으로 측정.
 
 동일 골든셋·동일 환경에서 **리랭커 없이** 측정한 Current 대비 성장은 아래와 같다.
 
@@ -204,11 +208,10 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
    `pip install -r requirements.txt` 또는 `uv pip install -r requirements.txt`
 
 3. **서버**  
-   `uvicorn main:app --reload`  
-   (규칙: `.cursor/rules/use-uv.mdc`에 따라 venv 내 `uv` 경로 사용 가능)
+   `cert-app/backend` 디렉터리에서 `uvicorn main:app --reload`. (uv 미사용 시 venv의 `python -m uvicorn main:app --reload`)
 
 4. **RAG 인덱스**  
-   BM25 인덱스: `python -m app.rag index`. Vector 인덱스는 Supabase certificates_vectors 등으로 관리.
+   BM25: `python -m app.rag index`. Vector: Supabase `certificates_vectors`. Contrastive: FAISS 인덱스·Redis 캐시(설정 시 `docs/README.md` §3 참고).
 
 ---
 
@@ -218,14 +221,15 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
   - **형식**: 질문은 **직무 희망만** (예: "데이터 분석 쪽으로 가고싶어"). 학년·학과·취득/북마크는 **프로필**에서 재질의에 반영.
   - **건수**: n=34 (프로필 없음 16건 + 프로필 있음 18건, IT·비IT 혼합). **모든 RAG 평가는 이 골든셋 기준.**
 - **3모델 비교 (리랭커 없음)**  
+  `cd cert-app/backend` 후  
   `uv run python scripts/eval_three_models_no_reranker.py --golden data/reco_golden_recommendation_18.jsonl --output data/eval_three_models_8.csv --report data/eval_three_models_8_report.md`  
-  → Vector(베이스라인) / Dense+Sparse RRF(레거시) / BM25+Vector+Contrastive+RRF(고도화) 지표·개선률 출력.
+  → baseline(Vector만) / current(Dense+Sparse RRF) / enhanced_reranker(BM25+Vector+Contrastive+RRF) 지표·개선률 출력. 전체 골든(34건) 또는 `--max-queries 8` 등으로 실행.
 - **적용 검증 (RAG 응답 크기·DB 지연)**  
-  `uv run python scripts/bench_apply_verification.py` (backend 디렉터리, PYTHONPATH=backend)
+  `uv run python scripts/bench_apply_verification.py` (backend 디렉터리에서 실행)
 - **RAG 평가 메트릭 JSON (API용)**  
   `uv run python scripts/export_rag_eval_metrics.py` → `data/rag_eval_metrics_8.json` (GET /api/v1/recommendations/ai/rag-eval-metrics에서 사용)
 
-- **백엔드 문서 (통합)**: `docs/README.md` — 성능 개선 지표(적용 전/후, 캐시, 복구), 운영 기본값·평가 절차, Contrastive §3. 상세: `docs/PERFORMANCE_IMPROVEMENT_METRICS.md`.
+- **백엔드 문서 (통합)**: `docs/README.md` — CertFinder RAG 성능 지표(적용 전/후, 캐시, 복구), 운영 기본값·평가 절차, Contrastive §3. 상세: `docs/PERFORMANCE_IMPROVEMENT_METRICS.md`.
 
 ---
 
@@ -241,7 +245,8 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 ## 📚 참고 문서
 
-- **백엔드 문서 (통합)**: `docs/README.md` — 성능 지표·적용 검증·운영 기본값·Contrastive §3.
+- **백엔드 문서 (통합)**: `docs/README.md` — CertFinder RAG 성능 지표·적용 검증·운영 기본값·Contrastive §3.
+- **트러블슈팅**: `docs/TRUBLESHOOTING.md` — 병목·타임아웃·예외 로깅·체크리스트.
 - **성능 개선 지표 (상세)**: `docs/PERFORMANCE_IMPROVEMENT_METRICS.md` — DB 쿼리·Reranker·복구 절차.
 - **배포·CORS·환경변수**: `.cursor/rules/deployment.mdc`
 - **리랭커 데이터 품질**: `data/RERANKER_TRAIN_QUALITY_REVIEW.md`, `data/ANALYSIS_SCRIPTS_AUDIT.md`
@@ -250,5 +255,5 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 ## Reranker
 
-- **Reranker**: multifuly/certweb-reranker-model (Hub), multifuly/certweb-reranker (Space API)
+- **CertFinder Reranker**: HF Hub 모델·Space API로 서빙. 환경변수 `RAG_RERANKER_MODEL_REPO_ID`, `RAG_RERANKER_SPACE_REPO_ID`, `RAG_RERANKER_API_URL` 참고.
 - **역할**: RRF 상위 30개 후보 재정렬 → Top 4 선택. Gating 적용 시 확신 높은 질의는 스킵.

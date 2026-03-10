@@ -112,8 +112,9 @@ def _run_enhanced_reranker_rag(
     contrastive_top_n_override: Optional[int] = None,
     vector_threshold_override: Optional[float] = None,
     channels_override: Optional[List[str]] = None,
+    force_reranker: bool = False,
 ) -> tuple:
-    """Enhanced RAG: RRF 후보 + (옵션) Cross-Encoder → Top4. use_reranker=False면 검색만. channels_override로 단일/조합 채널 평가. 반환 (chunk_ids, latency_ms)."""
+    """Enhanced RAG: RRF 후보 + (옵션) Cross-Encoder → Top4. use_reranker=False면 검색만. force_reranker=True면 게이팅 무시하고 항상 HF API 호출(평가용)."""
     start = time.perf_counter()
     candidates = hybrid_retrieve(
         db, query, top_k=top_k, filters=None, alpha=alpha, use_reranker=use_reranker,
@@ -126,6 +127,7 @@ def _run_enhanced_reranker_rag(
         contrastive_top_n_override=contrastive_top_n_override,
         vector_threshold_override=vector_threshold_override,
         channels_override=channels_override,
+        force_reranker=force_reranker,
     )
     chunk_ids = [c[0] for c in candidates]
     latency = (time.perf_counter() - start) * 1000
@@ -154,9 +156,11 @@ def run_eval_three_way(
     vector_top_n_override: Optional[int] = None,
     contrastive_top_n_override: Optional[int] = None,
     vector_threshold_override: Optional[float] = None,
+    force_reranker: bool = True,
 ) -> Dict[str, Dict[str, float]]:
     """
     골든셋으로 4-way 실행 후 메트릭 집계. RRF Top30 후보, Reranker는 상위 20개 pool → Top4.
+    force_reranker=True(기본): 평가 시 게이팅 무시하고 항상 HF 리랭커 API 호출해 ON/OFF 차이 반영.
     current_w_d, current_w_s / enhanced_alpha 가 있으면 해당 가중치로 실행.
     verbose=True 이면 질의별 검색 결과 출력.
     반환: { "baseline": {...}, "enhanced_reranker": {...}, "current": {...}, "current_reranker": {...} }
@@ -289,6 +293,7 @@ def run_eval_three_way(
                     vector_top_n_override=vector_top_n_override,
                     contrastive_top_n_override=contrastive_top_n_override,
                     vector_threshold_override=vector_threshold_override,
+                    force_reranker=force_reranker,
                 )
                 agg["enhanced_reranker"]["recall5"].append(recall_at_k(ids_er, gold_ids, 5))
                 agg["enhanced_reranker"]["recall10"].append(recall_at_k(ids_er, gold_ids, 10))
@@ -325,6 +330,7 @@ def run_eval_three_way(
                     contrastive_top_n_override=contrastive_top_n_override,
                     vector_threshold_override=vector_threshold_override,
                     channels_override=channels,
+                    force_reranker=force_reranker,
                 )
             for ch_name, ch_list in [("bm25_only", ["bm25"]), ("vector_only", ["vector"]), ("contrastive_only", ["contrastive"])]:
                 if ch_name in pipelines:

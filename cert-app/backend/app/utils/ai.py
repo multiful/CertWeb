@@ -23,8 +23,10 @@ from app.config import get_settings
 settings = get_settings()
 logger = logging.getLogger(__name__)
 
-client = OpenAI(api_key=settings.OPENAI_API_KEY)
-async_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+# 타임아웃 설정: RAG/평가에서 to_thread로 호출 시 무한 대기 방지
+_OPENAI_TIMEOUT = getattr(settings, "OPENAI_TIMEOUT", 60.0)
+client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=_OPENAI_TIMEOUT)
+async_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, timeout=_OPENAI_TIMEOUT)
 
 
 class EmbeddingCache:
