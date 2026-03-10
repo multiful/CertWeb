@@ -21,7 +21,7 @@ import {
     DialogFooter,
 } from "@/components/ui/dialog";
 import { getFavorites, getRecentViewed, getRecommendations, updateProfile, getProfile, getAcquiredCerts, addAcquiredCert, removeAcquiredCert, getCertifications } from '@/lib/api';
-import type { AcquiredCertItem } from '@/lib/api';
+import type { AcquiredCertItem, AcquiredCertSummary } from '@/lib/api';
 import type { QualificationListResponse } from '@/types';
 import { toast } from 'sonner';
 
