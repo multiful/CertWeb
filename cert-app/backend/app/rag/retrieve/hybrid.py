@@ -455,33 +455,40 @@ def hybrid_retrieve(
     contrastive_results: List[Tuple[str, float]] = []
     contrastive_enabled = getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and use_contrastive_ch
     if contrastive_enabled:
+        # 단일 Contrastive 채널 평가(bm25_only/vector_only/contrastive_only 중 contrastive_only)는 게이팅을 끄고 항상 사용.
+        single_contrastive_only = use_contrastive_ch and not use_bm25 and not use_vector and bool(channels_set)
         # 질의 타입 기반 Contrastive 게이팅: 자연어·복합 목적 질의 위주로만 사용해 비용·지연 절감
         allowed_types_raw = getattr(settings, "RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES", "") or ""
         allowed_types = {t.strip() for t in allowed_types_raw.split(",") if t.strip()}
-        use_contrastive_for_query = True
-        if allowed_types:
-            use_contrastive_for_query = query_type in allowed_types
-        # 짧은 키워드·자격증명 위주 쿼리는 BM25+Vector로 충분한 경우가 많으므로 기본적으로 contrastive 비활성
-        if short_keyword and query_type in ("cert_name_included", "keyword"):
-            use_contrastive_for_query = False
+        if single_contrastive_only:
+            use_contrastive_for_query = True
+        else:
+            use_contrastive_for_query = True
+            if allowed_types:
+                use_contrastive_for_query = query_type in allowed_types
+            # 짧은 키워드·자격증명 위주 쿼리는 BM25+Vector로 충분한 경우가 많으므로 기본적으로 contrastive 비활성
+            if short_keyword and query_type in ("cert_name_included", "keyword"):
+                use_contrastive_for_query = False
         if use_contrastive_for_query:
             try:
                 logger.debug(
-                    "contrastive arm enabled (query_type=%s short=%s top_n=%d contrastive_top_n=%d)",
+                    "contrastive arm enabled (query_type=%s short=%s top_n=%d contrastive_top_n=%d single_only=%s)",
                     query_type,
                     short_keyword,
                     top_n,
                     contrastive_top_n,
+                    single_contrastive_only,
                 )
                 contrastive_results = contrastive_search((query or "").strip(), top_k=contrastive_top_n)
             except Exception:
                 logger.debug("contrastive_search failed (disabled or deps missing)", exc_info=True)
         else:
             logger.debug(
-                "contrastive arm skipped by gating (query_type=%s short=%s enabled=%s)",
+                "contrastive arm skipped by gating (query_type=%s short=%s enabled=%s single_only=%s)",
                 query_type,
                 short_keyword,
                 contrastive_enabled,
+                single_contrastive_only,
             )
 
     # Query Routing + Weighted RRF (쿼리 타입별·도메인별 가중치, 짧은 쿼리 시 Vector 게이팅)

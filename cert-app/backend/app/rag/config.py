@@ -152,7 +152,8 @@ class RAGSettings(BaseSettings):
 
     # Contrastive retriever (768-dim 한국어 bi-encoder + FAISS. BM25 + dense1536 + contrastive768 3-way RRF)
     # Contrastive = 768-dim 한국어 전용 모델. 공식: Hub multifuly/cert-constrative-embedding (RAG_CONTRASTIVE_MODEL).
-    RAG_CONTRASTIVE_ENABLE: bool = False  # True면 contrastive FAISS arm 추가, weighted RRF로 병합
+    # 기본값을 True로 두고, 필요 시 환경변수 RAG_CONTRASTIVE_ENABLE=0 으로 비활성화한다.
+    RAG_CONTRASTIVE_ENABLE: bool = True  # True면 contrastive FAISS arm 추가, weighted RRF로 병합
     RAG_CONTRASTIVE_MODEL: str = ""  # Contrastive 전용 768-dim 모델. Hub: multifuly/cert-constrative-embedding. RAG_CONTRASTIVE_EMBEDDING_URL 있으면 무시
     RAG_CONTRASTIVE_EMBEDDING_URL: str = ""  # 비우지 않으면 질의 임베딩을 이 URL로 POST (HF Space 등). body: {"inputs": query}, 응답: [[float,...]] 768-dim
     RAG_CONTRASTIVE_EMBEDDING_TOKEN: str = ""  # HF Inference API 등 인증 시 Bearer 토큰 (선택)
