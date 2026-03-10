@@ -58,6 +58,51 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const baseTitle = 'CertFinder | 국가자격 통합 분석 시스템';
+    let title = baseTitle;
+
+    switch (routeState.route) {
+      case 'home':
+        title = '홈 | CertFinder 국가자격 통합 분석';
+        break;
+      case 'certs':
+        title = '자격증 탐색 | CertFinder';
+        break;
+      case 'cert-detail':
+        title = '자격증 상세 정보 | CertFinder';
+        break;
+      case 'recommendations':
+        title = '전공별 자격증 추천 | CertFinder';
+        break;
+      case 'ai-recommendations':
+        title = 'AI 추천 엔진 | CertFinder';
+        break;
+      case 'jobs':
+        title = '직무·진로 매칭 | CertFinder';
+        break;
+      case 'job-detail':
+        title = '직무 상세 분석 | CertFinder';
+        break;
+      case 'mypage':
+        title = '마이페이지 | CertFinder';
+        break;
+      case 'privacy':
+        title = '개인정보 처리방침 | CertFinder';
+        break;
+      case 'terms':
+        title = '이용약관 | CertFinder';
+        break;
+      case 'contact':
+        title = '문의하기 | CertFinder';
+        break;
+      default:
+        title = baseTitle;
+    }
+
+    document.title = title;
+  }, [routeState.route]);
+
   const renderPage = useMemo(() => {
     switch (routeState.route) {
       case 'home':
