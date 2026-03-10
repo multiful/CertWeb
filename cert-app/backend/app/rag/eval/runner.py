@@ -109,8 +109,9 @@ def _run_enhanced_reranker_rag(
     vector_top_n_override: Optional[int] = None,
     contrastive_top_n_override: Optional[int] = None,
     vector_threshold_override: Optional[float] = None,
+    channels_override: Optional[List[str]] = None,
 ) -> tuple:
-    """Enhanced RAG: RRF 후보 + (옵션) Cross-Encoder → Top4. use_reranker=False면 검색만. 반환 (chunk_ids, latency_ms)."""
+    """Enhanced RAG: RRF 후보 + (옵션) Cross-Encoder → Top4. use_reranker=False면 검색만. channels_override로 단일/조합 채널 평가. 반환 (chunk_ids, latency_ms)."""
     start = time.perf_counter()
     candidates = hybrid_retrieve(
         db, query, top_k=top_k, filters=None, alpha=alpha, use_reranker=use_reranker,
@@ -122,6 +123,7 @@ def _run_enhanced_reranker_rag(
         vector_top_n_override=vector_top_n_override,
         contrastive_top_n_override=contrastive_top_n_override,
         vector_threshold_override=vector_threshold_override,
+        channels_override=channels_override,
     )
     chunk_ids = [c[0] for c in candidates]
     latency = (time.perf_counter() - start) * 1000
@@ -305,6 +307,44 @@ def run_eval_three_way(
             else:
                 ids_er = []
 
+            # 단일 채널 기여도 (BM25 only / Vector only / Contrastive only)
+            def _run_channel(channels: List[str]) -> tuple:
+                return _run_enhanced_reranker_rag(
+                    db, q, top_k, gold_ids, alpha=enhanced_alpha,
+                    rrf_w_bm25=rrf_w_bm25, rrf_w_dense1536=rrf_w_dense1536, rrf_w_contrastive768=rrf_w_contrastive768,
+                    rrf_k_override=rrf_k_override,
+                    use_reranker=use_reranker,
+                    top_n_candidates_override=top_n_candidates_override,
+                    dedup_per_cert_override=dedup_per_cert_override,
+                    bm25_top_n_override=bm25_top_n_override,
+                    vector_top_n_override=vector_top_n_override,
+                    contrastive_top_n_override=contrastive_top_n_override,
+                    vector_threshold_override=vector_threshold_override,
+                    channels_override=channels,
+                )
+            for ch_name, ch_list in [("bm25_only", ["bm25"]), ("vector_only", ["vector"]), ("contrastive_only", ["contrastive"])]:
+                if ch_name in pipelines:
+                    ids_ch, lat_ch = _run_channel(ch_list)
+                    agg[ch_name]["recall5"].append(recall_at_k(ids_ch, gold_ids, 5))
+                    agg[ch_name]["recall10"].append(recall_at_k(ids_ch, gold_ids, 10))
+                    agg[ch_name]["precision5"].append(precision_at_k(ids_ch, gold_ids, 5))
+                    agg[ch_name]["precision10"].append(precision_at_k(ids_ch, gold_ids, 10))
+                    agg[ch_name]["mrr"].append(mrr(ids_ch, gold_ids))
+                    agg[ch_name]["ndcg5"].append(ndcg_at_k(ids_ch, gold_ids, 5))
+                    agg[ch_name]["ndcg10"].append(ndcg_at_k(ids_ch, gold_ids, 10))
+                    agg[ch_name]["map"].append(average_precision(ids_ch, gold_ids))
+                    agg[ch_name]["mrr5"].append(mrr_at_k(ids_ch, gold_ids, 5))
+                    agg[ch_name]["mrr10"].append(mrr_at_k(ids_ch, gold_ids, 10))
+                    agg[ch_name]["f15"].append(f1_at_k(ids_ch, gold_ids, 5))
+                    agg[ch_name]["f110"].append(f1_at_k(ids_ch, gold_ids, 10))
+                    agg[ch_name]["hit5"].append(success_at_k(ids_ch, gold_ids, 5))
+                    agg[ch_name]["hit10"].append(success_at_k(ids_ch, gold_ids, 10))
+                    agg[ch_name]["latency"].append(lat_ch)
+                    if ch_name in agg_qual:
+                        agg_qual[ch_name]["recall5_qual"].append(recall_at_k_qual(ids_ch, gold_qual_ids, 5))
+                        agg_qual[ch_name]["recall10_qual"].append(recall_at_k_qual(ids_ch, gold_qual_ids, 10))
+                        agg_qual[ch_name]["mrr_qual"].append(mrr_qual(ids_ch, gold_qual_ids))
+
             # Current + 리랭커 (Current RRF 후보, pool → Reranker Top4)
             if "current_reranker" in pipelines:
                 if q not in embedding_cache:
@@ -389,7 +429,7 @@ def run_eval_three_way(
                 "Avg_Latency_ms": avg(vals["latency"]),
                 "P95_Latency_ms": p95(vals["latency"]),
             }
-            if name == "enhanced_reranker" and agg_qual.get(name):
+            if agg_qual.get(name):
                 qv = agg_qual[name]
                 results[name]["Recall@5_qual"] = avg(qv["recall5_qual"])
                 results[name]["Recall@10_qual"] = avg(qv["recall10_qual"])

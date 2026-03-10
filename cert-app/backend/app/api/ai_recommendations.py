@@ -422,8 +422,11 @@ async def hybrid_recommendation(
             # 응답 속도와 결과 일관성을 위해, 현재는 확장 질의를 1개만 사용한다.
             multi_queries = [expanded_interest]
             try:
-                query_vectors = await asyncio.gather(*[get_embedding_async(q) for q in multi_queries])
-                major_vector = await get_embedding_async(major)
+                # 임베딩 2회를 병렬 호출해 지연 절감 (query + major)
+                query_vectors, major_vector = await asyncio.gather(
+                    asyncio.gather(*[get_embedding_async(q) for q in multi_queries]),
+                    get_embedding_async(major),
+                )
             except Exception as emb_err:
                 logger.exception("hybrid_recommendation embedding failed")
                 raise HTTPException(

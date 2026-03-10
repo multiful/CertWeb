@@ -1,9 +1,10 @@
 """
 POST /rag/ask: question, filters, baseline_id, top_k → answer, citations, debug(scores)
 """
+import asyncio
 import hashlib
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -60,6 +61,55 @@ def _chunk_ids_to_contents(
     return rows
 
 
+def _run_retrieval_sync(
+    question: str,
+    top_k: int,
+    baseline_id: str,
+    filters: Optional[Dict[str, Any]],
+) -> Tuple[List[tuple], List[tuple]]:
+    """
+    동기 검색+콘텐츠 조회. 이벤트 루프 블로킹 방지를 위해 asyncio.to_thread에서 호출.
+    전용 DB 세션 사용(Session은 스레드 간 공유 불가).
+    반환: (chunk_ids_with_scores, chunks_with_content)
+    """
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        chunk_ids_with_scores: List[tuple] = []
+        if baseline_id == "baseline":
+            vector_results = get_vector_search(db, question, top_k=top_k, threshold=None)
+            chunk_ids_with_scores = [(r[0], r[1]) for r in vector_results]
+        elif baseline_id == "current":
+            vec = get_embedding(question)
+            qual_ids = enhanced_rag_03_hybrid(db, question, vec, top_k)
+            chunk_ids_with_scores = [(f"{qid}:0", 1.0) for qid in qual_ids]
+        elif baseline_id == "current_reranker":
+            vec = get_embedding(question)
+            pool = 20
+            qual_ids = enhanced_rag_03_hybrid(db, question, vec, pool)
+            chunk_ids_with_scores = [(f"{qid}:0", 1.0) for qid in qual_ids]
+            chunks_pre = _chunk_ids_to_contents(db, chunk_ids_with_scores)
+            pairs = [(cid, content) for cid, content, _ in chunks_pre]
+            reranked = rerank_with_cross_encoder(question, pairs, top_k=top_k)
+            if reranked:
+                chunk_ids_with_scores = reranked
+            else:
+                chunk_ids_with_scores = chunk_ids_with_scores[:top_k]
+        elif baseline_id == "enhanced_reranker":
+            candidates = hybrid_retrieve(db, question, top_k=top_k, filters=filters, use_reranker=True)
+            chunk_ids_with_scores = [(c[0], c[1]) for c in candidates]
+        else:
+            vector_results = get_vector_search(db, question, top_k=top_k, threshold=None)
+            chunk_ids_with_scores = [(r[0], r[1]) for r in vector_results]
+
+        chunks_with_content = _chunk_ids_to_contents(db, chunk_ids_with_scores)
+        if not chunks_with_content:
+            chunks_with_content = [(cid, "", s) for cid, s in chunk_ids_with_scores]
+        return (chunk_ids_with_scores, chunks_with_content)
+    finally:
+        db.close()
+
+
 @router.post("/ask", response_model=RAGAskResponse)
 async def rag_ask(
     body: RAGAskRequest,
@@ -82,39 +132,14 @@ async def rag_ask(
     if cached and isinstance(cached, dict):
         return RAGAskResponse(**cached)
 
-    chunk_ids_with_scores: List[tuple] = []
-    if body.baseline_id == "baseline":
-        vector_results = get_vector_search(db, question, top_k=body.top_k, threshold=None)
-        chunk_ids_with_scores = [(r[0], r[1]) for r in vector_results]
-    elif body.baseline_id == "current":
-        vec = get_embedding(question)
-        qual_ids = enhanced_rag_03_hybrid(db, question, vec, body.top_k)
-        chunk_ids_with_scores = [(f"{qid}:0", 1.0) for qid in qual_ids]
-    elif body.baseline_id == "current_reranker":
-        # Current RRF 후보, 상위 20 pool + Cross-Encoder 리랭커 → Top4
-        vec = get_embedding(question)
-        pool = 20
-        qual_ids = enhanced_rag_03_hybrid(db, question, vec, pool)
-        chunk_ids_with_scores = [(f"{qid}:0", 1.0) for qid in qual_ids]
-        chunks_pre = _chunk_ids_to_contents(db, chunk_ids_with_scores)
-        pairs = [(cid, content) for cid, content, _ in chunks_pre]
-        reranked = rerank_with_cross_encoder(question, pairs, top_k=body.top_k)
-        if reranked:
-            chunk_ids_with_scores = reranked
-        else:
-            chunk_ids_with_scores = chunk_ids_with_scores[: body.top_k]
-    elif body.baseline_id == "enhanced_reranker":
-        # RRF Top30 후보, 상위 20 pool + Cross-Encoder Reranker → Top4 (BM25+Vector hybrid)
-        candidates = hybrid_retrieve(db, question, top_k=body.top_k, filters=body.filters, use_reranker=True)
-        chunk_ids_with_scores = [(c[0], c[1]) for c in candidates]
-    else:
-        # baseline: 벡터만
-        vector_results = get_vector_search(db, question, top_k=body.top_k, threshold=None)
-        chunk_ids_with_scores = [(r[0], r[1]) for r in vector_results]
-
-    chunks_with_content = _chunk_ids_to_contents(db, chunk_ids_with_scores)
-    if not chunks_with_content:
-        chunks_with_content = [(cid, "", s) for cid, s in chunk_ids_with_scores]
+    # 동기 검색(임베딩/DB/리랭커)을 스레드 풀에서 실행해 이벤트 루프 블로킹 완화
+    chunk_ids_with_scores, chunks_with_content = await asyncio.to_thread(
+        _run_retrieval_sync,
+        question,
+        body.top_k,
+        body.baseline_id,
+        body.filters,
+    )
 
     top1_score = chunk_ids_with_scores[0][1] if chunk_ids_with_scores else 0.0
     gate = check_gating(top1_score, chunks_with_content, question)

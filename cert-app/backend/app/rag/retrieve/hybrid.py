@@ -339,69 +339,71 @@ def hybrid_retrieve(
     query_type = classify_query_type(query, from_golden=None)
 
     # Vector (OpenAI embedding + pgvector). Dense query rewrite (개인화 시 profile 반영)
-    vector_query = query
-    use_personalized_rewrite = (
-        getattr(settings, "RAG_PERSONALIZED_DENSE_REWRITE_ENABLE", False)
-        and user_profile is not None
-    )
-    if getattr(settings, "RAG_DENSE_USE_QUERY_REWRITE", True):
-        try:
-            rewritten = rewrite_for_dense(query, profile=user_profile if use_personalized_rewrite else None)
-            if rewritten and rewritten.strip():
-                vector_query = rewritten
-        except Exception:
-            if getattr(settings, "RAG_DENSE_QUERY_REWRITE_FALLBACK", True):
-                vector_query = query
-    if getattr(settings, "RAG_DENSE_MULTI_QUERY_ENABLE", False):
-        # Multi-query: 원본 + rewrite 각각 검색 후 RRF 병합 (diversity·recall 향상, Query expansion + multi-query 논문)
-        vec_orig = get_vector_search(
-            db, query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
+    vector_results: List[Tuple[str, float]] = []
+    if use_vector:
+        vector_query = query
+        use_personalized_rewrite = (
+            getattr(settings, "RAG_PERSONALIZED_DENSE_REWRITE_ENABLE", False)
+            and user_profile is not None
         )
-        vec_rewrite = get_vector_search(
-            db, vector_query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-        )
-        rrf_k_mq = _rrf_k()
-        vector_results = _rrf_merge(vec_orig, vec_rewrite, w_bm25=0.5, w_vector=0.5, rrf_k=rrf_k_mq)
-    else:
-        vector_results = get_vector_search(
-            db, vector_query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-        )
-
-    # COT 쿼리 확장: 대안 검색 문구 생성 후 다중 벡터 검색 RRF (창의적 방법론)
-    if getattr(settings, "RAG_COT_QUERY_EXPANSION_ENABLE", False):
-        cot_alts = expand_query_cot(query, max_alternatives=getattr(settings, "RAG_COT_EXPANSION_MAX", 2))
-        if cot_alts:
-            cot_lists: List[List[Tuple[str, float]]] = []
-            for alt in cot_alts:
-                try:
-                    lst = get_vector_search(
-                        db, alt, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-                    )
-                    if lst:
-                        cot_lists.append(lst)
-                except Exception:
-                    continue
-            if cot_lists:
-                vector_results = _rrf_merge_n([vector_results] + cot_lists, rrf_k=_rrf_k())
-
-    # Step-back 메타 쿼리: 상위 목표 한 문장 추출 후 추가 벡터 검색, RRF 병합
-    if getattr(settings, "RAG_STEPBACK_QUERY_ENABLE", False):
-        stepback_q = stepback_query(query)
-        if stepback_q:
+        if getattr(settings, "RAG_DENSE_USE_QUERY_REWRITE", True):
             try:
-                vec_sb = get_vector_search(
-                    db, stepback_q, top_k=vec_top_k, threshold=settings.RAG_VECTOR_THRESHOLD, use_rewrite=False
-                )
-                if vec_sb:
-                    vector_results = _rrf_merge(
-                        vector_results, vec_sb, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
-                    )
+                rewritten = rewrite_for_dense(query, profile=user_profile if use_personalized_rewrite else None)
+                if rewritten and rewritten.strip():
+                    vector_query = rewritten
             except Exception:
-                pass
+                if getattr(settings, "RAG_DENSE_QUERY_REWRITE_FALLBACK", True):
+                    vector_query = query
+        if getattr(settings, "RAG_DENSE_MULTI_QUERY_ENABLE", False):
+            # Multi-query: 원본 + rewrite 각각 검색 후 RRF 병합 (diversity·recall 향상, Query expansion + multi-query 논문)
+            vec_orig = get_vector_search(
+                db, query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
+            )
+            vec_rewrite = get_vector_search(
+                db, vector_query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
+            )
+            rrf_k_mq = _rrf_k()
+            vector_results = _rrf_merge(vec_orig, vec_rewrite, w_bm25=0.5, w_vector=0.5, rrf_k=rrf_k_mq)
+        else:
+            vector_results = get_vector_search(
+                db, vector_query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
+            )
+
+        # COT 쿼리 확장: 대안 검색 문구 생성 후 다중 벡터 검색 RRF (창의적 방법론)
+        if getattr(settings, "RAG_COT_QUERY_EXPANSION_ENABLE", False):
+            cot_alts = expand_query_cot(query, max_alternatives=getattr(settings, "RAG_COT_EXPANSION_MAX", 2))
+            if cot_alts:
+                cot_lists: List[List[Tuple[str, float]]] = []
+                for alt in cot_alts:
+                    try:
+                        lst = get_vector_search(
+                            db, alt, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
+                        )
+                        if lst:
+                            cot_lists.append(lst)
+                    except Exception:
+                        continue
+                if cot_lists:
+                    vector_results = _rrf_merge_n([vector_results] + cot_lists, rrf_k=_rrf_k())
+
+        # Step-back 메타 쿼리: 상위 목표 한 문장 추출 후 추가 벡터 검색, RRF 병합
+        if getattr(settings, "RAG_STEPBACK_QUERY_ENABLE", False):
+            stepback_q = stepback_query(query)
+            if stepback_q:
+                try:
+                    vec_sb = get_vector_search(
+                        db, stepback_q, top_k=vec_top_k, threshold=settings.RAG_VECTOR_THRESHOLD, use_rewrite=False
+                    )
+                    if vec_sb:
+                        vector_results = _rrf_merge(
+                            vector_results, vec_sb, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
+                        )
+                except Exception:
+                    pass
 
     # HyDE: 가상 문서 생성 후 벡터 검색, 3-way 병합 (방법론 확장). LONG_QUERY_ONLY면 짧은 쿼리(≤3단어)에서는 생략.
     hyde_results: List[Tuple[str, float]] = []
-    if getattr(settings, "RAG_HYDE_ENABLE", False):
+    if use_vector and getattr(settings, "RAG_HYDE_ENABLE", False):
         use_hyde = not (getattr(settings, "RAG_HYDE_LONG_QUERY_ONLY", True) and short_keyword)
         if use_hyde:
             hyde_doc = generate_hyde_document(query)
@@ -417,7 +419,7 @@ def hybrid_retrieve(
 
     # BM25: single expansion 또는 multi-expansion(여러 확장 쿼리 검색 후 RRF). 선택 시 PRF.
     bm25_scores: List[Tuple[str, float]] = []
-    if Path(index_dir).exists():
+    if use_bm25 and Path(index_dir).exists():
         try:
             bm25 = BM25Index(index_path=Path(index_dir))
             bm25.load()
@@ -451,7 +453,7 @@ def hybrid_retrieve(
 
     # Contrastive 768 FAISS arm (별도 retriever, RRF로만 결합)
     contrastive_results: List[Tuple[str, float]] = []
-    contrastive_enabled = getattr(settings, "RAG_CONTRASTIVE_ENABLE", False)
+    contrastive_enabled = getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and use_contrastive_ch
     if contrastive_enabled:
         # 질의 타입 기반 Contrastive 게이팅: 자연어·복합 목적 질의 위주로만 사용해 비용·지연 절감
         allowed_types_raw = getattr(settings, "RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES", "") or ""
@@ -519,10 +521,28 @@ def hybrid_retrieve(
         else:
             w_bm25, w_vector = 0.5, 0.5
 
-    # Fusion: 2-way / 3-way(HyDE) / 3-way(BM25+dense1536+contrastive768)
+    # Fusion: 2-way / 3-way(HyDE) / 3-way(BM25+dense1536+contrastive768). channels_override 시 요청 채널만 RRF.
     fusion_method = (getattr(settings, "RAG_FUSION_METHOD", None) or "rrf").strip().lower()
     rrf_k = rrf_k_override if rrf_k_override is not None else _rrf_k()
-    if getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and contrastive_results:
+    if channels_set:
+        lists_to_merge: List[List[Tuple[str, float]]] = []
+        weights_to_merge: List[float] = []
+        if use_bm25 and bm25_scores:
+            lists_to_merge.append(bm25_scores)
+            weights_to_merge.append(rrf_w_bm25 if rrf_w_bm25 is not None else getattr(settings, "RAG_RRF_W_BM25", 1.0))
+        if use_vector and vector_results:
+            lists_to_merge.append(vector_results)
+            weights_to_merge.append(rrf_w_dense1536 if rrf_w_dense1536 is not None else getattr(settings, "RAG_RRF_W_DENSE1536", 1.0))
+        if use_contrastive_ch and contrastive_results:
+            lists_to_merge.append(contrastive_results)
+            weights_to_merge.append(rrf_w_contrastive768 if rrf_w_contrastive768 is not None else getattr(settings, "RAG_RRF_W_CONTRASTIVE768", 1.2))
+        if len(lists_to_merge) == 0:
+            combined: List[Tuple[str, float]] = []
+        elif len(lists_to_merge) == 1:
+            combined = lists_to_merge[0][: top_n * 2]
+        else:
+            combined = _rrf_merge_n(lists_to_merge, weights=weights_to_merge, rrf_k=rrf_k)
+    elif getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and contrastive_results:
         w_b = rrf_w_bm25 if rrf_w_bm25 is not None else getattr(settings, "RAG_RRF_W_BM25", 1.0)
         w_v = rrf_w_dense1536 if rrf_w_dense1536 is not None else getattr(settings, "RAG_RRF_W_DENSE1536", 1.0)
         w_c = rrf_w_contrastive768 if rrf_w_contrastive768 is not None else getattr(settings, "RAG_RRF_W_CONTRASTIVE768", 1.2)
@@ -694,8 +714,12 @@ def hybrid_retrieve(
         if to_rerank:
             from app.rag.rerank.cross_encoder import rerank_with_cross_encoder
             chunk_ids = [c[0] for c in to_rerank]
-            contents = _fetch_contents_by_chunk_ids(db, chunk_ids)
-            qual_names = _fetch_qual_names_for_chunk_ids(db, chunk_ids) if getattr(settings, "RAG_RERANK_INPUT_ADD_QUAL_NAME", True) else {}
+            add_qual_name = getattr(settings, "RAG_RERANK_INPUT_ADD_QUAL_NAME", True)
+            if add_qual_name:
+                contents, qual_names = _fetch_contents_and_qual_names_by_chunk_ids(db, chunk_ids)
+            else:
+                contents = _fetch_contents_by_chunk_ids(db, chunk_ids)
+                qual_names = {}
             reranker_query = _build_reranker_query(query, user_profile) if getattr(settings, "RAG_RERANK_INPUT_ADD_CONTEXT", True) else query
             pairs = []
             for cid in chunk_ids:
@@ -710,6 +734,49 @@ def hybrid_retrieve(
                 return reranked
 
     return candidates[:top_k]
+
+
+def _fetch_contents_and_qual_names_by_chunk_ids(
+    db: Session, chunk_ids: List[str]
+) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """리랭커용: content와 qual_name을 한 번의 DB 조회로 가져와 지연·라운드트립 절감."""
+    if not chunk_ids:
+        return {}, {}
+    qual_to_chunks: Dict[int, set] = {}
+    for cid in chunk_ids:
+        if ":" in cid:
+            try:
+                a, b = cid.split(":", 1)
+                qid, cidx = int(a), int(b)
+                qual_to_chunks.setdefault(qid, set()).add(cidx)
+            except ValueError:
+                continue
+    if not qual_to_chunks:
+        return {}, {}
+    qual_ids = list(qual_to_chunks.keys())
+    try:
+        sql = text("""
+            SELECT v.qual_id, COALESCE(v.chunk_index, 0) AS chunk_index, v.content, q.qual_name
+            FROM certificates_vectors v
+            LEFT JOIN qualification q ON q.qual_id = v.qual_id
+            WHERE v.qual_id = ANY(:ids)
+        """)
+        rows = db.execute(sql, {"ids": qual_ids}).fetchall()
+    except Exception:
+        return _fetch_contents_by_chunk_ids(db, chunk_ids), _fetch_qual_names_for_chunk_ids(db, chunk_ids)
+    contents: Dict[str, str] = {}
+    qual_names: Dict[str, str] = {}
+    for r in rows:
+        qid = int(getattr(r, "qual_id"))
+        cidx = int(getattr(r, "chunk_index"))
+        if cidx not in qual_to_chunks.get(qid, ()):
+            continue
+        cid = f"{qid}:{cidx}"
+        content = getattr(r, "content", None)
+        if content:
+            contents[cid] = content
+        qual_names[cid] = (getattr(r, "qual_name", None) or "").strip()
+    return contents, qual_names
 
 
 def _fetch_qual_names_for_chunk_ids(db: Session, chunk_ids: List[str]) -> Dict[str, str]:

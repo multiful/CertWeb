@@ -1,5 +1,4 @@
-
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     Briefcase,
     TrendingUp,
@@ -19,6 +18,7 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { getJobDetail } from '@/lib/api';
 import type { Job } from '@/types';
 import { useRouter } from '@/lib/router';
@@ -41,32 +41,34 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
     const [job, setJob] = useState<Job | null>(null);
     const [loading, setLoading] = useState(true);
 
-    useEffect(() => {
-        const fetchJob = async () => {
-            setLoading(true);
-            try {
-                const data = await getJobDetail(parseInt(id));
-                setJob(data);
-            } catch (error) {
-                console.error('Failed to fetch job detail:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchJob();
+    const fetchJob = useCallback(async () => {
+        setLoading(true);
+        setJob(null);
+        try {
+            const data = await getJobDetail(parseInt(id));
+            setJob(data);
+        } catch (error) {
+            console.error('Failed to fetch job detail:', error);
+        } finally {
+            setLoading(false);
+        }
     }, [id]);
+
+    useEffect(() => {
+        fetchJob();
+    }, [fetchJob]);
 
     if (loading) {
         return (
-            <div className="container mx-auto px-4 py-8 space-y-8 animate-pulse">
-                <div className="h-10 w-32 bg-slate-800 rounded-lg"></div>
-                <div className="h-64 bg-slate-900 rounded-[2.5rem]"></div>
+            <div className="container mx-auto px-4 py-8 space-y-8">
+                <Skeleton className="h-10 w-32 rounded-lg bg-slate-800" />
+                <Skeleton className="h-64 w-full rounded-[2.5rem] bg-slate-900" />
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                     <div className="lg:col-span-2 space-y-8">
-                        <div className="h-48 bg-slate-900 rounded-2xl"></div>
-                        <div className="h-48 bg-slate-900 rounded-2xl"></div>
+                        <Skeleton className="h-48 w-full rounded-2xl bg-slate-900" />
+                        <Skeleton className="h-48 w-full rounded-2xl bg-slate-900" />
                     </div>
-                    <div className="h-96 bg-slate-900 rounded-2xl"></div>
+                    <Skeleton className="h-96 w-full rounded-2xl bg-slate-900" />
                 </div>
             </div>
         );
@@ -76,9 +78,15 @@ export function JobDetailPage({ id }: JobDetailPageProps) {
         return (
             <div className="text-center py-20 text-white">
                 <h2 className="text-2xl font-bold">직무 정보를 찾을 수 없습니다.</h2>
-                <Button onClick={() => router.navigate('/jobs')} variant="ghost" className="mt-4">
-                    목록으로 돌아가기
-                </Button>
+                <p className="text-slate-400 mt-2 text-sm">일시적인 오류일 수 있습니다. 다시 시도해 보세요.</p>
+                <div className="flex flex-wrap gap-3 justify-center mt-6">
+                    <Button onClick={() => fetchJob()} variant="outline" className="border-slate-600 text-slate-300">
+                        다시 시도
+                    </Button>
+                    <Button onClick={() => router.navigate('/jobs')} variant="ghost">
+                        목록으로 돌아가기
+                    </Button>
+                </div>
             </div>
         );
     }

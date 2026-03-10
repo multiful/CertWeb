@@ -35,6 +35,7 @@ import {
 import { useCerts, useFilterOptions } from '@/hooks/useCerts';
 import { useRouter } from '@/lib/router';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent, EmptyMedia } from '@/components/ui/empty';
 import type { CertFilterParams, SortOption } from '@/types';
 
 const ALL_FIELDS = "ALL_FIELDS";
@@ -632,24 +633,30 @@ export function CertListPage() {
           </div>
         ) : !data || filteredItems.length === 0 ? (
           <Card className="bg-slate-900/30 border-slate-800 border-dashed py-32">
-            <CardContent className="flex flex-col items-center justify-center space-y-6">
-              <div className="p-6 bg-slate-900 rounded-full">
-                <SearchX className="w-16 h-16 text-slate-700" />
-              </div>
-              <div className="text-center space-y-2">
-                <h3 className="text-2xl font-bold text-white">일치하는 자격증을 찾을 수 없습니다</h3>
-                <p className="text-slate-500">{isFavoritesOnly ? "관심 자격증으로 등록된 항목이 없습니다." : "다른 검색어나 필터를 사용해 보세요."}</p>
-              </div>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setParams({ page: 1, page_size: 20, sort: 'name' });
-                  setIsFavoritesOnly(false);
-                }}
-                className="border-slate-800 text-slate-400 hover:text-white"
-              >
-                필터 초기화
-              </Button>
+            <CardContent>
+              <Empty className="flex-col items-center justify-center border-0 p-0 gap-6">
+                <EmptyMedia className="p-6 bg-slate-900 rounded-full mb-0">
+                  <SearchX className="w-16 h-16 text-slate-700" />
+                </EmptyMedia>
+                <EmptyHeader className="space-y-2">
+                  <EmptyTitle className="text-2xl font-bold text-white">일치하는 자격증을 찾을 수 없습니다</EmptyTitle>
+                  <EmptyDescription className="text-slate-500">
+                    {isFavoritesOnly ? "관심 자격증으로 등록된 항목이 없습니다." : "다른 검색어나 필터를 사용해 보세요."}
+                  </EmptyDescription>
+                </EmptyHeader>
+                <EmptyContent>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setParams({ page: 1, page_size: 20, sort: 'name' });
+                      setIsFavoritesOnly(false);
+                    }}
+                    className="border-slate-800 text-slate-400 hover:text-white"
+                  >
+                    필터 초기화
+                  </Button>
+                </EmptyContent>
+              </Empty>
             </CardContent>
           </Card>
         ) : (

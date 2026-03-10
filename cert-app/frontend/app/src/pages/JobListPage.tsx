@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
     Search,
     Briefcase,
@@ -8,13 +8,15 @@ import {
     Star,
     ChevronRight,
     DollarSign,
-    Zap
+    Zap,
+    AlertCircle
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyMedia } from '@/components/ui/empty';
 import { getJobs } from '@/lib/api';
 import type { Job, JobListResponse } from '@/types';
 import { useRouter } from '@/lib/router';
@@ -32,6 +34,7 @@ export function JobListPage() {
     const router = useRouter();
     const [jobs, setJobs] = useState<Job[]>([]);
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState(false);
     const [page, setPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [totalJobs, setTotalJobs] = useState(0);
@@ -48,31 +51,33 @@ export function JobListPage() {
         setPage(initialPage);
     }, []);
 
-    useEffect(() => {
-        const fetchJobs = async () => {
-            setLoading(true);
-            try {
-                const res: JobListResponse = await getJobs({
-                    q: searchQuery || undefined,
-                    page,
-                    page_size: PAGE_SIZE,
-                });
-                const items = res.items ?? [];
-                setJobs(items);
-                setPage(res.page);
-                // 백엔드 total_pages를 쓰되, 한 페이지가 꽉 찼으면 최소 2페이지는 있다고 보고(다음 버튼용)
-                const fromBackend = res.total_pages ?? Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE));
-                const inferred = items.length >= PAGE_SIZE ? Math.max(fromBackend, res.page + 1) : fromBackend;
-                setTotalPages(inferred);
-                setTotalJobs(res.total ?? 0);
-            } catch (error) {
-                console.error('Failed to fetch jobs:', error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        fetchJobs();
+    const fetchJobs = useCallback(async () => {
+        setLoading(true);
+        setFetchError(false);
+        try {
+            const res: JobListResponse = await getJobs({
+                q: searchQuery || undefined,
+                page,
+                page_size: PAGE_SIZE,
+            });
+            const items = res.items ?? [];
+            setJobs(items);
+            setPage(res.page);
+            const fromBackend = res.total_pages ?? Math.max(1, Math.ceil((res.total || 0) / PAGE_SIZE));
+            const inferred = items.length >= PAGE_SIZE ? Math.max(fromBackend, res.page + 1) : fromBackend;
+            setTotalPages(inferred);
+            setTotalJobs(res.total ?? 0);
+        } catch (error) {
+            console.error('Failed to fetch jobs:', error);
+            setFetchError(true);
+        } finally {
+            setLoading(false);
+        }
     }, [searchQuery, page]);
+
+    useEffect(() => {
+        fetchJobs();
+    }, [fetchJobs]);
 
     const goToPage = (nextPage: number) => {
         // totalPages 계산이 보수적으로 잡혀도 번호 클릭은 항상 동작하도록
@@ -217,25 +222,38 @@ export function JobListPage() {
                     </div>
 
                     <div className="flex items-center gap-4 text-xs font-bold text-slate-500 uppercase tracking-widest">
-                        <span>Analysis Status: Live</span>
+                        <span>분석 상태: 실시간</span>
                         <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                     </div>
                 </div>
 
-                {loading ? (
+                {fetchError && !loading ? (
+                    <Card className="bg-red-500/5 border-red-500/20 py-20 rounded-[2rem]">
+                        <CardContent className="flex flex-col items-center justify-center space-y-4">
+                            <AlertCircle className="w-12 h-12 text-red-500 opacity-50" />
+                            <div className="text-center">
+                                <h3 className="text-xl font-bold text-white">데이터를 불러오지 못했습니다</h3>
+                                <p className="text-slate-400">네트워크 상태를 확인하거나 잠시 후 다시 시도해 주세요.</p>
+                            </div>
+                            <Button onClick={() => fetchJobs()} variant="outline" className="border-red-500/30 text-red-400">다시 시도</Button>
+                        </CardContent>
+                    </Card>
+                ) : loading ? (
                     <div className="grid gap-8">
                         {[1, 2, 3].map(i => <Skeleton key={i} className="h-96 rounded-[2rem] bg-slate-900" />)}
                     </div>
                 ) : jobList.length === 0 ? (
-                    <Card className="bg-slate-900/40 border-slate-800 border-dashed py-32 text-center rounded-[2rem]">
-                        <CardContent className="space-y-6">
-                            <div className="p-8 bg-slate-900 rounded-full w-fit mx-auto">
-                                <Search className="w-16 h-16 text-slate-700" />
-                            </div>
-                            <div className="space-y-2">
-                                <h3 className="text-2xl font-bold text-white">검색된 정보가 없습니다</h3>
-                                <p className="text-slate-500">다른 키워드로 직무를 찾아보세요.</p>
-                            </div>
+                    <Card className="bg-slate-900/40 border-slate-800 border-dashed py-32 rounded-[2rem]">
+                        <CardContent>
+                            <Empty className="flex-col items-center justify-center border-0 p-0 gap-6">
+                                <EmptyMedia className="p-8 bg-slate-900 rounded-full w-fit mx-auto mb-0">
+                                    <Search className="w-16 h-16 text-slate-700" />
+                                </EmptyMedia>
+                                <EmptyHeader className="space-y-2">
+                                    <EmptyTitle className="text-2xl font-bold text-white">검색된 정보가 없습니다</EmptyTitle>
+                                    <EmptyDescription className="text-slate-500">다른 키워드로 직무를 찾아보세요.</EmptyDescription>
+                                </EmptyHeader>
+                            </Empty>
                         </CardContent>
                     </Card>
                 ) : (

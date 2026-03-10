@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
 import { useRecommendations, useMajors, usePopularMajors } from '@/hooks/useRecommendations';
 import { useRouter } from '@/lib/router';
 
@@ -216,23 +217,29 @@ export function RecommendationPage() {
             </Card>
           ) : (recommendations?.items.length === 0) ? (
             <Card className="bg-slate-900/50 border-slate-800">
-              <CardContent className="p-12 text-center flex flex-col items-center gap-4">
-                <p className="text-lg text-slate-400">
-                  &quot;<span className="text-white font-bold">{major}</span>&quot;에 대한 추천 결과가 없습니다.
-                </p>
-                <div className="text-sm text-slate-500 max-w-sm">
-                  검색어 오타를 확인하거나, 다른 전공 키워드로 다시 시도해보세요.
-                </div>
-                <Button
-                  onClick={() => {
-                    setSubmitted(false);
-                    setInputValue('');
-                  }}
-                  variant="outline"
-                  className="mt-2 border-slate-700"
-                >
-                  다른 전공 검색
-                </Button>
+              <CardContent className="p-12">
+                <Empty className="flex-col items-center justify-center border-0 p-0 gap-4">
+                  <EmptyHeader>
+                    <EmptyTitle className="text-lg text-slate-400">
+                      &quot;<span className="text-white font-bold">{major}</span>&quot;에 대한 추천 결과가 없습니다.
+                    </EmptyTitle>
+                    <EmptyDescription className="text-sm text-slate-500 max-w-sm">
+                      검색어 오타를 확인하거나, 다른 전공 키워드로 다시 시도해보세요.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                  <EmptyContent>
+                    <Button
+                      onClick={() => {
+                        setSubmitted(false);
+                        setInputValue('');
+                      }}
+                      variant="outline"
+                      className="mt-2 border-slate-700"
+                    >
+                      다른 전공 검색
+                    </Button>
+                  </EmptyContent>
+                </Empty>
               </CardContent>
             </Card>
           ) : (

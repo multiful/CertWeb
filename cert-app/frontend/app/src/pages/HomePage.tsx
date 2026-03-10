@@ -9,7 +9,8 @@ import {
   Briefcase,
   ChevronRight,
   Target,
-  Sparkles
+  Sparkles,
+  AlertCircle
 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { useRouter } from '@/lib/router';
 import { getTrendingCerts } from '@/lib/api';
 import type { TrendingQualification } from '@/types';
+import { toast } from 'sonner';
 
 export function HomePage() {
   const router = useRouter();
@@ -24,23 +26,28 @@ export function HomePage() {
   const [trendingCerts, setTrendingCerts] = useState<TrendingQualification[]>([]);
   const [loading, setLoading] = useState(false);
   const [hasRequestedTrending, setHasRequestedTrending] = useState(false);
+  const [trendingError, setTrendingError] = useState(false);
   const trendingSectionRef = useRef<HTMLElement>(null);
   const fetchStartedRef = useRef(false);
 
   const fetchTrendingData = useCallback(async () => {
-    if (fetchStartedRef.current) return;
+    if (fetchStartedRef.current && !trendingError) return;
+    if (trendingError) fetchStartedRef.current = false;
     fetchStartedRef.current = true;
     setHasRequestedTrending(true);
+    setTrendingError(false);
     setLoading(true);
     try {
       const res = await getTrendingCerts(6);
-      setTrendingCerts(res.items);
+      setTrendingCerts(res.items ?? []);
     } catch (error) {
       console.error('Failed to fetch trending data:', error);
+      setTrendingError(true);
+      toast.error('인기 자격증을 불러오지 못했습니다.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [trendingError]);
 
   useEffect(() => {
     const el = trendingSectionRef.current;
@@ -302,6 +309,19 @@ export function HomePage() {
                 </article>
               ))}
             </div>
+          ) : trendingError ? (
+            <Card className="bg-red-500/5 border-red-500/20 py-12 col-span-full">
+              <CardContent className="flex flex-col items-center justify-center space-y-4">
+                <AlertCircle className="w-12 h-12 text-red-500 opacity-50" />
+                <div className="text-center">
+                  <h3 className="text-lg font-bold text-white">인기 자격증을 불러오지 못했습니다</h3>
+                  <p className="text-slate-400 text-sm mt-1">네트워크를 확인한 뒤 다시 시도해 주세요.</p>
+                </div>
+                <Button onClick={() => { setTrendingError(false); fetchStartedRef.current = false; fetchTrendingData(); }} variant="outline" className="border-red-500/30 text-red-400">
+                  다시 시도
+                </Button>
+              </CardContent>
+            </Card>
           ) : (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
               <div className="col-span-full py-12 text-center text-slate-500 bg-slate-900/20 rounded-2xl border border-dashed border-slate-800">

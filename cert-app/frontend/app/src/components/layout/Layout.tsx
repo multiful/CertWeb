@@ -52,8 +52,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-500/30 selection:text-blue-200">
-      {/* Skip to main content — a11y / SEO */}
-      <a href="#main-content" className="absolute -left-[9999px] top-4 z-[100] px-4 py-2 bg-blue-600 text-white rounded-xl outline-none ring-2 ring-blue-400 focus:left-4 focus:overflow-visible">
+      {/* Skip to main content — a11y / SEO (키보드 포커스 시에만 표시) */}
+      <a href="#main-content" className="absolute -left-[9999px] top-4 z-[100] px-4 py-2 bg-blue-600 text-white rounded-xl outline-none ring-2 ring-blue-400 focus-visible:left-4 focus-visible:overflow-visible">
         본문으로 건너뛰기
       </a>
       {/* Header */}
@@ -94,6 +94,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
               variant="ghost"
               size="icon"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-nav"
+              aria-label={mobileMenuOpen ? '메뉴 닫기' : '메뉴 열기'}
             >
               {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </Button>
@@ -102,7 +105,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
         {/* Mobile Navigation */}
         {mobileMenuOpen && (
-          <nav className="md:hidden border-t border-slate-800 bg-slate-950 px-4 py-2 animate-in slide-in-from-top duration-200">
+          <nav id="mobile-nav" className="md:hidden border-t border-slate-800 bg-slate-950 px-4 py-2 animate-in slide-in-from-top duration-200" aria-label="메인 메뉴">
             {navItems.map((item) => (
               <Link
                 key={item.path}
@@ -149,6 +152,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   variant="ghost"
                   onClick={declineCookies}
                   className="text-slate-500 hover:text-slate-300 text-xs px-3"
+                  aria-label="쿠키 거부"
                 >
                   거부
                 </Button>
@@ -156,6 +160,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
                   size="sm"
                   onClick={acceptCookies}
                   className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-4 rounded-xl"
+                  aria-label="쿠키 동의"
                 >
                   동의
                 </Button>

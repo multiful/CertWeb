@@ -103,6 +103,7 @@ export function AiRecommendationPage() {
     const [showSuggestions, setShowSuggestions] = useState(false);
     const [loading, setLoading] = useState(false);
     const [results, setResults] = useState<HybridRecommendationResponse | null>(null);
+    const [majorError, setMajorError] = useState<string | null>(null);
     const [, setError] = useState<Error | null>(null);
     const { navigate } = useRouter();
     const { token } = useAuth();
@@ -162,10 +163,11 @@ export function AiRecommendationPage() {
 
     const handleRecommend = async () => {
         if (!major) {
+            setMajorError('전공을 선택하거나 입력해주세요.');
             toast.error('전공을 선택하거나 입력해주세요.');
             return;
         }
-
+        setMajorError(null);
         setLoading(true);
         setError(null);
         try {
@@ -249,10 +251,16 @@ export function AiRecommendationPage() {
                                         setInputValue(e.target.value);
                                         setMajor(e.target.value);
                                         setShowSuggestions(true);
+                                        setMajorError(null);
                                     }}
                                     onFocus={() => setShowSuggestions(true)}
-                                    className="bg-slate-900/80 border-slate-700 h-12 focus:ring-blue-500/20 text-white"
+                                    className={`bg-slate-900/80 h-12 focus:ring-blue-500/20 text-white ${majorError ? 'border-red-500/60 focus-visible:ring-red-500/30' : 'border-slate-700'}`}
+                                    aria-invalid={!!majorError}
+                                    aria-describedby={majorError ? 'major-input-error' : undefined}
                                 />
+                                {majorError && (
+                                    <p id="major-input-error" role="alert" className="text-xs text-red-400 font-medium px-1">{majorError}</p>
+                                )}
                                 {showSuggestions && filteredMajors.length > 0 && (
                                     <div className="absolute top-full left-0 right-0 mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-[0_20px_50px_rgba(0,0,0,0.5)] z-[100] max-h-60 overflow-y-auto overflow-x-hidden">
                                         {filteredMajors.map(m => (
@@ -263,6 +271,7 @@ export function AiRecommendationPage() {
                                                     setMajor(m);
                                                     setInputValue(m);
                                                     setShowSuggestions(false);
+                                                    setMajorError(null);
                                                 }}
                                             >
                                                 {m}

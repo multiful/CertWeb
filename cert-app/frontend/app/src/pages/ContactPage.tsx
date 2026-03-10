@@ -10,10 +10,13 @@ import { toast } from 'sonner';
 
 import { sendContactEmail } from '@/lib/api';
 
+const CONTACT_EMAIL = 'rlaehdrb2485@naver.com';
+
 export function ContactPage() {
     const router = useRouter();
     const [isSubmitted, setIsSubmitted] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
     const [formData, setFormData] = useState({
         name: '',
         email: '',
@@ -21,19 +24,26 @@ export function ContactPage() {
         message: ''
     });
 
+    const clearFieldError = (field: string) => {
+        setFieldErrors(prev => ({ ...prev, [field]: '' }));
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-
-        // 이메일 형식 검사 (프론트에서 사전 차단)
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        const errors: Record<string, string> = {};
         if (!emailRegex.test(formData.email)) {
-            toast.error('올바른 이메일 주소를 입력해주세요. (예: example@gmail.com)');
+            errors.email = '올바른 이메일 주소를 입력해주세요. (예: example@gmail.com)';
+        }
+        if (!formData.name.trim()) errors.name = '성함을 입력해주세요.';
+        if (!formData.subject.trim()) errors.subject = '제목을 입력해주세요.';
+        if (!formData.message.trim()) errors.message = '상세 내용을 입력해주세요.';
+        if (Object.keys(errors).length > 0) {
+            setFieldErrors(errors);
+            toast.error('입력 내용을 확인해 주세요.');
             return;
         }
-        if (!formData.name.trim() || !formData.subject.trim() || !formData.message.trim()) {
-            toast.error('모든 필드를 입력해주세요.');
-            return;
-        }
+        setFieldErrors({});
 
         setLoading(true);
         try {
@@ -58,7 +68,7 @@ export function ContactPage() {
                         <h1 className="text-2xl font-black text-white">문의 접수 완료</h1>
                         <p className="text-slate-400 leading-relaxed">
                             소중한 의견 감사합니다. <br />
-                            검토 후 <b>rlaehdrb2485@naver.com</b>으로 <br />
+                            검토 후 <b>{CONTACT_EMAIL}</b>으로 <br />
                             빠른 시일 내에 답변 드리겠습니다.
                         </p>
                     </div>
@@ -151,9 +161,14 @@ export function ContactPage() {
                                         required
                                         placeholder="홍길동"
                                         value={formData.name}
-                                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                        className="bg-slate-950 border-slate-800 h-12 focus:ring-blue-500/20"
+                                        onChange={(e) => { setFormData({ ...formData, name: e.target.value }); clearFieldError('name'); }}
+                                        className={`bg-slate-950 h-12 focus:ring-blue-500/20 ${fieldErrors.name ? 'border-red-500/60 focus-visible:ring-red-500/30' : 'border-slate-800'}`}
+                                        aria-invalid={!!fieldErrors.name}
+                                        aria-describedby={fieldErrors.name ? 'contact-name-error' : undefined}
                                     />
+                                    {fieldErrors.name && (
+                                        <p id="contact-name-error" role="alert" className="text-xs text-red-400 font-medium px-1">{fieldErrors.name}</p>
+                                    )}
                                 </div>
                                 <div className="space-y-2">
                                     <label
@@ -169,9 +184,14 @@ export function ContactPage() {
                                         type="email"
                                         placeholder="example@email.com"
                                         value={formData.email}
-                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                        className="bg-slate-950 border-slate-800 h-12 focus:ring-blue-500/20"
+                                        onChange={(e) => { setFormData({ ...formData, email: e.target.value }); clearFieldError('email'); }}
+                                        className={`bg-slate-950 h-12 focus:ring-blue-500/20 ${fieldErrors.email ? 'border-red-500/60 focus-visible:ring-red-500/30' : 'border-slate-800'}`}
+                                        aria-invalid={!!fieldErrors.email}
+                                        aria-describedby={fieldErrors.email ? 'contact-email-error' : undefined}
                                     />
+                                    {fieldErrors.email && (
+                                        <p id="contact-email-error" role="alert" className="text-xs text-red-400 font-medium px-1">{fieldErrors.email}</p>
+                                    )}
                                 </div>
                             </div>
 
@@ -188,20 +208,32 @@ export function ContactPage() {
                                     required
                                     placeholder="문의 제목을 입력해 주세요."
                                     value={formData.subject}
-                                    onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
-                                    className="bg-slate-950 border-slate-800 h-12 focus:ring-blue-500/20"
+                                    onChange={(e) => { setFormData({ ...formData, subject: e.target.value }); clearFieldError('subject'); }}
+                                    className={`bg-slate-950 h-12 focus:ring-blue-500/20 ${fieldErrors.subject ? 'border-red-500/60 focus-visible:ring-red-500/30' : 'border-slate-800'}`}
+                                    aria-invalid={!!fieldErrors.subject}
+                                    aria-describedby={fieldErrors.subject ? 'contact-subject-error' : undefined}
                                 />
+                                {fieldErrors.subject && (
+                                    <p id="contact-subject-error" role="alert" className="text-xs text-red-400 font-medium px-1">{fieldErrors.subject}</p>
+                                )}
                             </div>
 
                             <div className="space-y-2">
-                                <label className="text-sm font-bold text-slate-400 ml-1">상세 내용</label>
+                                <label htmlFor="contact-message" className="text-sm font-bold text-slate-400 ml-1">상세 내용</label>
                                 <textarea
+                                    id="contact-message"
+                                    name="message"
                                     required
                                     placeholder="문의하실 내용을 상세히 적어주세요."
                                     value={formData.message}
-                                    onChange={(e) => setFormData({ ...formData, message: e.target.value })}
-                                    className="w-full bg-slate-950 border-slate-800 rounded-xl p-4 min-h-[160px] focus:ring-blue-500/20 border outline-none focus:border-blue-500 transition-all text-white placeholder:text-slate-600 shadow-inner"
+                                    onChange={(e) => { setFormData({ ...formData, message: e.target.value }); clearFieldError('message'); }}
+                                    className={`w-full bg-slate-950 rounded-xl p-4 min-h-[160px] focus:ring-blue-500/20 border outline-none focus:border-blue-500 transition-all text-white placeholder:text-slate-600 shadow-inner ${fieldErrors.message ? 'border-red-500/60' : 'border-slate-800'}`}
+                                    aria-invalid={!!fieldErrors.message}
+                                    aria-describedby={fieldErrors.message ? 'contact-message-error' : undefined}
                                 />
+                                {fieldErrors.message && (
+                                    <p id="contact-message-error" role="alert" className="text-xs text-red-400 font-medium px-1">{fieldErrors.message}</p>
+                                )}
                             </div>
 
                             <Button

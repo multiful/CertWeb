@@ -158,11 +158,17 @@ async def get_embedding_async(
     text: str,
     model: str = "text-embedding-3-small",
     retries: int = 3,
+    use_cache: bool = True,
 ) -> List[float]:
-    """Get embedding for text using OpenAI (async, with retry)."""
+    """Get embedding for text using OpenAI (async, with retry + cache)."""
     if not settings.OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY is not set.")
     text = text.replace("\n", " ").strip() or " "
+    if use_cache:
+        cached = _embedding_cache.get(text, model)
+        if cached is not None:
+            logger.debug("embedding cache hit (async) for text[:50]=%s...", text[:50])
+            return cached
     last_err: Exception | None = None
     for attempt in range(retries):
         try:
@@ -172,7 +178,10 @@ async def get_embedding_async(
                 raise ValueError("OpenAI embedding returned no data")
             latency_ms = (time.perf_counter() - start) * 1000
             _log_embedding_usage(model, latency_ms, getattr(response, "usage", None))
-            return response.data[0].embedding
+            embedding = response.data[0].embedding
+            if use_cache:
+                _embedding_cache.set(text, model, embedding)
+            return embedding
         except (APIError, APIConnectionError, RateLimitError) as e:
             last_err = e
             logger.warning("OpenAI embedding async attempt %s/%s failed: %s", attempt + 1, retries, type(e).__name__)
