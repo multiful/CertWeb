@@ -59,7 +59,7 @@ def _get_allowed_hosts() -> list[str]:
     # ALLOWED_HOSTS 환경변수를 설정하면 이 값이 우선한다.
     return [
         "certweb-xzpx.onrender.com",  # Render
-        "https://certfinder-production.up.railway.app",           # Railway
+        "certfinder-production.up.railway.app",    # Railway
         "localhost",
         "127.0.0.1",
     ]
