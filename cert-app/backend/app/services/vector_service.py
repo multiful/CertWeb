@@ -10,8 +10,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from app.utils.ai import get_embedding
+from app.config import get_settings
+from app.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 def _content_hash(content: str) -> str:
@@ -117,8 +120,8 @@ class VectorService:
         limit: int = 5,
         match_threshold: Optional[float] = None,
         exclude_qual_ids: Optional[List[int]] = None,
-        include_content: bool = True,
-        include_metadata: bool = True,
+        include_content: bool = False,
+        include_metadata: bool = False,
         query_embedding: Optional[List[float]] = None,
     ) -> List[Dict]:
         """
@@ -144,6 +147,29 @@ class VectorService:
         if not query_embedding or not isinstance(query_embedding, list):
             return []
         max_distance = (1.0 - match_threshold) if (match_threshold is not None and match_threshold > 0) else 1.0
+
+        # Redis가 연결되어 있으면 similarity_search 결과를 TTL 캐시해 재질의 비용을 줄인다.
+        cache_key: Optional[str] = None
+        if redis_client.is_connected():
+            try:
+                # embedding 리스트는 길어질 수 있으므로 직접 문자열로 넣기보다는 해시를 사용
+                params_for_hash: Dict[str, Any] = {
+                    "q": (query_text or "").strip(),
+                    "max_distance": max_distance,
+                    "limit": limit,
+                    "exclude_ids": tuple(exclude_qual_ids or []),
+                    "include_content": include_content,
+                    "include_metadata": include_metadata,
+                    "has_query_embedding": bool(query_embedding),
+                }
+                h = redis_client.hash_query_params(**params_for_hash)
+                cache_key = f"vec:search:v1:{h}"
+                cached = redis_client.get(cache_key)
+                if isinstance(cached, list):
+                    return cached
+            except Exception:
+                # 캐시 문제가 있어도 검색 자체는 계속 진행
+                cache_key = None
 
         # Egress 최적화를 위해 대용량 컬럼 선택 여부를 동적으로 결정
         select_columns = [
@@ -195,6 +221,12 @@ class VectorService:
             if include_metadata:
                 item["metadata"] = getattr(r, "metadata", None)
             out.append(item)
+        # 검색 결과를 Redis에 TTL 캐시 (RAG 응답 TTL과 동일하게 사용)
+        if cache_key:
+            try:
+                redis_client.set(cache_key, out, ttl=settings.CACHE_TTL_RAG)
+            except Exception:
+                pass
         return out
 
 

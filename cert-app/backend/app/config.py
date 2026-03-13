@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
     SUPABASE_JWT_SECRET: str = ""
+    # Supabase 벡터 intent 라벨 테이블 사용 여부 및 임계값
+    INTENT_LABEL_LOOKUP_ENABLE: bool = False
+    INTENT_LABEL_MIN_SIMILARITY: float = 0.75
     
     # AI (OpenAI). OPENAI_TIMEOUT: 임베딩/채팅 API 호출 타임아웃(초). 미설정 시 60
     OPENAI_API_KEY: str = ""
@@ -50,9 +53,9 @@ class Settings(BaseSettings):
     ALLOWED_HOSTS: str = ""
 
     # RAG: 유사도 임계값 (이하면 결과에서 제외). 0이면 미적용.
-    # 선정 근거: docs/RAG_고도화_총정리.md §2-2 참고.
+    # 3-way RAG 기본값.
     RAG_MATCH_THRESHOLD: float = 0.4
-    # RAG /search/rag: content 컬럼 조회 여부. False=egress 절감(보수적 기본). True=롤백용. docs/README.md §1
+    # RAG /search/rag: content 컬럼 조회 여부. False=egress 절감(보수적 기본). True=롤백용.
     RAG_SEARCH_INCLUDE_CONTENT: bool = False
 
     # 에러 트래킹 (비어 있으면 Sentry 비활성)

@@ -1,11 +1,13 @@
 """
 개인화 soft scoring: 전공/학년/즐겨찾기/취득 자격증/난이도 적합도를 반영한 점수 보정.
 profile 없으면 0 반환 (fallback). 기존 metadata_soft_score와 병행 사용 가능.
+전공 비교 시 profile/자격증 모두 major_category로 정규화해 매칭률을 높임.
 """
 import logging
 from typing import Any, Dict, List, Optional, Set
 
 from app.rag.utils.dense_query_rewrite import UserProfile
+from app.rag.utils.major_normalize import normalize_major
 
 logger = logging.getLogger(__name__)
 
@@ -86,18 +88,20 @@ def compute_personalized_soft_score(
             )
         return score
 
-    # 전공 일치 (profile.major vs qual related_majors)
+    # 전공 일치 (profile.major vs qual related_majors). 둘 다 major_category로 정규화 후 비교.
     profile_major = (profile.get("major") or "").strip()
     if profile_major:
+        q_major_norm = normalize_major(profile_major)
         qual_majors = qual_metadata.get("related_majors") or []
         if isinstance(qual_majors, list):
             qual_major_set = set()
             for m in qual_majors:
-                qual_major_set |= _normalize_tokens(str(m))
+                n = normalize_major(str(m).strip())
+                if n:
+                    qual_major_set.add(n)
         else:
-            qual_major_set = _normalize_tokens(str(qual_majors))
-        q_major_set = _normalize_tokens(profile_major)
-        if q_major_set and qual_major_set and _overlap_ratio(q_major_set, qual_major_set) > 0:
+            qual_major_set = {normalize_major(str(qual_majors).strip())} if str(qual_majors).strip() else set()
+        if q_major_norm and qual_major_set and q_major_norm in qual_major_set:
             score += major_bonus
             applied_major = major_bonus
 

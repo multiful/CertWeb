@@ -137,7 +137,7 @@ def _embed_via_api(query: str):
                     pass
         to_try = [url, f"{url}/", f"{url}/embed"]  # 404 시 대체 경로 재시도
         last_error = None
-        with httpx.Client(timeout=30.0) as client:
+        with httpx.Client(timeout=60.0) as client:
             for base in to_try:
                 try:
                     r = client.post(base, json=body, headers=headers)

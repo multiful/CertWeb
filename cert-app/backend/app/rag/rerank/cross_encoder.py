@@ -18,6 +18,7 @@ import logging
 import time
 from typing import Dict, List, Optional, Tuple
 
+from app.rag.config import get_rag_settings
 from app.rag.rerank.cache import RerankerCache, get_reranker_cache
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,8 @@ def _rerank_via_api(
         passages = [text for _cid, text, _dh in miss_pairs]
         try:
             start = time.perf_counter()
-            with httpx.Client(timeout=90.0) as client:
+            timeout = float(getattr(get_rag_settings(), "RAG_RERANKER_TIMEOUT", 90.0) or 90.0)
+            with httpx.Client(timeout=timeout) as client:
                 r = client.post(
                     api_url.rstrip("/"),
                     json={"query": query, "passages": passages},

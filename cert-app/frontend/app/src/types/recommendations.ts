@@ -38,7 +38,7 @@ export interface HybridRecommendationResponse {
     guest_limited?: boolean;
     /** "current" | "enhanced" */
     rag_mode?: string;
-    /** "bm25_vector_contrastive_rrf" | "vector_fulltext_rrf" — 검색 파이프라인 표시용 */
+    /** "bm25_vector_contrastive_linear" | "vector_fulltext_linear" — 검색 파이프라인 표시용 (RRF 제거, Linear fusion 기준) */
     retrieval_pipeline?: string | null;
 }
 

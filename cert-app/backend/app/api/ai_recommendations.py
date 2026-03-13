@@ -65,6 +65,7 @@ def _run_enhanced_rag_sync(
             expanded_interest,
             top_k=HYBRID_GLOBAL_RESULTS_LIMIT,
             use_reranker=False,
+            dedup_per_cert_override=True,
         )
         hybrid_rrf_scores = {}
         for chunk_id, score in (rag_list or []):
@@ -814,7 +815,7 @@ async def hybrid_recommendation(
         results=items,
         guest_limited=not bool(user_id),
         rag_mode="enhanced" if use_enhanced_rag_result else "current",
-        retrieval_pipeline="bm25_vector_contrastive_rrf" if use_enhanced_rag_result else "vector_fulltext_rrf",
+        retrieval_pipeline="bm25_vector_contrastive_linear" if use_enhanced_rag_result else "vector_fulltext_linear",
     )
 
     # 메트릭 로깅: 처리 시간, 후보 수, 점수 분포 등 (개인정보 제외)

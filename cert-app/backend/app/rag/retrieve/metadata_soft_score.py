@@ -1,11 +1,14 @@
 """
 Metadata 기반 soft scoring: 직무/전공/추천대상 일치 시 가산, 분야 이탈 시 감점.
 IT↔비IT 도메인 불일치 시 감점(선택, RAG_METADATA_DOMAIN_MISMATCH_ENABLE).
+전공 비교 시 쿼리/자격증 모두 major_category로 정규화해 매칭률을 높임.
 """
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
+
+from app.rag.utils.major_normalize import normalize_major
 
 
 # 기본 가중치 (config로 오버라이드)
@@ -14,6 +17,7 @@ DEFAULT_MAJOR_BONUS = 0.10
 DEFAULT_TARGET_BONUS = 0.10
 DEFAULT_FIELD_PENALTY = -0.20
 DEFAULT_DOMAIN_MISMATCH_PENALTY = -0.35
+DEFAULT_DOMAIN_BONUS = 0.15
 
 
 def _normalize_tokens(s: str) -> set:
@@ -36,7 +40,7 @@ def compute_metadata_soft_score(
     query_is_it: Optional[bool] = None,
 ) -> float:
     """
-    query_slots: rewrite에서 추출한 전공, 희망직무, 목적, 관심분야 등.
+    query_slots: rewrite에서 추출한 전공, 희망직무, 목적 등.
     qual_metadata: qualification + related_majors 등 (main_field, ncs_large, related_majors, is_it).
     config: RAG_METADATA_SOFT_* 가중치. domain_mismatch_penalty 있으면 도메인 불일치 시 적용.
     query_is_it: 쿼리가 IT 도메인인지. None이면 도메인 불일치 미적용.
@@ -47,20 +51,24 @@ def compute_metadata_soft_score(
     target_bonus = float(cfg.get("target_bonus", DEFAULT_TARGET_BONUS))
     field_penalty = float(cfg.get("field_penalty", DEFAULT_FIELD_PENALTY))
     domain_mismatch_penalty = float(cfg.get("domain_mismatch_penalty", 0.0))
+    domain_bonus = float(cfg.get("domain_bonus", DEFAULT_DOMAIN_BONUS))
 
     score = 0.0
     q_job = _normalize_tokens(str(query_slots.get("희망직무") or query_slots.get("관심분야") or ""))
     q_major = _normalize_tokens(str(query_slots.get("전공") or ""))
     q_interest = _normalize_tokens(str(query_slots.get("관심분야") or ""))
+    q_domains = _normalize_tokens(str(query_slots.get("도메인") or ""))
 
     qual_job = _normalize_tokens(str(qual_metadata.get("main_field") or "") + " " + str(qual_metadata.get("ncs_large") or ""))
     qual_majors = qual_metadata.get("related_majors") or []
     if isinstance(qual_majors, list):
         qual_major_set = set()
         for m in qual_majors:
-            qual_major_set |= _normalize_tokens(str(m))
+            n = normalize_major(str(m).strip())
+            if n:
+                qual_major_set.add(n)
     else:
-        qual_major_set = _normalize_tokens(str(qual_majors))
+        qual_major_set = {normalize_major(str(qual_majors).strip())} if str(qual_majors).strip() else set()
 
     if q_job and qual_job and _overlap_ratio(q_job, qual_job) > 0:
         score += job_bonus
@@ -70,6 +78,11 @@ def compute_metadata_soft_score(
         score += target_bonus * 0.5
     if q_job and qual_job and len(qual_job) > 0 and _overlap_ratio(q_job, qual_job) == 0 and len(q_job) >= 2:
         score += field_penalty * 0.5
+
+    # 넓은 도메인(IT/금융/의료/관광 등) 일치 시 가산
+    qual_domains = _normalize_tokens(" ".join(qual_metadata.get("domains") or []))
+    if q_domains and qual_domains and _overlap_ratio(q_domains, qual_domains) > 0:
+        score += domain_bonus
     # IT↔비IT 도메인 불일치 감점 (쿼리 IT인데 자격증 비IT, 또는 그 반대)
     if (
         query_is_it is not None
@@ -112,17 +125,27 @@ def fetch_qual_metadata_bulk(db: Session, qual_ids: List[int]) -> Dict[int, Dict
                     by_qual[r.qual_id].append((r.major or "").strip())
             for qid, majors in by_qual.items():
                 if qid in out:
-                    out[qid]["related_majors"] = [m for m in majors if m]
-        # IT/비IT 도메인 플래그 (도메인 불일치 감점용)
+                    raw_list = [m for m in majors if m]
+                    out[qid]["related_majors"] = raw_list
+                    # 자격증 메타데이터에도 전공 원본 + major_category(정규화)를 모두 보관
+                    out[qid]["related_majors_normalized"] = [normalize_major(m) for m in raw_list]
+        # IT/비IT 및 넓은 도메인 플래그 (도메인 불일치 감점 및 도메인 보너스용)
         try:
-            from app.rag.utils.domain_tokens import get_it_tokens, get_non_it_tokens
+            from app.rag.utils.domain_tokens import (
+                get_it_tokens,
+                get_non_it_tokens,
+                detect_broad_domains_in_text,
+            )
             it_tokens = get_it_tokens()
             non_it_tokens = get_non_it_tokens()
             for qid, meta in out.items():
-                text_parts = " ".join([
-                    str(meta.get("main_field") or ""),
-                    str(meta.get("ncs_large") or ""),
-                ] + [str(m) for m in (meta.get("related_majors") or [])])
+                text_parts = " ".join(
+                    [
+                        str(meta.get("main_field") or ""),
+                        str(meta.get("ncs_large") or ""),
+                    ]
+                    + [str(m) for m in (meta.get("related_majors") or [])]
+                )
                 is_it = None
                 for t in it_tokens:
                     if t in text_parts:
@@ -134,9 +157,12 @@ def fetch_qual_metadata_bulk(db: Session, qual_ids: List[int]) -> Dict[int, Dict
                             is_it = False
                             break
                 meta["is_it"] = is_it
+                # 넓은 도메인(금융, 의료, 관광/서비스 등) 라벨
+                meta["domains"] = detect_broad_domains_in_text(text_parts)
         except Exception:
             for meta in out.values():
                 meta["is_it"] = None
+                meta["domains"] = []
     except Exception:
         pass
     return out

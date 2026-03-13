@@ -4,7 +4,7 @@ BM25 쿼리 전처리 및 확장.
 기능:
 - normalize: 특수문자 제거, 대소문자 통일, 다중 공백 정리
 - expand: 동의어/약어 확장 (자격증 도메인)
-- 현재 방식: RECOMMENDATION_QUERY_MAP n-gram 매칭 (docs/QUERY_EXPANSION_CURRENT.md)
+- 현재 방식: RECOMMENDATION_QUERY_MAP n-gram 매칭
 - 다른 방식: RAG_BM25_BASELINE_APPEND_ENABLE 시 비 cert-centric 추천 질의에 베이스라인 용어 추가
 - 비IT 도메인 쿼리(관광, 언어 등)일 때는 IT 베이스라인 미추가
 """
@@ -187,6 +187,11 @@ RECOMMENDATION_QUERY_MAP = {
     "인데취업": "취업 자격증 실무 정보처리 SQLD",
     "인데자격증": "자격증 입문 취업 정보처리",
     "다음단계": "정보처리기사 SQLD ADsP 자격증 로드맵",
+    # 취준/자소서 등 취업 준비 맥락 보강
+    "취준": "취업 준비 자격증 정보처리 SQLD ADsP",
+    "자소서": "취업 준비 자격증 실무 포트폴리오",
+    # 빅데이터 직무 표현 보강
+    "빅데이터직무": "빅데이터 직무 데이터분석 SQLD ADsP 빅데이터분석기사 자격증",
 }
 
 # Query type별 expansion: cert-centric(자격증명·로드맵·비교)에서는 목적/전공/직무 과확장 스킵.

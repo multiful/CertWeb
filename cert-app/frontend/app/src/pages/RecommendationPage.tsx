@@ -356,7 +356,7 @@ export function RecommendationPage() {
               </div>
               <h3 className="text-lg font-bold text-white">데이터 기반 분석</h3>
               <p className="text-sm text-slate-400 leading-relaxed">
-                합격률·응시자 수·난이도 등 실제 시험 데이터와 하이브리드 검색(RRF) 결과를 반영해 신뢰할 수 있는 추천을 제공합니다.
+                합격률·응시자 수·난이도 등 실제 시험 데이터와 하이브리드 검색 결과를 반영해 신뢰할 수 있는 추천을 제공합니다.
               </p>
             </CardContent>
           </Card>

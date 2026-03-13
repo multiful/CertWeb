@@ -58,7 +58,7 @@ const AI_STATS = [
     },
     {
         label: '순위 융합·리랭킹',
-        value: 'RRF + Reranker',
+        value: 'Hybrid + Reranker',
         unit: '',
         icon: Layers,
         color: 'indigo',
@@ -86,8 +86,8 @@ const RAG_GROWTH_BASELINE: { label: string; growth: string }[] = [
     { label: 'MRR@4', growth: '8배 향상' },
 ];
 
-/** 레거시(Dense+Sparse RRF) 대비 고도화 — 평가지표 (갱신 시 반영) */
-const RAG_GROWTH_LEGACY_RRF: { label: string; growth: string }[] = [
+/** 레거시(Dense+Sparse) 대비 고도화(Linear fusion) — 평가지표 (갱신 시 반영) */
+const RAG_GROWTH_LEGACY_LINEAR: { label: string; growth: string }[] = [
     { label: 'Recall@5', growth: '—' },
     { label: 'Recall@10', growth: '—' },
     { label: 'Recall@20', growth: '—' },
@@ -329,9 +329,9 @@ export function AiRecommendationPage() {
                             <h2 className="text-2xl font-bold text-white flex items-center gap-3 flex-wrap">
                                 <Sparkles className="w-6 h-6 text-yellow-500" />
                                 분석 결과
-                                {results.retrieval_pipeline === 'bm25_vector_contrastive_rrf' && (
+                                {(results.retrieval_pipeline === 'bm25_vector_contrastive_linear' || results.retrieval_pipeline === 'bm25_vector_contrastive_rrf') && (
                                     <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px] font-normal">
-                                        BM25+Vector+Contrastive+RRF
+                                        BM25+Vector+Contrastive (Linear)
                                     </Badge>
                                 )}
                             </h2>
@@ -566,7 +566,7 @@ export function AiRecommendationPage() {
                             })}
                         </div>
 
-                        {/* 정합성 점수 구성 바 — BM25 + Vector + Contrastive + RRF 파이프라인 반영 + 레거시 대비 성장(배 수) */}
+                        {/* 정합성 점수 구성 바 — BM25 + Vector + Contrastive 파이프라인 반영 + 레거시 대비 성장(배 수) */}
                         <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
                             <div className="flex items-center justify-between flex-wrap gap-2">
                                 <p className="text-sm font-bold text-slate-300 flex items-center gap-2">
@@ -578,7 +578,7 @@ export function AiRecommendationPage() {
                                         절대 매칭도
                                     </Badge>
                                     <Badge className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px]">
-                                        BM25+Vector+Contrastive+RRF
+                                        BM25+Vector+Contrastive
                                     </Badge>
                                 </div>
                             </div>
@@ -600,7 +600,7 @@ export function AiRecommendationPage() {
                                     <div className="flex items-center justify-between text-xs">
                                         <span className="text-purple-400 font-semibold flex items-center gap-1.5">
                                             <div className="w-2.5 h-2.5 rounded-sm bg-purple-500" />
-                                            관심도 일치 (RRF)
+                                            관심도 일치
                                         </span>
                                         <span className="text-purple-400 font-bold">50~70%</span>
                                     </div>
@@ -608,12 +608,12 @@ export function AiRecommendationPage() {
                                         <div className="h-full w-[60%] bg-gradient-to-r from-purple-600 to-indigo-400 rounded-full" />
                                     </div>
                                     <p className="text-[11px] text-slate-600">
-                                        BM25 + Vector(Dense) + Contrastive → RRF 융합 점수 (관심 입력 시 70%)
+                                        BM25 + Vector(Dense) + Contrastive 융합 점수 (관심 입력 시 70%)
                                     </p>
                                 </div>
                             </div>
                             <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800">
-                                검색: BM25 + Vector + Contrastive → RRF. 정합성 = (전공 + RRF 가중 평균) × 난이도·합격률 보정
+                                검색: BM25 + Vector + Contrastive. 정합성 = (전공 + 융합 가중 평균) × 난이도·합격률 보정
                             </p>
                             <div className="pt-3 border-t border-slate-800 space-y-4">
                                 <div>
@@ -628,10 +628,10 @@ export function AiRecommendationPage() {
                                     </div>
                                 </div>
                                 <div>
-                                    <p className="text-[11px] font-bold text-slate-400 mb-2">레거시(Dense+Sparse RRF) 대비</p>
+                                    <p className="text-[11px] font-bold text-slate-400 mb-2">레거시(Dense+Sparse) 대비</p>
                                     <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                                        {RAG_GROWTH_LEGACY_RRF.map(({ label, growth }) => (
-                                            <span key={`rrf-${label}`} className="text-[11px] text-slate-300">
+                                        {RAG_GROWTH_LEGACY_LINEAR.map(({ label, growth }) => (
+                                            <span key={`linear-${label}`} className="text-[11px] text-slate-300">
                                                 <span className="text-slate-500">{label}</span>
                                                 <span className="ml-1.5 font-semibold text-slate-500">{growth}</span>
                                             </span>

@@ -44,6 +44,7 @@ sentry-sdk[fastapi]>=1.39.0
 # RAG 런타임: BM25 + 벡터 검색. (청킹/인덱스 빌드는 로컬 스크립트에서만 사용)
 numpy>=1.24.0,<3
 rank_bm25>=0.2.2
+faiss-cpu
 
 # RAG 로컬 리랭커는 선택. 원격 API 사용 시 불필요.
 # sentence-transformers>=2.2.0

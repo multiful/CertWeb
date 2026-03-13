@@ -46,17 +46,10 @@ backend/
 │   │   └── data_loader.py
 │   ├── redis_client.py, database.py, models.py, schemas/, config.py
 │   └── utils/ai.py, auth.py, stream_producer.py
-├── scripts/                     # 평가·적용 검증·데이터 파이프라인
-│   ├── eval_three_models_no_reranker.py   # 3모델 비교(baseline/current/enhanced_reranker), CSV·보고서
-│   ├── eval_channel_ablation.py          # 채널별(bm25_only/vector_only/contrastive_only vs 3-way) Ablation
-│   ├── eval_enhanced_only.py             # Enhanced 단일 파이프라인 평가
-│   ├── eval_reranker_on_off.py           # 리랭커 ON/OFF 비교
-│   ├── eval_baseline_vs_enhanced.py      # 베이스라인(Vector) vs RRF 고도화(Enhanced+리랭커) 비교표
-│   ├── run_vector_only_tuning.py         # Vector 단일 K·threshold 튜닝 (vector_only)
-│   ├── run_enhanced_further_tuning.py    # 고도화 파이프라인 추가 변형 실험 (RRF/alpha/threshold 등)
-│   ├── bench_apply_verification.py       # RAG 응답 크기·get_list 지연 측정
-│   ├── export_rag_eval_metrics.py       # rag_eval_metrics_8.json (API /rag-eval-metrics용)
-│   └── (기타) audit_corpus_*.py 등 — docs/README.md, docs/RAG_고도화_총정리.md 참고
+├── scripts/                     # 데이터·평가 파이프라인
+│   ├── build_rewrite_snapshot.py         # 골든 → 재질의 스냅샷 (reco_golden_recommendation_18_rewrite_snapshot.jsonl)
+│   ├── build_intent_labels_init.py      # audit → intent_labels_init.json (job/purpose)
+│   └── upload_intent_labels_to_supabase.py  # intent_labels_init → Supabase intent_labels
 ├── data/                     # 골든셋, 코퍼스, contrastive 학습 데이터
 ├── main.py
 ├── requirements.txt
@@ -237,17 +230,10 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
   - **건수**: n=34 (프로필 없음 16건 + 프로필 있음 18건, IT·비IT 혼합). **모든 RAG 평가는 이 골든셋 기준.**
 - **3모델 비교 (리랭커 없음)**  
   `cd cert-app/backend` 후  
-  `uv run python scripts/eval_three_models_no_reranker.py --golden data/reco_golden_recommendation_18.jsonl --output data/eval_three_models_8.csv --report data/eval_three_models_8_report.md`  
-  → baseline(Vector만) / current(Dense+Sparse RRF) / enhanced_reranker(BM25+Vector+Contrastive+RRF) 지표·개선률 출력. 전체 골든(34건) 또는 `--max-queries 8` 등으로 실행.
-- **채널 Ablation (단일 vs 3-way)**  
-  `uv run python scripts/eval_channel_ablation.py --golden data/reco_golden_recommendation_18.jsonl --output data/channel_ablation.csv --report data/channel_ablation_report.md`  
-  → bm25_only / vector_only / contrastive_only vs enhanced_reranker 비교.
-- **적용 검증 (RAG 응답 크기·DB 지연)**  
-  `uv run python scripts/bench_apply_verification.py` (backend 디렉터리에서 실행)
-- **RAG 평가 메트릭 JSON (API용)**  
-  `uv run python scripts/export_rag_eval_metrics.py` → `data/rag_eval_metrics_8.json` (GET /api/v1/recommendations/ai/rag-eval-metrics에서 사용)
-
-- **백엔드 문서 (통합)**: `docs/README.md` — CertFinder RAG 성능 지표(적용 전/후, 캐시, 복구), 운영 기본값·평가 절차, Contrastive §3. 상세: `docs/PERFORMANCE_IMPROVEMENT_METRICS.md`.
+  `uv run python -m app.rag.eval --golden data/reco_golden_recommendation_18.jsonl [--output data/eval_rrf_current.csv] [--max-queries N]`  
+  → baseline(단일 Vector) / current(2-way 레거시) / current_reranker / enhanced_reranker(3-way BM25+Vector+Contrastive RRF+리랭커) 4-way 비교.
+- **재질의 스냅샷**: `uv run python scripts/build_rewrite_snapshot.py` → `data/reco_golden_recommendation_18_rewrite_snapshot.jsonl`
+- **intent_labels 갱신**: `uv run python scripts/build_intent_labels_init.py` 후 `uv run python scripts/upload_intent_labels_to_supabase.py`
 
 ---
 
@@ -255,26 +241,18 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 | 용도 | 파일·스크립트 |
 |------|----------------|
-| **골든셋** | `data/reco_golden_recommendation_18.jsonl` (표준 평가용). 평가 결과: `data/eval_three_models_8.csv`, `data/eval_three_models_8_report.md`, `data/eval_baseline_vs_enhanced.json` (베이스라인 vs 고도화) |
-| **저장된 고도화 기준** | `data/enhanced_saved_baseline.json`, `data/eval_enhanced_baseline_snapshot.json` (추가 고도화·롤백 판단 기준) |
-| **채널 Ablation** | `data/channel_ablation.csv`, `data/channel_ablation_report.md` (`eval_channel_ablation.py` 실행 결과) |
-| **추가 튜닝 결과** | `data/further_tuning_result.json` (run_enhanced_further_tuning), `data/vector_only_tuning_result.json` (run_vector_only_tuning) |
-| **RAG 평가 메트릭** | `scripts/export_rag_eval_metrics.py` → `data/rag_eval_metrics_8.json` (API 노출) |
-| **RAG 코퍼스·리랭커** | `data/all_cert_corpus.json`, `data/reranker_train_from_contrastive.jsonl` 등. 정제·품질 검사·코퍼스 검토 스크립트는 `scripts/` 및 `docs/README.md` 참고. |
+| **골든셋** | `data/reco_golden_recommendation_18.jsonl`, `data/reco_golden_recommendation_18_rewrite_snapshot.jsonl` (재질의 스냅샷) |
+| **평가 결과** | `data/eval_rrf_current.csv` (`python -m app.rag.eval --output ...` 실행 결과) |
+| **intent_labels** | `data/intent_labels_init.json` (audit 기반 job/purpose), `scripts/upload_intent_labels_to_supabase.py`로 Supabase 반영 |
+| **3-way RAG** | `data/contrastive_cleaned_audit_v3.json` (intent 초기값 추출), `data/contrastive_index/` (FAISS), `data/domain_tokens.json` |
+| **리랭커** | `data/reranker_train_from_contrastive.jsonl` (학습 데이터). 어려운 쿼리(통번역/빅데이터 분석가) 패치는 `scripts/patch_reranker_train_hard_queries.py`로 추가됨. |
 
 ---
 
 ## 📚 참고 문서
 
-- **백엔드 문서 (통합)**: `docs/README.md` — CertFinder RAG 성능 지표·적용 검증·운영 기본값·Contrastive §3.
-- **RAG 고도화 총정리**: `docs/RAG_고도화_총정리.md` — 적용/미적용 고도화 이력, §2-3 Contrastive 게이팅·타입별 가중치·채널 Ablation 결과.
-- **RRF 단계별 고도화**: `docs/RRF_ONLY_IMPROVEMENT_GUIDE.md` — BM25/Vector/RRF 개선 레버, 한 번에 하나씩 적용·측정 원칙.
-- **Vector 성능 전후**: `docs/VECTOR_PERFORMANCE_BEFORE_AFTER.md` — Vector 채널 튜닝·지표.
-- **리랭커 지연·메트릭**: `docs/RERANKER_LATENCY_AND_METRICS.md` — Reranker 캐시·지연 측정.
-- **트러블슈팅**: `docs/TRUBLESHOOTING.md` — 병목·타임아웃·예외 로깅·체크리스트.
-- **성능 개선 지표 (상세)**: `docs/PERFORMANCE_IMPROVEMENT_METRICS.md` — DB 쿼리·Reranker·복구 절차.
+- **RAG·Contrastive**: `app/rag/contrastive/README.md`, `data/contrastive_index/README.md`
 - **배포·CORS·환경변수**: `.cursor/rules/deployment.mdc`
-- **리랭커 데이터 품질**: `data/RERANKER_TRAIN_QUALITY_REVIEW.md`, `data/ANALYSIS_SCRIPTS_AUDIT.md`
 
 ---
 
