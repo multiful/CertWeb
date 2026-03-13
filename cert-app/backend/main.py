@@ -55,7 +55,14 @@ def _get_allowed_origins() -> list[str]:
 def _get_allowed_hosts() -> list[str]:
     if settings.ALLOWED_HOSTS and settings.ALLOWED_HOSTS.strip():
         return [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
-    return ["certweb-xzpx.onrender.com", "localhost", "127.0.0.1"]
+    # 기본값: Render 백엔드 도메인 + Railway 기본 도메인 패턴 + 로컬
+    # ALLOWED_HOSTS 환경변수를 설정하면 이 값이 우선한다.
+    return [
+        "certweb-xzpx.onrender.com",  # Render
+        "https://certfinder-production.up.railway.app",           # Railway
+        "localhost",
+        "127.0.0.1",
+    ]
 
 ALLOWED_ORIGINS = _get_allowed_origins()
 ALLOWED_HOSTS = _get_allowed_hosts()
