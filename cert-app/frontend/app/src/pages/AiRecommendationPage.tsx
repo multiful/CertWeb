@@ -107,6 +107,7 @@ export function AiRecommendationPage() {
     const [, setError] = useState<Error | null>(null);
     const { navigate } = useRouter();
     const { token, user } = useAuth();
+    const profileMajor = (user as any)?.user_metadata?.detail_major as string | undefined;
 
     const [availableMajors, setAvailableMajors] = useState<string[]>([]);
 
@@ -151,7 +152,6 @@ export function AiRecommendationPage() {
             // 캐시 파싱 실패 시 무시
         }
         // 캐시가 없고 로그인 사용자인 경우, 프로필 전공(detail_major)로 초기값 자동 채움
-        const profileMajor = (user as any)?.user_metadata?.detail_major;
         if (profileMajor && !major && !inputValue) {
             setMajor(profileMajor);
             setInputValue(profileMajor);
@@ -196,9 +196,15 @@ export function AiRecommendationPage() {
     };
 
     const handleReset = () => {
-        setMajor('');
+        // 로그인 + 프로필 전공이 있는 경우, 전공은 고정하고 나머지만 리셋
+        if (profileMajor) {
+            setMajor(profileMajor);
+            setInputValue(profileMajor);
+        } else {
+            setMajor('');
+            setInputValue('');
+        }
         setInterest('');
-        setInputValue('');
         setResults(null);
         sessionStorage.removeItem(AI_CACHE_KEY);
     };
@@ -262,6 +268,7 @@ export function AiRecommendationPage() {
                                         setMajorError(null);
                                     }}
                                     onFocus={() => setShowSuggestions(true)}
+                                    readOnly={!!profileMajor}
                                     className={`bg-slate-900/80 h-12 focus:ring-blue-500/20 text-white ${majorError ? 'border-red-500/60 focus-visible:ring-red-500/30' : 'border-slate-700'}`}
                                     aria-invalid={!!majorError}
                                     aria-describedby={majorError ? 'major-input-error' : undefined}
