@@ -68,54 +68,114 @@ def _rerank_via_api(
             len(cached_scores), len(miss_pairs)
         )
     
-    # 2) miss 항목만 API 호출
+    # 2) miss 항목만 API 호출 (5xx/429/연결 오류 시 RAG_RERANKER_HTTP_RETRIES 만큼 지수 백오프 재시도)
     api_scores: Dict[str, float] = {}  # chunk_id -> score
     if miss_pairs:
         passages = [text for _cid, text, _dh in miss_pairs]
-        try:
-            start = time.perf_counter()
-            timeout = float(getattr(get_rag_settings(), "RAG_RERANKER_TIMEOUT", 90.0) or 90.0)
-            with httpx.Client(timeout=timeout) as client:
-                r = client.post(
-                    api_url.rstrip("/"),
-                    json={"query": query, "passages": passages},
-                    headers={"Content-Type": "application/json"},
-                )
-                r.raise_for_status()
-                data = r.json()
-                scores = data.get("scores")
-                latency_ms = (time.perf_counter() - start) * 1000
-                
-                if not isinstance(scores, list) or len(scores) != len(miss_pairs):
-                    logger.warning(
-                        "리랭커 API 응답 형식 오류: scores 길이=%s, pairs=%d",
-                        len(scores) if scores else 0, len(miss_pairs)
+        settings = get_rag_settings()
+        timeout = float(getattr(settings, "RAG_RERANKER_TIMEOUT", 90.0) or 90.0)
+        max_retries = int(getattr(settings, "RAG_RERANKER_HTTP_RETRIES", 2) or 2)
+        api_ok = False
+        for attempt in range(max_retries + 1):
+            try:
+                start = time.perf_counter()
+                with httpx.Client(timeout=timeout) as client:
+                    r = client.post(
+                        api_url.rstrip("/"),
+                        json={"query": query, "passages": passages},
+                        headers={"Content-Type": "application/json"},
                     )
-                    # fallback: 캐시된 것만 반환
-                    if cached_scores:
-                        out = [(cid, s) for cid, s in cached_scores.items()]
-                        out.sort(key=lambda x: -x[1])
-                        return out[:top_k] if top_k else out
-                    return []
-                
-                # 캐시에 저장
-                for i, (chunk_id, text, doc_hash) in enumerate(miss_pairs):
-                    score = float(scores[i])
-                    api_scores[chunk_id] = score
-                    if cache:
-                        cache.set(query, doc_hash, score)
-                
-                logger.debug(
-                    "Reranker API: %d hit, %d miss, latency=%.1fms",
-                    len(cached_scores), len(miss_pairs), latency_ms
+                    if r.status_code >= 500 or r.status_code == 429:
+                        if attempt < max_retries:
+                            delay = min(3.0, 0.5 * (2**attempt))
+                            logger.warning(
+                                "리랭커 API HTTP %s (시도 %d/%d), %.1fs 후 재시도",
+                                r.status_code,
+                                attempt + 1,
+                                max_retries + 1,
+                                delay,
+                            )
+                            time.sleep(delay)
+                            continue
+                    r.raise_for_status()
+                    data = r.json()
+                    scores = data.get("scores")
+                    latency_ms = (time.perf_counter() - start) * 1000
+
+                    if not isinstance(scores, list) or len(scores) != len(miss_pairs):
+                        logger.warning(
+                            "리랭커 API 응답 형식 오류: scores 길이=%s, pairs=%d",
+                            len(scores) if scores else 0,
+                            len(miss_pairs),
+                        )
+                        if cached_scores:
+                            out = [(cid, s) for cid, s in cached_scores.items()]
+                            out.sort(key=lambda x: -x[1])
+                            return out[:top_k] if top_k else out
+                        return []
+
+                    for i, (chunk_id, text, doc_hash) in enumerate(miss_pairs):
+                        score = float(scores[i])
+                        api_scores[chunk_id] = score
+                        if cache:
+                            cache.set(query, doc_hash, score)
+
+                    logger.debug(
+                        "Reranker API: %d hit, %d miss, latency=%.1fms",
+                        len(cached_scores),
+                        len(miss_pairs),
+                        latency_ms,
+                    )
+                    api_ok = True
+                    break
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                if (code >= 500 or code == 429) and attempt < max_retries:
+                    delay = min(3.0, 0.5 * (2**attempt))
+                    logger.warning(
+                        "리랭커 API HTTP %s, %.1fs 후 재시도",
+                        code,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.warning(
+                    "리랭커 API HTTP 오류 (url=%s, status=%s): %s",
+                    api_url,
+                    code,
+                    e,
                 )
-                
-        except Exception as e:
-            logger.exception(
-                "리랭커 API 호출 실패 (url=%s, query 길이=%d, miss=%d): %s",
-                api_url, len(query), len(miss_pairs), e
-            )
-            # fallback: 캐시된 것만 반환
+                break
+            except httpx.RequestError as e:
+                if attempt < max_retries:
+                    delay = min(3.0, 0.5 * (2**attempt))
+                    logger.warning(
+                        "리랭커 API 연결 실패 (시도 %d/%d), %.1fs 후 재시도: %s",
+                        attempt + 1,
+                        max_retries + 1,
+                        delay,
+                        e,
+                    )
+                    time.sleep(delay)
+                    continue
+                logger.warning(
+                    "리랭커 API 연결 실패 (url=%s, query 길이=%d, miss=%d): %s",
+                    api_url,
+                    len(query),
+                    len(miss_pairs),
+                    e,
+                )
+                break
+            except Exception as e:
+                logger.exception(
+                    "리랭커 API 호출 실패 (url=%s, query 길이=%d, miss=%d): %s",
+                    api_url,
+                    len(query),
+                    len(miss_pairs),
+                    e,
+                )
+                break
+        if not api_ok:
             if cached_scores:
                 out = [(cid, s) for cid, s in cached_scores.items()]
                 out.sort(key=lambda x: -x[1])

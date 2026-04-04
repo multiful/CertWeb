@@ -198,14 +198,11 @@ export function MyPage() {
                 return;
             }
 
-            const [favRes, recentData, profileData, acquiredRes, recRes] = await Promise.all([
+            const [favRes, recentData, profileData, acquiredRes] = await Promise.all([
                 getFavorites(token, 1, 5),
                 getRecentViewed(token),
                 getProfile(token),
                 getAcquiredCerts(token, 1, 200).catch(() => ({ items: [] as AcquiredCertItem[], total: 0 })),
-                majorFromUser
-                    ? getRecommendations(majorFromUser, 20).catch(() => ({ items: [] as any[] }))
-                    : Promise.resolve({ items: [] as any[] }),
             ]);
 
             setFavorites(favRes.items.map((f: any) => f.qualification));
@@ -213,13 +210,15 @@ export function MyPage() {
             setProfile(profileData);
             setAcquiredCerts(acquiredRes.items);
 
-            const finalMajor = profileData?.detail_major ?? majorFromUser;
-            let recList: any[];
-            if (finalMajor && profileData?.detail_major !== majorFromUser) {
-                const recResFromProfile = await getRecommendations(finalMajor, 20);
-                recList = recResFromProfile.items || [];
-            } else {
-                recList = recRes.items || [];
+            const finalMajor = (profileData?.detail_major ?? majorFromUser)?.trim();
+            let recList: any[] = [];
+            if (finalMajor) {
+                try {
+                    const recRes = await getRecommendations(finalMajor, 20);
+                    recList = recRes.items || [];
+                } catch {
+                    recList = [];
+                }
             }
             setRecommendations(recList);
 

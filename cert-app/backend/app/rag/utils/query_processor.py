@@ -6,12 +6,12 @@ BM25 쿼리 전처리 및 확장.
 - expand: 동의어/약어 확장 (자격증 도메인)
 - 현재 방식: RECOMMENDATION_QUERY_MAP n-gram 매칭
 - 다른 방식: RAG_BM25_BASELINE_APPEND_ENABLE 시 비 cert-centric 추천 질의에 베이스라인 용어 추가
-- 비IT 도메인 쿼리(관광, 언어 등)일 때는 IT 베이스라인 미추가
+- IT·디지털 집중 신호가 없는 직종 쿼리(관광, 간호 등)일 때는 IT 베이스라인 미추가
 """
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-# 비IT 도메인: data/domain_tokens.json 기반. BM25_BASELINE_MODE=1이면 기존 동작(항상 IT 베이스라인).
+# 비(디지털 집중) 직종 토큰: data/domain_tokens.json 기반. BM25_BASELINE_MODE=1이면 항상 IT 베이스라인.
 def _get_bm25_non_it_tokens() -> frozenset:
     import os
     if os.environ.get("BM25_BASELINE_MODE") == "1":
@@ -72,6 +72,17 @@ SYNONYM_DICT = {
     # 직무/전공 alias (keyword·전산 직무 실패 대응)
     "전산": ["전산", "정보처리", "전산학", "시스템", "IT"],
     "db": ["db", "데이터베이스", "database", "sqld", "sql"],
+    # 자주 나오는 발화·약어 (BM25 recall 보조, 인덱스 재빌드 불필요)
+    "취준": ["취준", "취업준비", "취업 준비", "취업"],
+    "취업준비": ["취업준비", "취준", "취업", "자격증"],
+    "클라우드": ["클라우드", "cloud", "aws", "azure", "gcp"],
+    "devops": ["devops", "데브옵스", "ci cd", "인프라"],
+    "인공지능": ["인공지능", "ai", "머신러닝", "딥러닝"],
+    "머신러닝": ["머신러닝", "machine learning", "딥러닝", "인공지능"],
+    "풀스택": ["풀스택", "fullstack", "풀 스택", "프론트 백엔드"],
+    "웹개발": ["웹개발", "웹 개발", "프론트엔드", "백엔드"],
+    "블록체인": ["블록체인", "blockchain", "가상자산"],
+    "게임개발": ["게임개발", "게임 개발", "게임프로그래밍", "unity"],
 }
 
 # 정규화된 키 생성 (공백 제거, 소문자)
@@ -455,7 +466,7 @@ def expand_query_single_string(
                     seen.add(term.lower())
                     extra.append(term)
 
-    # 3) 다른 방식: 비 cert-centric 추천 질의에 베이스라인 용어 추가 (비IT 쿼리면 스킵)
+    # 3) 다른 방식: 비 cert-centric 추천 질의에 베이스라인 용어 추가 (IT·디지털 집중 신호 없으면 스킵)
     try:
         from app.rag.config import get_rag_settings
         s = get_rag_settings()
@@ -466,7 +477,7 @@ def expand_query_single_string(
             and query_type not in CERT_CENTRIC_QUERY_TYPES
             and not has_non_it
         ):
-            # 8개: S@4/Hit@4/MRR 최고점. 비IT(관광·언어 등) 쿼리에는 IT 용어 미추가.
+            # 8개: S@4/Hit@4/MRR 최고점. 관광·언어 등 IT·디지털 집중 신호 없는 질의에는 IT 베이스라인 미추가.
             _baseline_terms = ["자격증", "정보처리", "SQLD", "ADsP", "IT", "취업", "실무", "로드맵"]
             for term in _baseline_terms:
                 if term and term.lower() not in seen:
@@ -482,7 +493,7 @@ def expand_query_single_string(
     except Exception:
         pass
 
-    # 4) 비IT 쿼리: 도메인별 BM25 확장 (BM25_BASELINE_MODE=1이면 스킵)
+    # 4) IT·디지털 집중 신호 없는 질의: 도메인별 BM25 확장 (BM25_BASELINE_MODE=1이면 스킵)
     try:
         import os
         if os.environ.get("BM25_BASELINE_MODE") != "1":

@@ -16,3 +16,8 @@ datasets>=2.14.0
 # 로컬 Cross-Encoder 리랭커 및 Contrastive retriever (768 FAISS) 사용 시
 sentence-transformers>=2.2.0
 faiss-cpu>=1.7.0
+
+# 자격증 설명 수집 스크립트 (scripts/fill_cert_descriptions.py)
+duckduckgo-search>=6.0.0
+pypdf>=4.0.0
+rapidfuzz>=3.0.0

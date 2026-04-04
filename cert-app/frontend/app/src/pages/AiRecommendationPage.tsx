@@ -23,7 +23,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { getHybridRecommendations, getAvailableMajors } from '@/lib/api';
+import { getHybridRecommendations, getAvailableMajors, getCertificationsCatalogTotal, FALLBACK_CERT_CATALOG_TOTAL } from '@/lib/api';
 import { useRouter } from '@/lib/router';
 import { useAuth } from '@/hooks/useAuth';
 import type { HybridRecommendationResponse } from '@/types';
@@ -38,31 +38,32 @@ const AI_CACHE_KEY = 'ai-rec-cache';
 
 const POPULAR_MAJORS = ['컴퓨터공학', '경영학', '전기공학', '간호학', '기계공학', '데이터사이언스'];
 
-const AI_STATS = [
+const AI_ENGINE_STATS = [
     {
         label: '자격증 DB',
-        value: '1,101',
+        valueFromApiTotal: true,
         unit: '개',
         icon: Database,
-        color: 'blue',
-        desc: '임베딩 완료된 국가 자격증',
+        color: 'blue' as const,
+        desc: '국가 자격증 카탈로그(검색·임베딩 대상)',
+        descSmall: false,
     },
     {
         label: '검색 파이프라인',
         value: '3-way Hybrid',
         unit: '',
         icon: GitMerge,
-        color: 'purple',
+        color: 'purple' as const,
         desc: '(keyword · semantic · contrastive)',
         descSmall: true,
     },
     {
         label: '순위 융합·리랭킹',
-        value: 'Hybrid + Reranker',
+        value: 'Hybrid (+조건부 리랭커)',
         unit: '',
         icon: Layers,
-        color: 'indigo',
-        desc: '(fusion → rerank)',
+        color: 'indigo' as const,
+        desc: '설정·질의에 따라 Cross-Encoder 생략 가능',
         descSmall: true,
     },
     {
@@ -70,31 +71,11 @@ const AI_STATS = [
         value: 'Recall · MRR',
         unit: '',
         icon: TrendingUp,
-        color: 'green',
-        desc: '상위 노출 정확도 지표',
+        color: 'green' as const,
+        desc: '평가·모니터링 지표(내부 벤치)',
         descSmall: true,
     },
 ] as const;
-
-/** 베이스라인(벡터 단일) 대비 고도화 — 현재 combmnz 기준 배 향상 */
-const RAG_GROWTH_BASELINE: { label: string; growth: string }[] = [
-    { label: 'Recall@5', growth: '2.4배 향상' },
-    { label: 'Recall@10', growth: '1.7배 향상' },
-    { label: 'Recall@20', growth: '1.6배 향상' },
-    { label: 'Hit@20', growth: '1.6배 향상' },
-    { label: 'Success@4', growth: '1.8배 향상' },
-    { label: 'MRR@4', growth: '1.9배 향상' },
-];
-
-/** 레거시(Dense+Sparse) 대비 고도화(Linear fusion) — 평가지표 (갱신 시 반영) */
-const RAG_GROWTH_LEGACY_LINEAR: { label: string; growth: string }[] = [
-    { label: 'Recall@5', growth: '1.1배 향상' },
-    { label: 'Recall@10', growth: '1.1배 향상' },
-    { label: 'Recall@20', growth: '1.1배 향상' },
-    { label: 'Hit@20', growth: '1.1배 향상' },
-    { label: 'Success@4', growth: '1.1배 향상' },
-    { label: 'MRR@4', growth: '1.2배 향상' },
-];
 
 export function AiRecommendationPage() {
     const [major, setMajor] = useState('');
@@ -110,6 +91,7 @@ export function AiRecommendationPage() {
     const profileMajor = (user as any)?.user_metadata?.detail_major as string | undefined;
 
     const [availableMajors, setAvailableMajors] = useState<string[]>([]);
+    const [certCatalogTotal, setCertCatalogTotal] = useState(FALLBACK_CERT_CATALOG_TOTAL);
 
     // 전공별 샘플 미리보기 상태
     const [selectedPreviewMajor, setSelectedPreviewMajor] = useState<string | null>(null);
@@ -161,6 +143,10 @@ export function AiRecommendationPage() {
 
     React.useEffect(() => {
         getAvailableMajors().then(res => setAvailableMajors(res.majors)).catch(() => { });
+    }, []);
+
+    useEffect(() => {
+        getCertificationsCatalogTotal().then(setCertCatalogTotal).catch(() => { });
     }, []);
 
     const filteredMajors = useMemo(() => {
@@ -553,7 +539,7 @@ export function AiRecommendationPage() {
                             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest">AI 엔진 스펙</h3>
                         </div>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                            {AI_STATS.map((stat) => {
+                            {AI_ENGINE_STATS.map((stat) => {
                                 const Icon = stat.icon;
                                 const colorMap = {
                                     blue: 'bg-blue-500/10 border-blue-500/20 text-blue-400',
@@ -561,6 +547,12 @@ export function AiRecommendationPage() {
                                     purple: 'bg-purple-500/10 border-purple-500/20 text-purple-400',
                                     indigo: 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400',
                                 } as const;
+                                const displayValue =
+                                    'valueFromApiTotal' in stat && stat.valueFromApiTotal
+                                        ? certCatalogTotal.toLocaleString('ko-KR')
+                                        : 'value' in stat
+                                            ? stat.value
+                                            : '';
                                 return (
                                     <div key={stat.label} className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 space-y-3">
                                         <div className={`w-9 h-9 rounded-xl border flex items-center justify-center ${colorMap[stat.color]}`}>
@@ -571,7 +563,7 @@ export function AiRecommendationPage() {
                                                 {stat.label}
                                             </p>
                                             <p className="text-xl md:text-2xl font-black text-white mt-0.5 break-words leading-tight">
-                                                {stat.value}
+                                                {displayValue}
                                                 {stat.unit && <span className="text-sm font-semibold text-slate-500 ml-1">{stat.unit}</span>}
                                             </p>
                                             <p className={`mt-1 text-slate-600 ${'descSmall' in stat && stat.descSmall ? 'text-[9px]' : 'text-[11px]'}`}>{stat.desc}</p>
@@ -581,7 +573,7 @@ export function AiRecommendationPage() {
                             })}
                         </div>
 
-                        {/* 정합성 점수 구성 바 — BM25 + Vector + Contrastive 파이프라인 반영 + 레거시 대비 성장(배 수) */}
+                        {/* 정합성 점수 구성 바 — BM25 + Vector + Contrastive 파이프라인 */}
                         <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 space-y-4">
                             <div className="flex items-center justify-between flex-wrap gap-2">
                                 <p className="text-sm font-bold text-slate-300 flex items-center gap-2">
@@ -604,12 +596,12 @@ export function AiRecommendationPage() {
                                             <div className="w-2.5 h-2.5 rounded-sm bg-blue-500" />
                                             전공 연관성 (Major)
                                         </span>
-                                        <span className="text-blue-400 font-bold">30~50%</span>
+                                        <span className="text-blue-400 font-bold">가변</span>
                                     </div>
                                     <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                         <div className="h-full w-[40%] bg-gradient-to-r from-blue-600 to-blue-400 rounded-full" />
                                     </div>
-                                    <p className="text-[11px] text-slate-600">전공 분야와 자격증 출제 범위 간 키워드·벡터 매칭 (관심사 없을 때 50%)</p>
+                                    <p className="text-[11px] text-slate-600">전공 분야와 자격증 출제 범위 간 키워드·벡터 매칭 비중은 입력에 따라 달라집니다.</p>
                                 </div>
                                 <div className="space-y-1.5">
                                     <div className="flex items-center justify-between text-xs">
@@ -617,43 +609,22 @@ export function AiRecommendationPage() {
                                             <div className="w-2.5 h-2.5 rounded-sm bg-purple-500" />
                                             관심도 일치
                                         </span>
-                                        <span className="text-purple-400 font-bold">50~70%</span>
+                                        <span className="text-purple-400 font-bold">가변</span>
                                     </div>
                                     <div className="h-2.5 bg-slate-800 rounded-full overflow-hidden">
                                         <div className="h-full w-[60%] bg-gradient-to-r from-purple-600 to-indigo-400 rounded-full" />
                                     </div>
                                     <p className="text-[11px] text-slate-600">
-                                        BM25 + Vector(Dense) + Contrastive 융합 점수 (관심 입력 시 70%)
+                                        BM25 + Vector(Dense) + Contrastive 융합 점수 비중은 관심사 입력 여부 등에 따라 달라집니다.
                                     </p>
                                 </div>
                             </div>
                             <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800">
                                 검색: BM25 + Vector + Contrastive. 정합성 = (전공 + 융합 가중 평균) × 난이도·합격률 보정
                             </p>
-                            <div className="pt-3 border-t border-slate-800 space-y-4">
-                                <div>
-                                    <p className="text-[11px] font-bold text-slate-400 mb-2">베이스라인(벡터 단일) 대비</p>
-                                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                                        {RAG_GROWTH_BASELINE.map(({ label, growth }) => (
-                                            <span key={label} className="text-[11px] text-slate-300">
-                                                <span className="text-slate-500">{label}</span>
-                                                <span className="ml-1.5 font-semibold text-emerald-400">{growth}</span>
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                                <div>
-                                    <p className="text-[11px] font-bold text-slate-400 mb-2">레거시(Dense+Sparse) 대비</p>
-                                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                                        {RAG_GROWTH_LEGACY_LINEAR.map(({ label, growth }) => (
-                                            <span key={`linear-${label}`} className="text-[11px] text-slate-300">
-                                                <span className="text-slate-500">{label}</span>
-                                                <span className="ml-1.5 font-semibold text-slate-500">{growth}</span>
-                                            </span>
-                                        ))}
-                                    </div>
-                                </div>
-                            </div>
+                            <p className="text-[10px] text-slate-600 leading-relaxed">
+                                막대 길이·표시 비율은 이해를 돕는 예시이며, 실제 서버 가중치·분기와 수치가 일치하지 않을 수 있습니다.
+                            </p>
                         </div>
                     </div>
 

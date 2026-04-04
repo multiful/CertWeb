@@ -21,19 +21,11 @@ class QualificationCRUD:
     @staticmethod
     def get_by_id(db: Session, qual_id: int) -> Optional[Qualification]:
         """Get qualification by ID."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     return data_loader.get_qualification_by_id(qual_id)
-            
         return db.query(Qualification).filter(Qualification.qual_id == qual_id).first()
     
     @staticmethod
     def get_with_stats(db: Session, qual_id: int) -> Optional[Qualification]:
         """Get qualification with stats."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     return data_loader.get_qual_with_stats(qual_id)
-            
         return db.query(Qualification).options(
             joinedload(Qualification.stats),
             joinedload(Qualification.jobs)
@@ -194,7 +186,6 @@ class QualificationStatsCRUD:
     @staticmethod
     def get_by_id(db: Session, stat_id: int) -> Optional[QualificationStats]:
         """Get stats by ID."""
-        # Stats usually fetched via qual_id in data loader
         return db.query(QualificationStats).filter(
             QualificationStats.stat_id == stat_id
         ).first()
@@ -206,15 +197,6 @@ class QualificationStatsCRUD:
         year: Optional[int] = None
     ) -> List[QualificationStats]:
         """Get stats by qualification ID."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     stats = data_loader.get_stats_by_qual_id(qual_id)
-        #     if year:
-        #         stats = [s for s in stats if s.year == year]
-        #     # sort desc
-        #     stats.sort(key=lambda x: (x.year, x.exam_round), reverse=True)
-        #     return stats
-            
         query = db.query(QualificationStats).filter(
             QualificationStats.qual_id == qual_id
         )
@@ -228,12 +210,6 @@ class QualificationStatsCRUD:
         qual_id: int
     ) -> Optional[QualificationStats]:
         """Get latest stats for a qualification."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     stats = data_loader.get_stats_by_qual_id(qual_id)
-        #     if not stats: return None
-        #     return max(stats, key=lambda s: (s.year, s.exam_round))
-
         return db.query(QualificationStats).filter(
             QualificationStats.qual_id == qual_id
         ).order_by(
@@ -316,10 +292,6 @@ class MajorQualificationMapCRUD:
         limit: int = 50
     ) -> List[MajorQualificationMap]:
         """Get qualification mappings for a major."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     return data_loader.get_recommendations_by_major(major, limit)
-
         return db.query(MajorQualificationMap).options(
             joinedload(MajorQualificationMap.qualification)
         ).filter(
@@ -335,11 +307,6 @@ class MajorQualificationMapCRUD:
         limit: int = 50
     ) -> List[MajorQualificationMap]:
         """Get qualification mappings with qualification stats."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     # data_loader returns mappings with qualifications linked (and stats linked to qual)
-        #     return data_loader.get_recommendations_by_major(major, limit)
-            
         return db.query(MajorQualificationMap).options(
             joinedload(MajorQualificationMap.qualification).joinedload(Qualification.stats)
         ).filter(
@@ -541,32 +508,6 @@ def get_qualification_aggregated_stats(
     qual_id: int
 ) -> dict:
     """Get aggregated stats for a qualification."""
-    # from app.services.data_loader import data_loader
-    
-    # if data_loader.is_ready:
-    #     stats = data_loader.get_stats_by_qual_id(qual_id)
-    #     latest = max(stats, key=lambda s: (s.year, s.exam_round)) if stats else None
-        
-    #     if not latest:
-    #         return {
-    #             "latest_pass_rate": None,
-    #             "avg_difficulty": None,
-    #             "total_candidates": None,
-    #         }
-        
-    #     # Calculate avg difficult
-    #     valid_diff = [s.difficulty_score for s in stats if s.difficulty_score is not None]
-    #     avg_difficulty = sum(valid_diff)/len(valid_diff) if valid_diff else None
-        
-    #     # Total candidates
-    #     total_candidates = sum((s.candidate_cnt or 0) for s in stats)
-        
-    #     return {
-    #         "latest_pass_rate": latest.pass_rate,
-    #         "avg_difficulty": round(avg_difficulty, 2) if avg_difficulty is not None else None,
-    #         "total_candidates": total_candidates,
-    #     }
-
     # 1. Get raw stats from DB
     raw_stats = db.query(
         func.avg(QualificationStats.pass_rate).label("avg_pass_rate"),
@@ -778,11 +719,6 @@ class JobCRUD:
         page_size: int = 20
     ) -> tuple[List[Job], int]:
         """Get list of jobs."""
-        # from app.services.data_loader import data_loader
-        # if data_loader.is_ready:
-        #     items = data_loader.get_jobs_list(q)
-        #     return items, len(items)
-            
         query = db.query(Job)
         if q:
             query = query.filter(

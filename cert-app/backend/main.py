@@ -13,9 +13,20 @@ from app.config import get_settings
 from app.database import check_database_connection
 from app.redis_client import redis_client
 from app.logging_config import log_audit
-from app.api import certs, recommendations, admin, favorites, acquired_certs, jobs, auth, majors, ai_recommendations, fast_certs
+from app.api import (
+    certs,
+    recommendations,
+    admin,
+    favorites,
+    acquired_certs,
+    jobs,
+    auth,
+    majors,
+    ai_recommendations,
+    fast_certs,
+    contact,
+)
 from app.rag.api import rag_router
-from app.services.data_loader import data_loader
 
 # Configure logging
 logging.basicConfig(
@@ -42,24 +53,26 @@ if settings.SENTRY_DSN and settings.SENTRY_DSN.strip():
     except Exception as e:
         logger.warning("Sentry init failed: %s", e)
 
-# CORS 허용 오리진 (환경변수 없으면 기본값: Vercel 프로덕션 + 샌드 + DEBUG 시 localhost)
+# CORS 허용 오리진 (환경변수 없으면 기본값: Vercel sand + 구 프로젝트 URL + DEBUG 시 localhost)
 def _get_allowed_origins() -> list[str]:
     if settings.CORS_ORIGINS and settings.CORS_ORIGINS.strip():
         return [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
-    base = [ "https://cert-web-multifuls-projects.vercel.app", "https://cert-web-sand.vercel.app", ]
+    base = [
+        "https://cert-web-sand.vercel.app",
+        "https://cert-web-multifuls-projects.vercel.app",
+    ]
     if settings.DEBUG:
         base.extend(["http://localhost:5173", "http://127.0.0.1:5173"])
     return base
 
-# Trusted Host 허용 호스트 (환경변수 없으면 Render + localhost)
+# Trusted Host 허용 호스트 (환경변수 없으면 Railway + 레거시 Render + localhost)
 def _get_allowed_hosts() -> list[str]:
     if settings.ALLOWED_HOSTS and settings.ALLOWED_HOSTS.strip():
         return [h.strip() for h in settings.ALLOWED_HOSTS.split(",") if h.strip()]
-    # 기본값: Render 백엔드 도메인 + Railway 기본 도메인 패턴 + 로컬
-    # ALLOWED_HOSTS 환경변수를 설정하면 이 값이 우선한다.
+    # 기본값: Railway(현재) + Render(레거시) + 로컬. ALLOWED_HOSTS 환경변수가 있으면 우선.
     return [
-        "certweb-xzpx.onrender.com",  # Render
-        "certfinder-production.up.railway.app",    # Railway
+        "certfinder-production.up.railway.app",
+        "certweb-xzpx.onrender.com",
         "localhost",
         "127.0.0.1",
     ]
@@ -73,14 +86,18 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     logger.info("Starting up...")
-    
+    if settings.DEBUG:
+        logger.warning(
+            "DEBUG=True: production에서는 False 권장. /docs·OpenAPI 노출·상세 오류 위험."
+        )
+
     if not (settings.JOB_SECRET or settings.JOB_SECRET.strip()):
         logger.warning(
             "JOB_SECRET is not set. Set JOB_SECRET in .env for production. "
             "Admin API (X-Job-Secret) will reject requests until configured."
         )
 
-    # SMTP 설정 상태 체크 (Render 배포 시 환경변수 누락 조기 감지)
+    # SMTP 설정 상태 체크 (배포 환경변수 누락 조기 감지)
     if settings.EMAIL_USER and settings.EMAIL_PASSWORD:
         logger.info(
             "SMTP configured: host=%s port=%d user=%s",
@@ -90,15 +107,8 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "SMTP NOT configured (EMAIL_USER/EMAIL_PASSWORD missing). "
             "Contact form emails will NOT be sent. "
-            "Add SMTP env vars in Render Dashboard > Environment."
+            "Set SMTP variables in the host dashboard (e.g. Railway Variables)."
         )
-    
-    # # Load CSV Data
-    # try:
-    #     data_loader.load_data()
-    #     logger.info("CSV Data loaded successfully.")
-    # except Exception as e:
-    #     logger.error(f"Failed to load CSV data: {e}")
 
     # Check database connection
     if check_database_connection():
@@ -106,7 +116,7 @@ async def lifespan(app: FastAPI):
     else:
         logger.warning("Database connection: FAILED")
     
-    # Redis sync은 백그라운드로 실행 — yield 이전에 블로킹하면 Render 헬스체크 타임아웃으로 배포 실패
+    # Redis sync은 백그라운드로 실행 — yield 이전에 블로킹하면 헬스체크 타임아웃으로 배포 실패할 수 있음
     async def _background_redis_sync():
         await asyncio.sleep(5)  # 서버 준비 후 시작
         try:
@@ -130,6 +140,27 @@ async def lifespan(app: FastAPI):
             logger.warning("Background Redis sync failed: %s", e)
 
     asyncio.create_task(_background_redis_sync())
+
+    async def _background_contrastive_prewarm():
+        """Contrastive FAISS·(선택) 로컬 모델 선로드 — 첫 사용자 질의 지연 완화. 헬스·배포 타임아웃을 피하기 위해 지연 후 executor에서 실행."""
+        await asyncio.sleep(10)
+        try:
+            from app.rag.config import get_rag_settings
+            from app.rag.retrieve.contrastive_retriever import prewarm_contrastive
+
+            rg = get_rag_settings()
+            if not getattr(rg, "RAG_CONTRASTIVE_ENABLE", False):
+                return
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(None, prewarm_contrastive)
+            if ok:
+                logger.info("Contrastive index pre-warm completed.")
+            else:
+                logger.debug("Contrastive pre-warm skipped or failed (see contrastive logs).")
+        except Exception as e:
+            logger.warning("Contrastive pre-warm task failed: %s", e)
+
+    asyncio.create_task(_background_contrastive_prewarm())
 
     yield
     
@@ -188,6 +219,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["X-Process-Time", "X-RAG-Variant", "X-RateLimit-Remaining"],
 )
 
 # 1. Custom HTTP Middleware (Outermost: process time + 보안 헤더)
@@ -239,6 +271,7 @@ async def add_process_time_and_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     client_ip = request.headers.get("X-Forwarded-For") or (getattr(request.client, "host", None) if request.client else None)
@@ -253,6 +286,14 @@ async def add_process_time_and_security_headers(request: Request, call_next):
         client_ip=client_ip or "",
     )
     return response
+
+
+@app.middleware("http")
+async def rag_ab_middleware(request: Request, call_next):
+    """RAG A/B: 마지막 등록 → 요청 시 가장 먼저 실행되어 variant 컨텍스트를 주입."""
+    from app.rag.experiment import rag_ab_middleware as rag_ab_dispatch
+
+    return await rag_ab_dispatch(request, call_next)
 
 
 # Exception handlers
@@ -277,8 +318,11 @@ async def generic_exception_handler(request: Request, exc: Exception):
 
 # ============== Routes ==============
 
-# API v1 routes
-v1_prefix = settings.API_V1_PREFIX
+# API v1 routes (FastAPI는 prefix가 반드시 '/'로 시작해야 함. .env 오타·빈 값 대비)
+_p = (settings.API_V1_PREFIX or "/api/v1").strip()
+if not _p.startswith("/"):
+    _p = "/" + _p.lstrip("/")
+v1_prefix = _p.rstrip("/") or "/api/v1"
 
 app.include_router(certs.router, prefix=v1_prefix)
 app.include_router(recommendations.router, prefix=v1_prefix)
@@ -291,7 +335,6 @@ app.include_router(majors.router, prefix=v1_prefix)
 app.include_router(ai_recommendations.router, prefix=v1_prefix)
 app.include_router(fast_certs.router, prefix=v1_prefix)
 app.include_router(rag_router, prefix=v1_prefix)
-from app.api import contact
 app.include_router(contact.router, prefix=v1_prefix)
 
 

@@ -58,10 +58,12 @@ def _run_enhanced_rag_sync(
     성공 시 (global_results, major_sim_lookup), 실패 시 (None, None) 반환.
     """
     from app.database import SessionLocal
+    from app.rag.config import get_rag_settings
     from app.rag.retrieve.hybrid import hybrid_retrieve
 
     db = SessionLocal()
     try:
+        pre_trace: Dict[str, Any] = {}
         rag_list = hybrid_retrieve(
             db,
             expanded_interest,
@@ -69,7 +71,14 @@ def _run_enhanced_rag_sync(
             use_reranker=False,
             dedup_per_cert_override=True,
             user_profile=user_profile,
+            pre_retrieval_trace_out=pre_trace,
         )
+        if getattr(get_rag_settings(), "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
+            logger.debug(
+                "ai_recommendations pre_retrieval query_type=%s rewrite_skipped=%s",
+                pre_trace.get("query_type"),
+                pre_trace.get("rewrite_skipped"),
+            )
         hybrid_rrf_scores = {}
         for chunk_id, score in (rag_list or []):
             part = (chunk_id or "").split(":")
@@ -588,6 +597,7 @@ async def hybrid_recommendation(
                 SELECT qual_id, MAX(1 - (embedding <=> :vec)) AS major_sim
                 FROM certificates_vectors
                 WHERE embedding IS NOT NULL
+                  AND qual_id = ANY(:ids)
                 GROUP BY qual_id
             """)
             try:

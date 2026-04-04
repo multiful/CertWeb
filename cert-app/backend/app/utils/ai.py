@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 from collections import OrderedDict
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from openai import OpenAI, AsyncOpenAI
 
@@ -106,18 +106,19 @@ def _log_embedding_usage(model: str, latency_ms: float, usage: object | None) ->
 
 def get_embedding(
     text: str,
-    model: str = "text-embedding-3-small",
+    model: Optional[str] = None,
     retries: int = 2,
     use_cache: bool = True,
 ) -> List[float]:
     """Get embedding for text using OpenAI (sync, with retry + cache)."""
     if not settings.OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY is not set.")
+    m = model or getattr(settings, "OPENAI_EMBEDDING_MODEL", None) or "text-embedding-3-small"
     text = text.replace("\n", " ").strip() or " "
     
     # 캐시 조회
     if use_cache:
-        cached = _embedding_cache.get(text, model)
+        cached = _embedding_cache.get(text, m)
         if cached is not None:
             logger.debug("embedding cache hit for text[:50]=%s...", text[:50])
             return cached
@@ -126,16 +127,16 @@ def get_embedding(
     for attempt in range(retries):
         try:
             start = time.perf_counter()
-            response = client.embeddings.create(input=[text], model=model)
+            response = client.embeddings.create(input=[text], model=m)
             if not getattr(response, "data", None):
                 raise ValueError("OpenAI embedding returned no data")
             latency_ms = (time.perf_counter() - start) * 1000
-            _log_embedding_usage(model, latency_ms, getattr(response, "usage", None))
+            _log_embedding_usage(m, latency_ms, getattr(response, "usage", None))
             embedding = response.data[0].embedding
             
             # 캐시 저장
             if use_cache:
-                _embedding_cache.set(text, model, embedding)
+                _embedding_cache.set(text, m, embedding)
             
             return embedding
         except (APIError, APIConnectionError, RateLimitError) as e:
@@ -153,6 +154,102 @@ def get_embedding(
     raise RuntimeError("get_embedding unreachable") from last_err
 
 
+# OpenAI 임베딩 API: 한 요청당 입력 개수 상한을 넘기지 않도록 청크 분할
+_EMBEDDINGS_BATCH_MAX_INPUTS = 100
+
+
+def get_embeddings_batch(
+    texts: List[str],
+    model: Optional[str] = None,
+    retries: int = 2,
+    use_cache: bool = True,
+) -> List[List[float]]:
+    """
+    여러 문장을 가능한 한 적은 OpenAI 호출로 임베딩 (순서 보존).
+    캐시 적중분은 API에서 제외하여 지연·비용을 줄인다.
+    """
+    if not settings.OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY is not set.")
+    m = model or getattr(settings, "OPENAI_EMBEDDING_MODEL", None) or "text-embedding-3-small"
+    n = len(texts)
+    if n == 0:
+        return []
+    normalized = [(t.replace("\n", " ").strip() or " ") for t in texts]
+    out: List[Optional[List[float]]] = [None] * n
+    pending_pairs: List[Tuple[int, str]] = []
+    for i, t in enumerate(normalized):
+        if use_cache:
+            cached = _embedding_cache.get(t, m)
+            if cached is not None:
+                out[i] = cached
+                continue
+        pending_pairs.append((i, t))
+    if not pending_pairs:
+        return [x for x in out if x is not None]  # type: ignore[return-value]
+
+    text_to_indices: Dict[str, List[int]] = {}
+    for i, t in pending_pairs:
+        text_to_indices.setdefault(t, []).append(i)
+    unique_texts = list(text_to_indices.keys())
+
+    def _remaining_unique() -> List[str]:
+        """아직 out이 채워지지 않은 고유 문장만 (재시도 시 캐시/API 부분 성공 대응)."""
+        rem: List[str] = []
+        for t in unique_texts:
+            if any(out[i] is None for i in text_to_indices[t]):
+                rem.append(t)
+        return rem
+
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        to_request = _remaining_unique()
+        if not to_request:
+            break
+        try:
+            start = time.perf_counter()
+            total_tokens = 0
+            for chunk_start in range(0, len(to_request), _EMBEDDINGS_BATCH_MAX_INPUTS):
+                chunk = to_request[chunk_start : chunk_start + _EMBEDDINGS_BATCH_MAX_INPUTS]
+                response = client.embeddings.create(input=chunk, model=m)
+                if not getattr(response, "data", None) or len(response.data) != len(chunk):
+                    raise ValueError("OpenAI embedding batch returned unexpected data length")
+                usage = getattr(response, "usage", None)
+                if usage is not None and hasattr(usage, "total_tokens"):
+                    total_tokens += int(getattr(usage, "total_tokens", 0) or 0)
+                for j, t in enumerate(chunk):
+                    vec = response.data[j].embedding
+                    if use_cache:
+                        _embedding_cache.set(t, m, vec)
+                    for idx in text_to_indices[t]:
+                        out[idx] = vec
+            latency_ms = (time.perf_counter() - start) * 1000
+            _log_embedding_usage(m, latency_ms, type("U", (), {"total_tokens": total_tokens})())
+            break
+        except (APIError, APIConnectionError, RateLimitError) as e:
+            last_err = e
+            logger.warning(
+                "OpenAI embedding batch attempt %s/%s failed: %s",
+                attempt + 1,
+                retries,
+                type(e).__name__,
+            )
+            if attempt == retries - 1:
+                raise
+            time.sleep(2**attempt)
+        except Exception as e:
+            last_err = e
+            logger.exception("OpenAI embedding batch unexpected error")
+            if attempt == retries - 1:
+                raise
+            time.sleep(2**attempt)
+    else:
+        raise RuntimeError("get_embeddings_batch unreachable") from last_err
+
+    if any(x is None for x in out):
+        raise RuntimeError("get_embeddings_batch: missing vectors after batch call")
+    return out  # type: ignore[return-value]
+
+
 def get_embedding_cache_stats() -> dict:
     """임베딩 캐시 통계 반환."""
     return _embedding_cache.stats()
@@ -160,16 +257,17 @@ def get_embedding_cache_stats() -> dict:
 
 async def get_embedding_async(
     text: str,
-    model: str = "text-embedding-3-small",
+    model: Optional[str] = None,
     retries: int = 2,
     use_cache: bool = True,
 ) -> List[float]:
     """Get embedding for text using OpenAI (async, with retry + cache)."""
     if not settings.OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY is not set.")
+    m = model or getattr(settings, "OPENAI_EMBEDDING_MODEL", None) or "text-embedding-3-small"
     text = text.replace("\n", " ").strip() or " "
     if use_cache:
-        cached = _embedding_cache.get(text, model)
+        cached = _embedding_cache.get(text, m)
         if cached is not None:
             logger.debug("embedding cache hit (async) for text[:50]=%s...", text[:50])
             return cached
@@ -177,14 +275,14 @@ async def get_embedding_async(
     for attempt in range(retries):
         try:
             start = time.perf_counter()
-            response = await async_client.embeddings.create(input=[text], model=model)
+            response = await async_client.embeddings.create(input=[text], model=m)
             if not getattr(response, "data", None):
                 raise ValueError("OpenAI embedding returned no data")
             latency_ms = (time.perf_counter() - start) * 1000
-            _log_embedding_usage(model, latency_ms, getattr(response, "usage", None))
+            _log_embedding_usage(m, latency_ms, getattr(response, "usage", None))
             embedding = response.data[0].embedding
             if use_cache:
-                _embedding_cache.set(text, model, embedding)
+                _embedding_cache.set(text, m, embedding)
             return embedding
         except (APIError, APIConnectionError, RateLimitError) as e:
             last_err = e

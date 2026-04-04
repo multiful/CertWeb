@@ -1,7 +1,8 @@
 """RAG 하이퍼파라미터: top_k, alpha, thresholds, rerank 경로, 캐시 TTL 등."""
+from contextvars import ContextVar, Token
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
@@ -24,8 +25,13 @@ class RAGSettings(BaseSettings):
 
     # Retrieval: RRF Top30 → Reranker Top4 (Vector 단일 채널 고도화: 후보 확대)
     RAG_TOP_K: int = 4  # 최종 반환/생성에 사용할 청크 수 (reranker 출력)
-    RAG_TOP_N_CANDIDATES: int = 125  # RRF 후보 수 (3-way BM25+Vector+Contrastive)
-    RAG_RRF_K: int = 60  # RRF 상수. 60=품질 개선 골든 n=34에서 전 지표 상승으로 적용. 논문(SIGIR'09) 표준
+    # `app.rag.eval.runner.run_eval_three_way` 전용: 평가 시 실제로 상위 몇 개까지 반환할지.
+    # 과거 top_k=4 고정이면 Recall@5/10·MRR_qual 이름과 불일치(최대 4슬롯만 관측)하므로 기본 10.
+    RAG_EVAL_TOP_K: int = 10
+    # 기본값: 전체 골든(54) 오프라인 A/B에서 control(레거시)이 Recall/MRR/Hit 기준 우세.
+    # 튜닝 후보는 RAG_CHALLENGER_PRESET + .env / scripts/eval_retrieval_ab_compare.py 로 검증 후 반영.
+    RAG_TOP_N_CANDIDATES: int = 136
+    RAG_RRF_K: int = 60
     RAG_RRF_EXPONENT: float = 1.0  # RRF 지수 p. 1=표준 1/(k+rank), >1이면 상위 순위 강조 1/(k+rank)^p. 2~3 실험 권장.
     # "linear" | "combsum" | "combmnz". (rrf 설정 시 코드에서 linear로 취급)
     # linear = min-max 정규화 가중합. 기본값 linear 확정.
@@ -34,12 +40,27 @@ class RAGSettings(BaseSettings):
     # Query-type adaptive weighted linear 랜덤서치 결과, exponent=1.0 이 CombMNZ 및 과거 선형 기준 대비
     # Recall@5/10/20, Success@4, MRR@4 전 지표에서 우수해 기본값 1.0으로 고정.
     RAG_LINEAR_NORM_EXPONENT: float = 1.0
+    # linear fusion 직후: BM25 목록 내 순위가 높을수록 소량 가산(MRR·Recall 안정화).
+    RAG_LINEAR_BM25_RANK_PRIOR: float = 0.009
+    RAG_POST_METADATA_BM25_RANK_PRIOR: float = 0.0055
+    # 3-way linear fusion 가중치 오버라이드(세 값 모두 설정 시에만 적용, 합으로 정규화).
+    # 비우면 hybrid.py의 LINEAR_QT_WEIGHTS_EXACT / LINEAR_QT_WEIGHTS_LONG 상수 사용.
+    RAG_LINEAR_QT_EXACT_W_BM25: Optional[float] = None
+    RAG_LINEAR_QT_EXACT_W_DENSE: Optional[float] = None
+    RAG_LINEAR_QT_EXACT_W_CONTRASTIVE: Optional[float] = None
+    RAG_LINEAR_QT_LONG_W_BM25: Optional[float] = None
+    RAG_LINEAR_QT_LONG_W_DENSE: Optional[float] = None
+    RAG_LINEAR_QT_LONG_W_CONTRASTIVE: Optional[float] = None
     RAG_VECTOR_TOP_N_OVERRIDE: Optional[int] = None  # 설정 시 벡터만 이 수만큼 뽑음. 100 실험 시 지표 동일·비용만 증가해 미적용
     RAG_ALPHA: float = 0.5  # hybrid: alpha*bm25_norm + (1-alpha)*vector_norm
-    RAG_VECTOR_THRESHOLD: float = 0.01  # 유사도 임계값(실험: 0.02→0.01로 완화해 vector recall 확대). 악화 시 0.02 복귀
-    # 후보 수(N). B70_V110_C70 스윕에서 3-way R@5/MRR/H@5 개선으로 적용. Vector=110은 RAG_TOP_N_CANDIDATES.
-    RAG_BM25_TOP_N: Optional[int] = 70
-    RAG_CONTRASTIVE_TOP_N: Optional[int] = 70
+    RAG_VECTOR_THRESHOLD: float = 0.008
+    RAG_BM25_TOP_N: Optional[int] = 76
+    RAG_CONTRASTIVE_TOP_N: Optional[int] = 76
+    # Hierarchical retrieval: child(문단/섹션) BM25 검색 후 parent(qual_id)로 환원해 BM25 채널과 병합.
+    # certificates_vectors.content가 채워진 행이 있을 때 recall 개선. 첫 빌드 시 메모리 BM25 구축 비용 있음.
+    RAG_HIERARCHICAL_RETRIEVAL_ENABLE: bool = True
+    RAG_HIERARCHICAL_CHILD_TOP_N: int = 90
+    RAG_HIERARCHICAL_BLEND_WEIGHT: float = 0.38
 
     # CombMNZ 전용 설정: 정규화/zero 판정 방식
     # - norm_mode: "minmax" (채널별 min-max 정규화; 기존 동작) 또는 "rank" (순위 기반 1/(k+rank)^p 점수화)
@@ -62,7 +83,20 @@ class RAGSettings(BaseSettings):
     RAG_CURRENT_W_S: Optional[float] = None  # Current RRF Sparse 가중치
     RAG_ENHANCED_ALPHA: Optional[float] = 0.35  # Enhanced BM25 가중치 (Vector=1-alpha). 조밀 랜덤 서치 적용. None이면 내부 fallback
 
-    @field_validator("RAG_CURRENT_W_D", "RAG_CURRENT_W_S", "RAG_ENHANCED_ALPHA", "RAG_BM25_K1", "RAG_BM25_B", mode="before")
+    @field_validator(
+        "RAG_CURRENT_W_D",
+        "RAG_CURRENT_W_S",
+        "RAG_ENHANCED_ALPHA",
+        "RAG_BM25_K1",
+        "RAG_BM25_B",
+        "RAG_LINEAR_QT_EXACT_W_BM25",
+        "RAG_LINEAR_QT_EXACT_W_DENSE",
+        "RAG_LINEAR_QT_EXACT_W_CONTRASTIVE",
+        "RAG_LINEAR_QT_LONG_W_BM25",
+        "RAG_LINEAR_QT_LONG_W_DENSE",
+        "RAG_LINEAR_QT_LONG_W_CONTRASTIVE",
+        mode="before",
+    )
     @classmethod
     def optional_float(cls, v):
         return _optional_float(v)
@@ -84,6 +118,8 @@ class RAGSettings(BaseSettings):
     RAG_RERANKER_SPACE_REPO_ID: str = "multifuly/certweb-reranker"  # 서빙 Space (참고용)
     RAG_RERANKER_API_URL: str = ""  # 비우지 않으면 이 URL로 POST (query, passages) → scores. 기본값 없음(설정 필수)
     RAG_RERANKER_TIMEOUT: float = 90.0  # HF Space cold-start·네트워크 지연. .env RAG_RERANKER_TIMEOUT=120 등으로 상향 가능
+    # HF Space 일시 500/502/429 시 재시도 횟수(추가 시도; 총 호출은 retries+1). 0이면 기존처럼 1회만.
+    RAG_RERANKER_HTTP_RETRIES: int = 2
     RAG_RERANK_POOL_SIZE: int = 20  # RRF 상위 N개만 Cross-Encoder 입력. 20=지연/품질 균형. 10=지연 약 절반, 30=품질 우선 (env로 오버라이드)
     # Rerank gating: "확신 높은 질의"는 리랭커 생략해 지연 절감. 기본 ON.
     # - enable=true: top1 >= top1_min_score 이고 (top1-top2) >= min_gap 이면 reranker 생략
@@ -93,15 +129,20 @@ class RAGSettings(BaseSettings):
     RAG_RERANK_GATING_MIN_GAP: float = 0.002
     # 질의 타입·길이 기반 리랭커 게이팅: 쉬운/정형 쿼리는 리랭커 생략해 지연 절감
     # - RAG_RERANK_ALLOWED_QUERY_TYPES: 리랭커를 사용할 query_type 목록 (comma-separated)
-    #   기본: natural, comparison, roadmap, mixed (자연어·비교·로드맵 위주)
+    #   classify_query_type·rewrite 실패 시 fallback은 keyword|natural|mixed 만 반환.
+    #   comparison·roadmap 등은 DB 벡터 query_type 라벨이 있을 때만 나오므로, 옛 목록을 두면
+    #   fallback 경로에서 query_type이 허용 목록에 없어 리랭커가 스킵될 수 있음.
     # - RAG_RERANK_ALLOW_SHORT_KEYWORD: True면 짧은 키워드 쿼리(≤3단어)에도 리랭커 허용
-    RAG_RERANK_ALLOWED_QUERY_TYPES: str = "natural,comparison,roadmap,mixed"
+    RAG_RERANK_ALLOWED_QUERY_TYPES: str = "keyword,natural,mixed"
     RAG_RERANK_ALLOW_SHORT_KEYWORD: bool = False
     # §2-9 추천 적합도: 재질의(리랭커 입력). 처음 질의 → 전공·목적·직무·취업용 등 보강 후 리랭커에 전달.
     RAG_RERANK_INPUT_ADD_CONTEXT: bool = True   # True=재질의 ON. 쿼리에 "전공: X 목적: Y 직무: Z 질의: ..." 추가 후 리랭커 호출.
     RAG_RERANK_INPUT_ADD_QUAL_NAME: bool = False  # True면 passage 앞에 "자격증: {qual_name}. " 추가. 학습이 "[자격증명:...]만"이었다면 False.
     RAG_RERANK_INPUT_ADD_QUERY_TYPE: bool = True  # True면 리랭커 쿼리 앞에 "쿼리유형: {query_type}" 추가. 리랭커가 자연어/키워드형 힌트 활용.
     RAG_INDEX_DIR: str = "data/rag_index"  # BM25 인덱스 등 디스크 저장 경로
+
+    # BM25 검색과 벡터(HyDE 포함) 검색을 스레드로 병렬 실행 → p95 지연 완화 (PRF 사용 시 순차 유지)
+    RAG_HYBRID_BM25_VECTOR_PARALLEL_ENABLE: bool = True
 
     # Hybrid Query Routing + Vector Gating (짧은 키워드 쿼리에서 Vector 오탐 억제)
     RAG_HYBRID_SHORT_W_BM25: float = 1.0   # 짧은 쿼리: BM25 가중치
@@ -128,24 +169,44 @@ class RAGSettings(BaseSettings):
     # 후보 다양화·정렬 (다른 축 고도화)
     RAG_DEDUP_PER_CERT: bool = False  # True=자격증당 1개만 유지. 전체 골든 3모델 평가에서 Recall/MRR 악화로 False 유지
     RAG_QUERY_TYPE_WEIGHTS_ENABLE: bool = True  # True면 query_type별 BM25/Vector 가중치 (2-way·3-way 공통). 3-way 시 _three_way_weights_by_query_type 사용
-    RAG_DOMAIN_AWARE_WEIGHTS_ENABLE: bool = True  # True면 비IT 쿼리 BM25 비중 상향. QUERY_TYPE과 함께 평가
+    RAG_DOMAIN_AWARE_WEIGHTS_ENABLE: bool = True  # True면 IT·디지털 집중 신호가 약할 때 BM25 비중 상향(다도메인 자격증 공통). QUERY_TYPE과 함께 평가
     RAG_QUERY_TYPE_CONTRASTIVE_WEIGHTS_ENABLE: bool = True  # True면 3-way RRF 시 query_type별 Contrastive multiplier 적용. 스윕에서 지표 동일·지연 감소로 ON
 
-    # Dense query rewrite (vector 채널만 적용, BM25/sparse 미적용)
+    # Dense query rewrite (기본: vector 채널 중심)
     RAG_DENSE_USE_QUERY_REWRITE: bool = True
     RAG_DENSE_QUERY_REWRITE_FALLBACK: bool = True  # rewrite 실패 시 원본 query 사용
+    # 채널 입력 contextual prompt (rank fusion 전):
+    # - True면 vector/contrastive 입력을 "전공/목적/직무 + 질의" 형태로 보강
+    # - BM25 적용은 별도 스위치(RAG_CHANNEL_CONTEXTUAL_PROMPT_APPLY_BM25)로 분리
+    RAG_CHANNEL_CONTEXTUAL_PROMPT_ENABLE: bool = False
+    RAG_CHANNEL_CONTEXTUAL_PROMPT_APPLY_BM25: bool = False
+
+    # Dense 벡터: get_vector_search(..., use_rewrite=True)에서 원문+재작성 이중 RRF 적용 시점.
+    # 하이브리드 메인(hybrid_retrieve)은 보통 use_rewrite=False + RAG_DENSE_MULTI_QUERY_ENABLE으로 원/재를 별도 병합.
+    # - divergence(기본): 재작성≠원문이면 RRF(임베딩 배치 1회). 다도메인 자격증에 맞춤.
+    # - legacy_non_it_only: IT·디지털 집중 신호 없을 때만 이중 검색(과거 “비IT” 게이트).
+    # - off: 재작성 단일 검색만.
+    RAG_DUAL_VECTOR_RRF_WHEN: str = "divergence"
     RAG_DENSE_SHORT_QUERY_BOOST: bool = True       # True=짧은 쿼리(5단어 이하) 시 보조 키워드 라인 추가(다른 방식 확장)
     RAG_DENSE_MEDIUM_QUERY_BOOST: bool = False     # True=6~9단어일 때 보조 키워드 한 줄 추가(평가 시 vector_only 하락으로 OFF 유지)
     RAG_DENSE_MULTI_QUERY_ENABLE: bool = True    # True=원본 쿼리+rewrite 각각 벡터 검색 후 linear fusion으로 병합
     RAG_DENSE_KEYWORD_EXPANSION_VECTOR_ENABLE: bool = True  # True=동의어/전공·직무 확장 쿼리로 3번째 벡터 검색 후 RRF 병합 (Recall@5 상승)
     RAG_REWRITE_ADD_QUERY_TYPE: bool = False  # True면 재질의 문자열 끝에 "쿼리유형: {query_type}" 추가 (벡터/contrastive 입력에도 포함). 기본 OFF.
+    # Contextual child retrieval (실험): LLM이 생성한 chunk-specific context + chunk 임베딩 인덱스를
+    # 별도 테이블(certificates_vectors_contextual)로 검색 후 parent 점수로 환원해 dense 채널에 결합.
+    RAG_CONTEXTUAL_CHILD_ENABLE: bool = False
+    RAG_CONTEXTUAL_CHILD_TOP_N: int = 90
+    RAG_CONTEXTUAL_CHILD_BLEND_WEIGHT: float = 0.30
+    RAG_CONTEXTUAL_CHILD_THRESHOLD: float = 0.0
     # Dense slot vector fallback: 도메인/난이도/희망직무/목적이 비거나 애매할 때 dense_slot_labels 유사도로 보정
     RAG_DENSE_SLOT_VECTOR_FALLBACK_ENABLE: bool = False  # True면 slot_vector_labels.lookup_slot_label_with_vector 사용
     RAG_DENSE_SLOT_VECTOR_MIN_SIM: float = 0.5   # 최소 유사도. 미만이면 보정하지 않음 (0.45~0.6 권장)
+    # True면 구조화 재질의에서 값이 없음/미추론인 선택 필드 라인을 출력하지 않음(토큰·노이즈 감소). 대비 학습 데이터 생성 시 1 권장.
+    RAG_DENSE_STRUCTURE_OMIT_EMPTY_LINES: bool = False
     # ----- BM25 (학습 없음: 인덱스 빌드 + 쿼리 확장 규칙 + k1/b 튜닝) -----
     # 개선 포인트:
     #  - 확장 규칙: app/rag/utils/query_processor.py 의 RECOMMENDATION_QUERY_MAP(직무/전공/목적→키워드), SYNONYM_DICT(동의어/약어) 보강
-    #  - 도메인 매핑: data/domain_tokens.json(IT·비IT 토큰, 비IT BM25 확장), data/domain_tokens_new.json(넓은 도메인). app/rag/utils/domain_tokens 에서 로드
+    #  - 도메인 매핑: data/domain_tokens.json(IT·비디지털 집중 토큰 등), domain_tokens_new_cert_full.json(넓은 직종 도메인·우선 사용). app/rag/utils/domain_tokens 에서 로드
     #  - 파라미터: RAG_BM25_K1, RAG_BM25_B 그리드서치. 인덱스/확장 변경 후 python -m app.rag index 재실행 필요
     # BM25 PRF (Pseudo-Relevance Feedback): 1차 검색 상위 문서에서 확장어 추출 후 2차 검색, RRF 병합.
     RAG_BM25_PRF_ENABLE: bool = False  # True면 BM25 2회(원본+확장) 후 RRF. 평가 시 3-way 악화로 미적용.
@@ -167,12 +228,22 @@ class RAGSettings(BaseSettings):
     # Metadata soft scoring (RRF 후보에 직무/전공 일치 가산, 분야 이탈 감점). 운영 기본 ON (full_challenger 경로).
     RAG_METADATA_SOFT_SCORE_ENABLE: bool = True
     RAG_METADATA_SOFT_JOB_BONUS: float = 0.25  # 직무 일치 가산 (옵션 비교 후 소폭 상향, 지표 동일·지연 개선)
-    RAG_METADATA_SOFT_MAJOR_BONUS: float = 0.16  # 전공 일치 가산
+    RAG_METADATA_SOFT_MAJOR_BONUS: float = 0.1493  # 전공 일치 가산(골든셋 균형점, random-search best)
     RAG_METADATA_SOFT_TARGET_BONUS: float = 0.16  # 목적 일치 가산
+    RAG_METADATA_SOFT_DOMAIN_BONUS: float = 0.1514  # 도메인/정규화도메인 일치 가산(골든셋 균형점, random-search best)
+    RAG_METADATA_SOFT_DOMAIN_KEYWORD_BONUS: float = 0.0522  # 도메인 키워드 일치 가산(골든셋 균형점, random-search best)
     RAG_METADATA_SOFT_FIELD_PENALTY: float = -0.20
-    # IT↔비IT 도메인 불일치 감점 (쿼리 IT인데 자격증 비IT, 또는 그 반대 → 감점으로 상대 순위 하락)
+    # True면 직무/관심 overlap·field_penalty용 qual 쪽 토큰에 qualification.main_field(단일 컬럼) 미포함.
+    # NCS·main_fields 리스트·도메인 키워드는 그대로(인덱스 본문의 분야 문장과 별개).
+    RAG_METADATA_SOFT_MAIN_FIELD_IN_JOB_MATCH: bool = True
+    # 쿼리 도메인(IT·디지털 집중 vs 그 외 직종) ↔ 자격증 메타 도메인 불일치 시 감점
     RAG_METADATA_DOMAIN_MISMATCH_ENABLE: bool = True  # True면 도메인 불일치 시 감점 적용.
-    RAG_METADATA_DOMAIN_MISMATCH_PENALTY: float = -0.35  # 불일치 시 적용 감점
+    RAG_METADATA_DOMAIN_MISMATCH_PENALTY: float = -0.3164  # 불일치 시 적용 감점(골든셋 균형점, random-search best)
+    # 쿼리 도메인 슬롯이 분명한데 후보 자격증 도메인이 매칭 실패일 때 추가 감점(하드 드롭은 하지 않음).
+    # 골든 20질의 A/B에서 -0.08은 Recall@5_qual/MRR_qual이 함께 악화되어, 기본은 기존과 동일 -0.15 유지.
+    RAG_QUERY_OUT_OF_SCOPE_SOFT_PENALTY: float = -0.15
+    # 프로필의 취득 자격증을 후보에서 완전 제외(hard filter). 골든/운영 정책에 맞게 끌 수 있음.
+    RAG_ACQUIRED_CANDIDATE_HARD_EXCLUDE_ENABLE: bool = True
 
     # BM25 전용 개인화 (평가/챌린저용, production default OFF)
     RAG_BM25_PERSONALIZATION_ENABLED: bool = False
@@ -199,12 +270,12 @@ class RAGSettings(BaseSettings):
     RAG_CONTRASTIVE_INDEX_DIR: str = "data/contrastive_index"  # cert_index.faiss, cert_metadata.json 위치 (정식 경로)
     # Contrastive arm 게이팅: 자연어·복합 목적 질의에만 Contrastive arm 사용해 비용·지연 절감
     # - RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES: contrastive arm을 사용할 query_type 목록 (comma-separated)
-    #   기본: natural, comparison, roadmap, mixed, purpose_only
-    RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES: str = "natural,comparison,roadmap,mixed,purpose_only"
-    # 랜덤 서치로 선정 (run_rrf_random_search.py, 전체 골든). 이전 1.0/1.0/1.2 → 적용
-    RAG_RRF_W_BM25: float = 0.6  # 3-way RRF 시 BM25 가중치 (조밀 랜덤 서치 20 trials 적용)
-    RAG_RRF_W_DENSE1536: float = 0.55  # 3-way RRF 시 dense(1536) 가중치
-    RAG_RRF_W_CONTRASTIVE768: float = 0.85  # 3-way RRF 시 contrastive(768) 가중치
+    #   fallback query_type 은 keyword|natural|mixed 만. 짧은 키워드는 hybrid에서 별도로 contrastive 비활성.
+    RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES: str = "keyword,natural,mixed"
+    RAG_RRF_W_BM25: float = 0.6
+    RAG_RRF_W_DENSE1536: float = 0.55
+    # 오프라인 골든 A/B(19_clean, retrieval-only)에서 0.92 대비 복합(2*R@5_qual+MRR_qual) 개선 → 1.05. 전체 골든 재검증 권장.
+    RAG_RRF_W_CONTRASTIVE768: float = 1.05
 
     # 결과 다양화: MMR(Maximal Marginal Relevance) 기반 diversity ranking.
     # - 기본값: 비활성 (retrieval 지표 baseline 유지)
@@ -212,6 +283,27 @@ class RAGSettings(BaseSettings):
     # - RAG_MMR_LAMBDA: 0~1, relevance(λ) vs diversity(1-λ) 트레이드오프 (0.7 권장).
     RAG_MMR_ENABLE: bool = False
     RAG_MMR_LAMBDA: float = 0.7
+
+    # hybrid 입력 질의 상한(바이트 폭주·DoS 완화). 0이면 잘라내지 않음.
+    RAG_QUERY_MAX_CHARS: int = 12000
+
+    # Pre-retrieval: 관측 trace / latency budget / 식별자 보수 경로 (opt_Pre-retrieval.md §2·§3 정합)
+    RAG_PRE_RETRIEVAL_TRACE_ENABLE: bool = False  # True면 hybrid_retrieve가 JSON 한 줄 pre_retrieval_trace 로그
+    # None이면 예산 게이트 비활성. 기본 15s로 확장 경로(HyDE 등)가 무한 대기하지 않게 함(운영에서 .env로 조정)
+    RAG_PRE_RETRIEVAL_BUDGET_MS: Optional[int] = 15000
+    # True이고 질의가 식별자·코드 위주로 판단되면 확장 경로 스킵 (dense_query_rewrite.query_suggests_identifier_heavy)
+    # §2 식별자 보존: 식별자·코드 위주 질의에서는 확장(HyDE·MQ 등) 비용·드리프트를 줄이기 위해 기본 스킵
+    RAG_SKIP_EXPANSION_ON_IDENTIFIER_HEAVY: bool = True
+    # §2 규칙 4: 식별자·코드 위주 질의에서는 구조화 dense rewrite 생략(원문을 dense/BM25 타입 분류 입력으로 사용)
+    RAG_SKIP_DENSE_REWRITE_ON_IDENTIFIER_HEAVY: bool = True
+    # §2 규칙 7: RAG_PRE_RETRIEVAL_BUDGET_MS가 설정된 경우, 총 예산이 이 값(ms) 미만이면 dense rewrite를 생략(확장보다 먼저 비용 큰 단계 절감).
+    # None이면 예산만으로는 rewrite를 끄지 않음. 예: 120 → 예산 100ms면 rewrite 스킵.
+    RAG_PRE_RETRIEVAL_REWRITE_MIN_BUDGET_MS: Optional[int] = 120
+
+    # hybrid_retrieve 결과 캐시(Redis): 리랭커·필터·프로필 없을 때만. opt_Pre-retrieval §16 경량 대응
+    # Railway 등 Redis 연결 시 반복 질의 지연 감소(리랭커 미사용 경로).
+    RAG_RETRIEVAL_RESULT_CACHE_ENABLE: bool = True
+    RAG_RETRIEVAL_RESULT_CACHE_TTL_SECONDS: int = 300
 
     # Cache
     RAG_CACHE_TTL: int = 600  # Redis 캐시 TTL(초)
@@ -226,9 +318,38 @@ class RAGSettings(BaseSettings):
         extra = "ignore"
 
 
+_rag_field_overrides: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "rag_field_overrides", default=None
+)
+
+
 @lru_cache()
-def get_rag_settings() -> RAGSettings:
+def _rag_settings_from_env() -> RAGSettings:
+    """환경·클래스 기본값만 로드. 랜덤 서치 등에서 clear_rag_settings_cache()로 갱신."""
     return RAGSettings()
+
+
+def get_rag_settings() -> RAGSettings:
+    """요청 단위 A/B 시 app.rag.experiment 미들웨어가 필드 오버라이드를 넣을 수 있음."""
+    base = _rag_settings_from_env()
+    ovr = _rag_field_overrides.get()
+    if ovr:
+        return base.model_copy(update=ovr)
+    return base
+
+
+def set_rag_field_overrides(overrides: Optional[Dict[str, Any]]) -> Token:
+    """미들웨어에서만 사용. reset_rag_field_overrides(token)으로 복구."""
+    return _rag_field_overrides.set(overrides)
+
+
+def reset_rag_field_overrides(token: Token) -> None:
+    _rag_field_overrides.reset(token)
+
+
+def clear_rag_settings_cache() -> None:
+    """환경변수 재로드·스크립트 trial 간 기본 설정 초기화."""
+    _rag_settings_from_env.cache_clear()
 
 
 def get_rag_index_dir() -> Path:

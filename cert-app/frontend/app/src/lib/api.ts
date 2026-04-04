@@ -1,4 +1,4 @@
-/** API client for backend communication with Mock fallback */
+/** API client for backend communication. Mock 폴백은 개발 환경에서만 사용(프로덕션은 오류 전파). */
 
 import type {
   QualificationListResponse,
@@ -21,7 +21,7 @@ import { mockApi } from './mockApi';
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ||
   (import.meta as any).env?.VITE_API_BASE_URL ||
   (import.meta as any).env?.NEXT_PUBLIC_API_URL ||
-  'https://certweb-xzpx.onrender.com/api/v1';
+  'https://certfinder-production.up.railway.app/api/v1';
 
 /** 요청 타임아웃 (ms). 실무에서는 15~30초 권장 */
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
@@ -99,6 +99,37 @@ async function apiRequest<T>(
   }
 }
 
+/** 목록 API 실패 시 UI용 보수적 기본값(캐시 미스 시에만 사용) */
+export const FALLBACK_CERT_CATALOG_TOTAL = 1101;
+
+let certCatalogTotalCache: { total: number; ts: number } | null = null;
+const CERT_CATALOG_TOTAL_TTL_MS = 30 * 60 * 1000;
+
+/** `/certs?page=1&page_size=1`의 total만 조회. 네트워크 실패 시 null */
+export async function fetchCertificationsCatalogTotal(): Promise<number | null> {
+  try {
+    const res = await apiRequest<QualificationListResponse>('/certs?page=1&page_size=1');
+    const t = res.total;
+    if (typeof t === 'number' && t > 0) return t;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/** 자격증 카탈로그 총 건수(30분 캐시). API 실패 시 FALLBACK_CERT_CATALOG_TOTAL */
+export async function getCertificationsCatalogTotal(): Promise<number> {
+  if (certCatalogTotalCache && Date.now() - certCatalogTotalCache.ts < CERT_CATALOG_TOTAL_TTL_MS) {
+    return certCatalogTotalCache.total;
+  }
+  const fresh = await fetchCertificationsCatalogTotal();
+  if (fresh != null) {
+    certCatalogTotalCache = { total: fresh, ts: Date.now() };
+    return fresh;
+  }
+  return FALLBACK_CERT_CATALOG_TOTAL;
+}
+
 // ============== Certification APIs ==============
 
 export async function getCertifications(
@@ -119,13 +150,9 @@ export async function getCertifications(
     if (params.page_size) query.append('page_size', params.page_size.toString());
 
     return await apiRequest<QualificationListResponse>(`/certs?${query.toString()}`);
-  } catch {
-    // When using mock, we need to adapt CertFilterParams if property names differ,
-    // but here we just pass it as is because we fixed the call site
-    // However, mockApi.getCertifications might expect camelCase if defined so.
-    // Let's check mockApi definition in Step 538.
-    // It expects { q?: string; main_field?: string; ... } which is snake_case.
-    // So this is fine.
+  } catch (error) {
+    if (import.meta.env.PROD) throw error;
+    console.warn('[api] getCertifications mock fallback (dev only)', error);
     return mockApi.getCertifications(params);
   }
 }
@@ -138,7 +165,9 @@ export async function getCertificationDetail(
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
     return await apiRequest<QualificationDetail>(`/certs/${qualId}`, { headers });
-  } catch {
+  } catch (error) {
+    if (import.meta.env.PROD) throw error;
+    console.warn('[api] getCertificationDetail mock fallback (dev only)', error);
     return mockApi.getCertificationDetail(qualId);
   }
 }
@@ -150,7 +179,9 @@ export async function getCertificationStats(
   try {
     const query = year ? `?year=${year}` : '';
     return await apiRequest<QualificationStatsListResponse>(`/certs/${qualId}/stats${query}`);
-  } catch {
+  } catch (error) {
+    if (import.meta.env.PROD) throw error;
+    console.warn('[api] getCertificationStats mock fallback (dev only)', error);
     return mockApi.getCertificationStats(qualId);
   }
 }
@@ -158,7 +189,9 @@ export async function getCertificationStats(
 export async function getFilterOptions(): Promise<FilterOptions> {
   try {
     return await apiRequest<FilterOptions>('/certs/filter-options');
-  } catch {
+  } catch (error) {
+    if (import.meta.env.PROD) throw error;
+    console.warn('[api] getFilterOptions mock fallback (dev only)', error);
     return mockApi.getFilterOptions();
   }
 }
@@ -171,7 +204,9 @@ export async function getRecommendations(
 ): Promise<RecommendationListResponse> {
   try {
     return await apiRequest<RecommendationListResponse>(`/recommendations?major=${encodeURIComponent(major)}&limit=${limit}`);
-  } catch {
+  } catch (error) {
+    if (import.meta.env.PROD) throw error;
+    console.warn('[api] getRecommendations mock fallback (dev only)', error);
     return mockApi.getRecommendations(major);
   }
 }
@@ -224,7 +259,12 @@ export async function semanticSearch(
 export async function getAvailableMajors(): Promise<{ majors: string[] }> {
   try {
     return await apiRequest<{ majors: string[] }>('/recommendations/majors');
-  } catch {
+  } catch (error) {
+    if (import.meta.env.PROD) {
+      console.warn('[api] getAvailableMajors failed', error);
+      return { majors: [] };
+    }
+    console.warn('[api] getAvailableMajors mock fallback (dev only)', error);
     const majors = await mockApi.getAvailableMajors();
     return { majors };
   }
@@ -309,7 +349,9 @@ export async function getJobDetail(jobId: number): Promise<Job | null> {
 export async function getHealth(): Promise<HealthCheck> {
   try {
     return await apiRequest<HealthCheck>('/health');
-  } catch {
+  } catch (error) {
+    if (import.meta.env.PROD) throw error;
+    console.warn('[api] getHealth mock fallback (dev only)', error);
     return mockApi.getHealth();
   }
 }

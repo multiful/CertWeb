@@ -75,10 +75,15 @@ def build_user_profile_from_row(
                 profile["favorite_field_tokens"] = list(dict.fromkeys(tokens))[:20]
 
     acquired_qual_ids: List[int] = list(row.get("acquired_qual_ids") or [])
-    if not acquired_qual_ids and row.get("acquired_cert_names"):
-        acq_names = row.get("acquired_cert_names")
-        if isinstance(acq_names, list):
-            for name in acq_names:
+    acq_names_raw = row.get("acquired_cert_names")
+    if isinstance(acq_names_raw, list) and acq_names_raw:
+        # 재질의·난이도 추론에서 이름 리스트를 직접 쓸 수 있게 유지 (qual_id만 있으면 비어 보이던 문제 방지)
+        profile["acquired_cert_names"] = [str(c).strip() for c in acq_names_raw if c and str(c).strip()][
+            :20
+        ]
+    if not acquired_qual_ids and acq_names_raw:
+        if isinstance(acq_names_raw, list):
+            for name in acq_names_raw:
                 acquired_qual_ids.extend(_cert_name_to_qual_ids(str(name).strip(), qual_id_to_name))
             acquired_qual_ids = list(dict.fromkeys(acquired_qual_ids))
     if acquired_qual_ids:

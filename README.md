@@ -6,7 +6,7 @@
 [![Backend: FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![DB: Supabase](https://img.shields.io/badge/DB-Supabase-3ECF8E?style=flat-square&logo=supabase)](https://supabase.com/)
 [![Cache: Redis](https://img.shields.io/badge/Cache-Redis-DC382D?style=flat-square&logo=redis)](https://redis.io/)
-[![API: Render](https://img.shields.io/badge/API-Render-46E3B7?style=flat-square&logo=render)](https://certweb-xzpx.onrender.com/health)
+[![API: Railway](https://img.shields.io/badge/API-Railway-0B0D0E?style=flat-square&logo=railway)](https://certfinder-production.up.railway.app/health)
 
 ---
 
@@ -16,9 +16,9 @@
 
 | 환경 | URL |
 |------|-----|
-| **프론트엔드** | https://cert-web-multifuls-projects.vercel.app |
-| **백엔드 API** | https://certweb-xzpx.onrender.com |
-| **헬스 체크** | https://certweb-xzpx.onrender.com/health |
+| **프론트엔드** | https://cert-web-sand.vercel.app |
+| **백엔드 API** | https://certfinder-production.up.railway.app *(도메인은 변경될 수 있음)* |
+| **헬스 체크** | https://certfinder-production.up.railway.app/health |
 
 ---
 
@@ -51,7 +51,7 @@
 - **인증**: Supabase Auth (이메일 OTP, Google OAuth)
 - **마이페이지**: 닉네임·전공·학년, 북마크·취득 자격증, XP·레벨·티어. 탭 전환 후 복귀 시 90초 캐시로 즉시 표시 후 백그라운드 갱신
 - **취득 자격증**: DB 자격증 검색 후 등록·삭제, XP 누적
-- **문의하기**: Naver SMTP 이메일 발송 (Render 백그라운드)
+- **문의하기**: Naver SMTP 이메일 발송 (백엔드 비동기 처리)
 
 ### 5. 인프라·성능
 
@@ -71,7 +71,7 @@
 | **캐시** | Redis Cloud |
 | **Auth** | Supabase Auth (JWT, Google OAuth) |
 | **AI** | OpenAI text-embedding-3-small (검색·추천), 선택적 GPT 계열 모델(법령 요약·벡터 인덱싱 파이프라인) |
-| **배포** | Vercel (Frontend), Render (Backend) |
+| **배포** | Vercel (Frontend), Railway (Backend, 임시 도메인 가능) |
 | **이메일** | Naver SMTP (문의 폼) |
 
 ---
@@ -108,12 +108,12 @@ CertWeb/
 
 ## 운영/유지보수 메모 (내부용)
 
-이 서비스는 **Vercel(프론트) + Render(백엔드) + Supabase(Postgres) + Redis Cloud** 환경에 배포된 상태로 운영되며,  
+이 서비스는 **Vercel(프론트) + Railway(백엔드) + Supabase(Postgres) + Redis Cloud** 환경에 배포된 상태로 운영되며,  
 일반 사용자가 로컬에서 직접 서버를 띄우는 것을 전제로 하지 않습니다. 아래 내용은 **운영자용 메모**입니다.
 
 - **환경 변수 분리**
   - 프론트(Vercel): `VITE_API_BASE_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` 등 브라우저에서 필요한 값만 저장.
-  - 백엔드(Render): `DATABASE_URL`, `REDIS_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `OPENAI_API_KEY` 등 비밀 키는 모두 Render 환경변수에만 저장.
+  - 백엔드(Railway 등): `DATABASE_URL`, `REDIS_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `OPENAI_API_KEY` 등 비밀 키는 모두 호스트 환경변수에만 저장.
   - DB 접속 정보나 Service Role Key, JWT Secret은 Vercel에 두지 않고 노출 시 즉시 키를 회전(재발급)한다.
 
 - **RAG 임베딩 관리**
@@ -122,7 +122,7 @@ CertWeb/
   - 이 작업에는 `OPENAI_API_KEY`와 DB 권한이 필요하므로, 일반 사용자는 수행할 수 없다.
 
 - **모니터링**
-  - Render `/health` 엔드포인트와 UptimeRobot으로 슬립/다운 여부를 모니터링한다.
+  - 백엔드 `/health` 엔드포인트와 UptimeRobot 등으로 다운 여부를 모니터링한다.
   - `ai_recommendations` 모듈에서 남기는 metrics 로그(응답 시간, 후보 수, 점수 분포)를 통해 AI 추천 품질·속도를 정기적으로 점검한다.
 
 로컬 개발/실행 방법은 문서에서 제거하고, 배포된 웹 서비스를 기준으로만 안내한다.
@@ -133,12 +133,12 @@ CertWeb/
 
 | 구분 | 서비스 | 비고 |
 |------|--------|------|
-| **Frontend** | Vercel | GitHub 연동 시 자동 배포, `VITE_API_BASE_URL` 설정 |
-| **Backend** | Render | Root: `cert-app/backend`, Start: `uvicorn main:app --host 0.0.0.0 --port $PORT` |
+| **Frontend** | Vercel | GitHub 연동 시 자동 배포, `VITE_API_BASE_URL` (Railway API URL + `/api/v1`) |
+| **Backend** | Railway | Root: `cert-app/backend`, Start: `uvicorn main:app --host 0.0.0.0 --port $PORT` |
 | **DB** | Supabase | PostgreSQL + pgvector |
 | **Cache** | Redis Cloud | `REDIS_URL` |
 
-Render Free 플랜은 비활성 시 슬립 가능. `/health`로 UptimeRobot 등 모니터링 권장.
+Railway/호스트별로 슬립 정책이 다를 수 있음. `/health`로 UptimeRobot 등 모니터링 권장.
 
 ---
 

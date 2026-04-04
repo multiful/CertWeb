@@ -2,12 +2,12 @@
 dense_slot_labels 테이블 기반 슬롯 벡터 라벨 조회.
 
 - 쿼리 임베딩과 slot_type별 라벨 임베딩의 코사인 유사도로
-  domain / difficulty / job / purpose 중 하나에 대한 최적 라벨(label_text) 반환.
+  domain / difficulty / job / purpose / major 중 하나에 대한 최적 라벨(label_text) 반환.
 - RAG_DENSE_SLOT_VECTOR_FALLBACK_ENABLE=True 일 때 dense_query_rewrite에서 보정용으로 사용.
 """
 
 import logging
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import text
 
@@ -26,36 +26,39 @@ def lookup_slot_label_with_vector(
     slot_type: str,
     top_k: int = 1,
     min_similarity: Optional[float] = None,
+    query_embedding: Optional[List[float]] = None,
 ) -> Optional[str]:
     """
     쿼리와 slot_type에 해당하는 dense_slot_labels 중 가장 유사한 라벨의 label_text 반환.
 
-    - query: 원문 질의 (임베딩 후 유사도 비교)
-    - slot_type: 'domain' | 'difficulty' | 'job' | 'purpose'
-    - min_similarity 미만이면 None 반환 (보정하지 않음)
+    - query: 원문 질의 (임베딩이 없을 때만 사용)
+    - slot_type: 'domain' | 'difficulty' | 'job' | 'purpose' | 'major'
+    - query_embedding: 이미 계산된 쿼리 벡터 (재질의 파이프라인에서 OpenAI 중복 호출 방지)
     """
     if not _is_enabled():
         return None
 
-    valid = {"domain", "difficulty", "job", "purpose"}
+    valid = {"domain", "difficulty", "job", "purpose", "major"}
     if slot_type not in valid:
         return None
 
     q = (query or "").strip()
-    if not q:
+    if not q and not query_embedding:
         return None
 
-    try:
-        from app.utils.ai import get_embedding
-    except Exception:
-        logger.debug("slot_vector_labels: get_embedding import failed", exc_info=True)
-        return None
+    embedding: Optional[List[float]] = query_embedding
+    if embedding is None or not isinstance(embedding, list) or not embedding:
+        try:
+            from app.utils.ai import get_embedding
+        except Exception:
+            logger.debug("slot_vector_labels: get_embedding import failed", exc_info=True)
+            return None
 
-    try:
-        embedding = get_embedding(q)
-    except Exception:
-        logger.debug("slot_vector_labels: get_embedding failed", exc_info=True)
-        return None
+        try:
+            embedding = get_embedding(q)
+        except Exception:
+            logger.debug("slot_vector_labels: get_embedding failed", exc_info=True)
+            return None
 
     if not isinstance(embedding, list) or not embedding:
         return None

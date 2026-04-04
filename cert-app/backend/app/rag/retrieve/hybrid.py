@@ -4,6 +4,7 @@ Query Routing: 짧은 키워드/약어 쿼리는 BM25 중심 + Vector 게이팅.
 RRF: score(d) = w_b * 1/(k+rank_bm25) + w_v * 1/(k+rank_vector).
 """
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,9 +14,17 @@ from sqlalchemy import text
 from app.rag.config import get_rag_index_dir, get_rag_settings
 from app.rag.eval.query_type import classify_query_type
 from app.rag.index.bm25_index import BM25Index, load_bm25_index_cached
-from app.rag.index.vector_index import get_vector_search
+from app.rag.index.vector_index import get_vector_search, get_vector_searches_preembedded
+from app.utils.ai import get_embeddings_batch
 from app.rag.utils.query_processor import expand_query_single_string, expand_query
-from app.rag.utils.dense_query_rewrite import rewrite_for_dense, extract_slots_for_dense, UserProfile
+from app.rag.utils.dense_query_rewrite import (
+    extract_slots_for_dense,
+    query_suggests_identifier_heavy,
+    rewrite_for_dense,
+    UserProfile,
+)
+from app.rag.pre_retrieval_trace import PreRetrievalTrace, log_pre_retrieval_trace
+from app.rag.utils.pre_retrieval_signals import pre_retrieval_aux_fields
 from app.rag.utils.hyde import generate_hyde_document
 from app.rag.utils.cot_query import expand_query_cot, stepback_query
 from app.rag.retrieve.metadata_soft_score import (
@@ -27,12 +36,16 @@ from app.rag.retrieve.personalized_soft_score import (
     merge_difficulty_into_metadata,
 )
 from app.rag.retrieve.contrastive_retriever import contrastive_search
+from app.rag.retrieve.hierarchical import hierarchical_parent_candidates
+from app.rag.retrieve.contextual_retriever import contextual_child_search
+from app.rag.retrieve.retrieval_result_cache import (
+    eligible_for_retrieval_cache,
+    get_cached_result,
+    make_cache_key,
+    set_cached_result,
+)
 
 logger = logging.getLogger(__name__)
-# RRF_K는 get_rag_settings().RAG_RRF_K 사용 (기본 28). 하위 호환용 상수 유지.
-RRF_K = 28
-
-
 def _rrf_k() -> int:
     """설정에서 RRF 상수 조회. env RAG_RRF_K로 튜닝 가능."""
     return getattr(get_rag_settings(), "RAG_RRF_K", 28)
@@ -654,6 +667,301 @@ def _apply_query_type_combmnz_weights(
     return out or weights
 
 
+def _hybrid_run_vector_and_hyde(
+    db: Session,
+    *,
+    use_vector: bool,
+    query: str,
+    dense_query: str,
+    short_keyword: bool,
+    query_type: str,
+    vec_top_k: int,
+    vec_threshold: float,
+    budget_deadline: Optional[float] = None,
+    skip_expansion: bool = False,
+    trace: Optional[Dict[str, Any]] = None,
+) -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
+    """벡터 채널(+키워드/COT/stepback) 및 HyDE. DB 세션은 호출 스레드 전용."""
+    settings = get_rag_settings()
+    vector_results: List[Tuple[str, float]] = []
+
+    def _budget_ok() -> bool:
+        return budget_deadline is None or time.monotonic() < budget_deadline
+
+    sf: Dict[str, Any] = {}
+    if trace is not None:
+        trace["strategy_flags"] = sf
+        sf["skip_expansion"] = bool(skip_expansion)
+        sf["budget_deadline_set"] = budget_deadline is not None
+
+    if not use_vector:
+        sf["vector_arm"] = False
+        return [], []
+
+    vector_query = dense_query
+    query_emb_for_contextual: Optional[List[float]] = None
+    if (
+        getattr(settings, "RAG_CONTEXTUAL_CHILD_ENABLE", False)
+        and not skip_expansion
+        and _budget_ok()
+    ):
+        try:
+            query_emb_for_contextual = get_embeddings_batch([vector_query])[0]
+        except Exception as e:
+            logger.debug("contextual child query embedding failed: %s", e)
+            query_emb_for_contextual = None
+
+    mq_enabled = bool(getattr(settings, "RAG_DENSE_MULTI_QUERY_ENABLE", False)) and not skip_expansion
+    if mq_enabled:
+        q0 = (query or "").strip()
+        q1 = (vector_query or "").strip()
+        sf["dense_multi_query"] = True
+        if q0 == q1:
+            vec_meta: Dict[str, Any] = {}
+            vec_orig = get_vector_search(
+                db,
+                query,
+                top_k=vec_top_k,
+                threshold=vec_threshold,
+                use_rewrite=False,
+                out_meta=vec_meta,
+            )
+            vec_rewrite = vec_orig
+            if trace is not None:
+                trace["vector_search_meta"] = {
+                    **vec_meta,
+                    "hybrid_dense_multi_query": True,
+                    "note": "orig==rewrite; single embedding path",
+                }
+        else:
+            embs_mq = get_embeddings_batch([q0, q1])
+            mq_lists = get_vector_searches_preembedded(
+                db, [q0, q1], embs_mq, vec_top_k, vec_threshold
+            )
+            vec_orig, vec_rewrite = mq_lists[0], mq_lists[1]
+            if trace is not None:
+                trace["vector_search_meta"] = {
+                    "hybrid_dense_multi_query": True,
+                    "get_vector_search_dual_rrf": False,
+                    "note": "preembedded dual strings; get_vector_search dual RRF not used",
+                }
+        w_orig = float(getattr(settings, "RAG_DENSE_MQ_W_ORIG", 0.5))
+        w_rewrite = float(getattr(settings, "RAG_DENSE_MQ_W_REWRITE", 0.5))
+        s = w_orig + w_rewrite or 1.0
+        w_orig /= s
+        w_rewrite /= s
+        vector_results = _linear_merge(vec_orig, vec_rewrite, w_bm25=w_orig, w_vector=w_rewrite)
+    else:
+        sf["dense_multi_query"] = False
+        vec_meta = {}
+        vector_results = get_vector_search(
+            db,
+            vector_query,
+            top_k=vec_top_k,
+            threshold=vec_threshold,
+            use_rewrite=False,
+            out_meta=vec_meta,
+        )
+        if trace is not None:
+            trace["vector_search_meta"] = vec_meta
+
+    if (
+        not skip_expansion
+        and _budget_ok()
+        and getattr(settings, "RAG_DENSE_KEYWORD_EXPANSION_VECTOR_ENABLE", False)
+        and vector_results
+    ):
+        sf["keyword_expansion_vector"] = True
+        try:
+            keyword_expanded = expand_query_single_string(
+                query or "", for_recommendation=True, query_type=query_type
+            )
+            if keyword_expanded and keyword_expanded.strip() != (query or "").strip():
+                kw_meta: Dict[str, Any] = {}
+                vec_keyword = get_vector_search(
+                    db,
+                    keyword_expanded.strip(),
+                    top_k=vec_top_k,
+                    threshold=vec_threshold,
+                    use_rewrite=False,
+                    out_meta=kw_meta,
+                )
+                if trace is not None:
+                    sf["keyword_expansion_vector_meta"] = kw_meta
+                if vec_keyword:
+                    vector_results = _rrf_merge_n([vector_results, vec_keyword], rrf_k=_rrf_k())
+        except Exception as e:
+            logger.debug("dense keyword expansion vector search failed: %s", e)
+    else:
+        sf["keyword_expansion_vector"] = False
+
+    if (
+        not skip_expansion
+        and _budget_ok()
+        and getattr(settings, "RAG_COT_QUERY_EXPANSION_ENABLE", False)
+    ):
+        cot_alts = expand_query_cot(query, max_alternatives=getattr(settings, "RAG_COT_EXPANSION_MAX", 2))
+        if cot_alts:
+            sf["cot_expansion"] = True
+            cot_lists: List[List[Tuple[str, float]]] = []
+            try:
+                alts_stripped = [(a or "").strip() for a in cot_alts if (a or "").strip()]
+                if alts_stripped:
+                    embs_cot = get_embeddings_batch(alts_stripped)
+                    cot_rank_lists = get_vector_searches_preembedded(
+                        db, alts_stripped, embs_cot, vec_top_k, vec_threshold
+                    )
+                    cot_lists = [L for L in cot_rank_lists if L]
+            except Exception as e:
+                logger.debug("COT batch vector search failed, falling back per-alt: %s", e)
+                for alt in cot_alts:
+                    try:
+                        lst = get_vector_search(
+                            db, alt, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
+                        )
+                        if lst:
+                            cot_lists.append(lst)
+                    except Exception as e2:
+                        logger.debug("COT vector search for alt failed: %s", e2)
+                        continue
+            if cot_lists:
+                vector_results = _rrf_merge_n([vector_results] + cot_lists, rrf_k=_rrf_k())
+        else:
+            sf["cot_expansion"] = False
+    else:
+        sf["cot_expansion"] = False
+
+    if not skip_expansion and _budget_ok() and getattr(settings, "RAG_STEPBACK_QUERY_ENABLE", False):
+        stepback_q = stepback_query(query)
+        if stepback_q:
+            sf["stepback"] = True
+            try:
+                vec_sb = get_vector_search(
+                    db,
+                    stepback_q,
+                    top_k=vec_top_k,
+                    threshold=settings.RAG_VECTOR_THRESHOLD,
+                    use_rewrite=False,
+                )
+                if vec_sb:
+                    vector_results = _rrf_merge(
+                        vector_results, vec_sb, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
+                    )
+            except Exception as e:
+                logger.debug("stepback vector search failed: %s", e)
+        else:
+            sf["stepback"] = False
+    else:
+        sf["stepback"] = False
+
+    # Contextual child retrieval arm (실험): child 검색 후 parent 점수로 환원해 dense 채널과 결합
+    if (
+        not skip_expansion
+        and _budget_ok()
+        and getattr(settings, "RAG_CONTEXTUAL_CHILD_ENABLE", False)
+        and query_emb_for_contextual is not None
+    ):
+        sf["contextual_child"] = True
+        try:
+            ctx_top_n = int(getattr(settings, "RAG_CONTEXTUAL_CHILD_TOP_N", vec_top_k) or vec_top_k)
+            ctx_th = float(getattr(settings, "RAG_CONTEXTUAL_CHILD_THRESHOLD", 0.0) or 0.0)
+            ctx_results = contextual_child_search(
+                db,
+                query_embedding=query_emb_for_contextual,
+                top_k=ctx_top_n,
+                similarity_threshold=ctx_th,
+            )
+            if ctx_results:
+                w_ctx = float(getattr(settings, "RAG_CONTEXTUAL_CHILD_BLEND_WEIGHT", 0.30))
+                w_ctx = min(max(w_ctx, 0.0), 1.0)
+                w_dense = 1.0 - w_ctx
+                if vector_results:
+                    vector_results = _rrf_merge_n(
+                        [vector_results, ctx_results],
+                        weights=[w_dense, w_ctx],
+                        rrf_k=_rrf_k(),
+                    )
+                else:
+                    vector_results = ctx_results
+        except Exception as e:
+            logger.debug("contextual child blend skipped: %s", e)
+    else:
+        sf["contextual_child"] = False
+
+    hyde_results: List[Tuple[str, float]] = []
+    if (
+        use_vector
+        and not skip_expansion
+        and _budget_ok()
+        and getattr(settings, "RAG_HYDE_ENABLE", False)
+    ):
+        use_hyde = not (getattr(settings, "RAG_HYDE_LONG_QUERY_ONLY", True) and short_keyword)
+        hyde_doc = generate_hyde_document(query) if use_hyde else None
+        sf["hyde"] = bool(hyde_doc)
+        if hyde_doc:
+            try:
+                hyde_results = get_vector_search(
+                    db, hyde_doc, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
+                )
+            except Exception as e:
+                logger.debug("HyDE vector search failed: %s", e)
+                hyde_results = []
+    else:
+        sf["hyde"] = False
+
+    if trace is not None:
+        sf["budget_ok_at_end"] = _budget_ok()
+    return vector_results, hyde_results
+
+
+def _hybrid_run_bm25(
+    db: Session,
+    *,
+    use_bm25: bool,
+    index_dir: Path,
+    bm25_top_n: int,
+    top_n: int,
+    query: str,
+    query_type: str,
+    enable_prf: bool,
+) -> List[Tuple[str, float]]:
+    """BM25(+선택 PRF). DB 세션은 호출 스레드 전용."""
+    settings = get_rag_settings()
+    bm25_scores: List[Tuple[str, float]] = []
+    if not (use_bm25 and Path(index_dir).exists()):
+        return bm25_scores
+    try:
+        bm25 = load_bm25_index_cached(str(index_dir))
+        if getattr(settings, "RAG_BM25_MULTI_EXPANSION_ENABLE", False):
+            expansions = expand_query(query, max_expansions=4)
+            if len(expansions) <= 1:
+                bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=query_type)
+                bm25_scores = bm25.search(bm25_query, k=bm25_top_n)
+            else:
+                bm25_lists = [bm25.search(q, k=bm25_top_n) for q in expansions[:4]]
+                bm25_scores = _rrf_merge_n(bm25_lists, rrf_k=_rrf_k())
+        else:
+            bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=query_type)
+            bm25_scores = bm25.search(bm25_query, k=bm25_top_n)
+
+        if enable_prf and getattr(settings, "RAG_BM25_PRF_ENABLE", False) and bm25_scores:
+            prf_top_k = getattr(settings, "RAG_BM25_PRF_TOP_K", 5)
+            prf_n_terms = getattr(settings, "RAG_BM25_PRF_N_TERMS", 10)
+            top_ids = [c[0] for c in bm25_scores[:prf_top_k]]
+            contents = _fetch_contents_by_chunk_ids(db, top_ids)
+            if contents:
+                terms = _extract_terms_for_prf(contents, query, n_terms=prf_n_terms)
+                if terms:
+                    expanded_q = f"{bm25_query} {' '.join(terms)}"
+                    bm25_second = bm25.search(expanded_q.strip(), k=top_n)
+                    bm25_scores = _rrf_merge(
+                        bm25_scores, bm25_second, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
+                    )
+    except Exception as e:
+        logger.debug("BM25 search failed (index or expansion): %s", e)
+    return bm25_scores
+
+
 def hybrid_retrieve(
     db: Session,
     query: str,
@@ -676,6 +984,8 @@ def hybrid_retrieve(
     vector_threshold_override: Optional[float] = None,
     channels_override: Optional[List[str]] = None,
     force_reranker: bool = False,
+    pre_retrieval_budget_ms: Optional[int] = None,
+    pre_retrieval_trace_out: Optional[Dict[str, Any]] = None,
 ) -> List[Tuple[str, float]]:
     """
     BM25 + Vector를 RRF로 병합.
@@ -687,8 +997,23 @@ def hybrid_retrieve(
     - rrf_w_bm25 / rrf_w_dense1536 / rrf_w_contrastive768: 3-way RRF 시 가중치 오버라이드(None이면 설정값 사용).
     - channels_override: 채널 제한. ["bm25"], ["vector"], ["contrastive"] 또는 조합. None이면 3채널 모두 사용.
     filters 있으면 메타데이터 필터. 반환: [(chunk_id, score), ...]
+    - pre_retrieval_budget_ms: Pre-retrieval 잔여 예산(ms). None이면 RAG_PRE_RETRIEVAL_BUDGET_MS(기본 15s). 0 이하면 게이트 없음.
+    - pre_retrieval_trace_out: 설정 시 PreRetrievalTrace 필드가 dict로 채워짐(호출자가 재사용 가능한 mutable dict).
     """
     settings = get_rag_settings()
+    q = (query or "").strip()
+    _qmax = int(getattr(settings, "RAG_QUERY_MAX_CHARS", 12000) or 12000)
+    if _qmax > 0 and len(q) > _qmax:
+        q = q[:_qmax]
+    query = q
+    t_pre_start = time.monotonic()
+    _bud = pre_retrieval_budget_ms
+    if _bud is None:
+        _bud = getattr(settings, "RAG_PRE_RETRIEVAL_BUDGET_MS", None)
+    budget_deadline: Optional[float] = None
+    if _bud is not None and float(_bud) > 0:
+        budget_deadline = t_pre_start + float(_bud) / 1000.0
+    vec_trace: Dict[str, Any] = {}
     channels_set = (channels_override or [])
     use_bm25 = len(channels_set) == 0 or "bm25" in channels_set
     use_vector = len(channels_set) == 0 or "vector" in channels_set
@@ -708,14 +1033,39 @@ def hybrid_retrieve(
     vec_threshold = vector_threshold_override if vector_threshold_override is not None else settings.RAG_VECTOR_THRESHOLD
     index_dir = bm25_index_path or (get_rag_index_dir() / "bm25.pkl")
     short_keyword = _is_short_query((query or "").strip())
+    identifier_heavy = query_suggests_identifier_heavy(query or "")
+    skip_expansion = bool(
+        getattr(settings, "RAG_SKIP_EXPANSION_ON_IDENTIFIER_HEAVY", True) and identifier_heavy
+    )
+
+    # §2 규칙 4·7: 식별자 질의는 dense rewrite 생략; 총 예산이 너무 작으면 rewrite 생략(규칙 7: 확장 전 단계 비용 절감).
+    rewrite_skipped = False
+    rewrite_skip_reason: Optional[str] = None
+    if identifier_heavy and getattr(settings, "RAG_SKIP_DENSE_REWRITE_ON_IDENTIFIER_HEAVY", True):
+        rewrite_skipped = True
+        rewrite_skip_reason = "identifier_heavy"
+    else:
+        _min_rw_b = getattr(settings, "RAG_PRE_RETRIEVAL_REWRITE_MIN_BUDGET_MS", None)
+        if (
+            _bud is not None
+            and float(_bud) > 0
+            and _min_rw_b is not None
+            and float(_bud) < float(_min_rw_b)
+        ):
+            rewrite_skipped = True
+            rewrite_skip_reason = "budget_ms_below_min_for_rewrite"
+
+    # 재질의와 동일 슬롯 파이프라인으로 계산된 dict(있으면 메타 soft에서 extract_slots_for_dense 재호출 생략)
+    prefetched_slots: Optional[Dict[str, Any]] = None
 
     # 질의 타입은 BM25 쿼리 확장·가중치·게이팅·contrastive/reranker 사용 여부에 공통으로 활용.
-    # Supabase query_type_labels 벡터 기반 라벨 → 실패 시 rule-based classify_query_type 으로 fallback.
-    if getattr(settings, "RAG_DENSE_USE_QUERY_REWRITE", True):
+    # RAG_DENSE_USE_QUERY_REWRITE(기본 True): 구조화 재질의 적용 여부. A/B 테스트·롤백용 스위치.
+    _use_rewrite = bool(getattr(settings, "RAG_DENSE_USE_QUERY_REWRITE", True)) and not rewrite_skipped
+    if _use_rewrite:
         try:
             from app.rag.utils.dense_query_rewrite import rewrite_for_dense_with_type
 
-            dense_rewrite, qt = rewrite_for_dense_with_type(
+            dense_rewrite, qt, prefetched_slots = rewrite_for_dense_with_type(
                 query or "",
                 profile=user_profile if user_profile is not None else None,
             )
@@ -726,143 +1076,202 @@ def hybrid_retrieve(
                 query_type = classify_query_type(query, from_golden=None)
         except Exception as e:
             logger.debug("dense query rewrite with type failed: %s", e)
+            prefetched_slots = None
             dense_query = (query or "").strip()
             query_type = classify_query_type(query, from_golden=None)
     else:
         dense_query = (query or "").strip()
         query_type = classify_query_type(query, from_golden=None)
 
+    # Rank fusion 전에 채널 입력(query)을 문맥 보강할 수 있는 옵션.
+    # 기본은 OFF이며, 켜도 우선 vector/contrastive에만 적용한다(BM25는 별도 스위치).
+    channel_contextual_enable = bool(getattr(settings, "RAG_CHANNEL_CONTEXTUAL_PROMPT_ENABLE", False))
+    channel_context_apply_bm25 = bool(getattr(settings, "RAG_CHANNEL_CONTEXTUAL_PROMPT_APPLY_BM25", False))
+    channel_query_cached: Optional[str] = None
+
+    def _get_channel_context_query() -> str:
+        nonlocal channel_query_cached
+        if channel_query_cached is not None:
+            return channel_query_cached
+        try:
+            slots = prefetched_slots if prefetched_slots is not None else extract_slots_for_dense(query, profile=user_profile)
+            channel_query_cached = _build_reranker_query(
+                dense_query,
+                user_profile,
+                slots=slots,
+            )
+        except Exception:
+            channel_query_cached = dense_query
+        return channel_query_cached
+
+    dense_query_for_channels = _get_channel_context_query() if channel_contextual_enable else dense_query
+    bm25_query_for_channel = (
+        _get_channel_context_query()
+        if channel_contextual_enable and channel_context_apply_bm25
+        else (query or "")
+    )
+
     if getattr(settings, "RAG_HYBRID_DEBUG_LOG", False):
         logger.info(
-            "rewrite: query=%r -> dense_query(첫120자)=%r (vector/contrastive 공통 입력)",
+            "rewrite: query=%r -> dense_query(첫120자)=%r channel_query(첫120자)=%r ctx_enable=%s bm25_ctx=%s",
             (query or "")[:80],
             (dense_query or "")[:120],
+            (dense_query_for_channels or "")[:120],
+            channel_contextual_enable,
+            channel_context_apply_bm25,
         )
 
-    # Vector (OpenAI embedding + pgvector). Dense query rewrite (개인화 시 profile 반영)
+    cache_key_for_result: Optional[str] = None
+    if eligible_for_retrieval_cache(
+        filters=filters,
+        user_profile=user_profile,
+        channels_override=channels_override,
+        use_reranker=use_reranker,
+    ):
+        cache_key_for_result = make_cache_key(
+            f"{(query or '').strip()}|||{(dense_query_for_channels or '').strip()}",
+            top_k,
+            top_n,
+        )
+        hit = get_cached_result(cache_key_for_result)
+        if hit:
+            _rem_hit: Optional[float] = None
+            if budget_deadline is not None:
+                _rem_hit = max(0.0, (budget_deadline - time.monotonic()) * 1000.0)
+            _aux_hit = pre_retrieval_aux_fields(
+                query or "",
+                query_type or "",
+                t_pre_start=t_pre_start,
+                latency_key="pre_retrieval_cache_return_ms",
+            )
+            _ptr_hit = PreRetrievalTrace(
+                original_query=query or "",
+                normalized_query=dense_query or "",
+                query_language=_aux_hit["query_language"],
+                query_type=query_type or "",
+                intent_label=query_type or None,
+                intent_confidence=_aux_hit["intent_confidence"],
+                difficulty_label=_aux_hit["difficulty_label"],
+                difficulty_confidence=_aux_hit["difficulty_confidence"],
+                latency_breakdown_ms=dict(_aux_hit["latency_breakdown_ms"]),
+                strategy_flags={"retrieval_result_cache": "hit"},
+                budget_remaining_ms=_rem_hit,
+                budget_deadline_set=budget_deadline is not None,
+                skip_expansion_identifier_heavy=skip_expansion,
+                identifier_heavy=identifier_heavy,
+                cache_hit_semantic=True,
+                vector_search_meta={},
+                rewrite_skipped=rewrite_skipped,
+                rewrite_skip_reason=rewrite_skip_reason,
+            )
+            if pre_retrieval_trace_out is not None:
+                pre_retrieval_trace_out.clear()
+                pre_retrieval_trace_out.update(_ptr_hit.model_dump())
+            if getattr(settings, "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
+                log_pre_retrieval_trace(_ptr_hit)
+            return hit[:top_k] if len(hit) >= top_k else hit
+
+    # Vector + HyDE / BM25: PRF 사용 시 BM25 2단계 의존 → 순차. 그 외 스레드 병렬로 p95 완화
+    _idx = Path(index_dir)
+    parallel_ok = (
+        use_vector
+        and use_bm25
+        and _idx.exists()
+        and not getattr(settings, "RAG_BM25_PRF_ENABLE", False)
+        and getattr(settings, "RAG_HYBRID_BM25_VECTOR_PARALLEL_ENABLE", True)
+    )
     vector_results: List[Tuple[str, float]] = []
-    if use_vector:
-        # Vector 채널은 항상 dense_query를 사용 (재질의 필수)
-        vector_query = dense_query
-        if getattr(settings, "RAG_DENSE_MULTI_QUERY_ENABLE", False):
-            # Multi-query: 원본 + rewrite 각각 검색 후 2-way linear fusion으로 병합.
-            # 두 결과의 점수 분포를 min-max 정규화한 뒤 (선택) norm^p 적용.
-            # 가중치는 설정(RAG_DENSE_MQ_W_ORIG / RAG_DENSE_MQ_W_REWRITE)에서 읽어온다.
-            vec_orig = get_vector_search(
-                db, query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-            )
-            vec_rewrite = get_vector_search(
-                db, vector_query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-            )
-            w_orig = float(getattr(settings, "RAG_DENSE_MQ_W_ORIG", 0.5))
-            w_rewrite = float(getattr(settings, "RAG_DENSE_MQ_W_REWRITE", 0.5))
-            s = w_orig + w_rewrite or 1.0
-            w_orig /= s
-            w_rewrite /= s
-            vector_results = _linear_merge(vec_orig, vec_rewrite, w_bm25=w_orig, w_vector=w_rewrite)
-        else:
-            vector_results = get_vector_search(
-                db, vector_query, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-            )
-
-        # 동의어/전공·직무 키워드 확장 쿼리로 3번째 벡터 검색 후 RRF 병합 (Recall@5 상승)
-        if getattr(settings, "RAG_DENSE_KEYWORD_EXPANSION_VECTOR_ENABLE", False) and vector_results:
-            try:
-                keyword_expanded = expand_query_single_string(
-                    query or "", for_recommendation=True, query_type=query_type
-                )
-                if keyword_expanded and keyword_expanded.strip() != (query or "").strip():
-                    vec_keyword = get_vector_search(
-                        db, keyword_expanded.strip(), top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-                    )
-                    if vec_keyword:
-                        vector_results = _rrf_merge_n([vector_results, vec_keyword], rrf_k=_rrf_k())
-            except Exception as e:
-                logger.debug("dense keyword expansion vector search failed: %s", e)
-
-        # COT 쿼리 확장: 대안 검색 문구 생성 후 다중 벡터 검색 RRF (창의적 방법론)
-        if getattr(settings, "RAG_COT_QUERY_EXPANSION_ENABLE", False):
-            cot_alts = expand_query_cot(query, max_alternatives=getattr(settings, "RAG_COT_EXPANSION_MAX", 2))
-            if cot_alts:
-                cot_lists: List[List[Tuple[str, float]]] = []
-                for alt in cot_alts:
-                    try:
-                        lst = get_vector_search(
-                            db, alt, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-                        )
-                        if lst:
-                            cot_lists.append(lst)
-                    except Exception as e:
-                        logger.debug("COT vector search for alt failed: %s", e)
-                        continue
-                if cot_lists:
-                    vector_results = _rrf_merge_n([vector_results] + cot_lists, rrf_k=_rrf_k())
-
-        # Step-back 메타 쿼리: 상위 목표 한 문장 추출 후 추가 벡터 검색, RRF 병합
-        if getattr(settings, "RAG_STEPBACK_QUERY_ENABLE", False):
-            stepback_q = stepback_query(query)
-            if stepback_q:
-                try:
-                    vec_sb = get_vector_search(
-                        db, stepback_q, top_k=vec_top_k, threshold=settings.RAG_VECTOR_THRESHOLD, use_rewrite=False
-                    )
-                    if vec_sb:
-                        vector_results = _rrf_merge(
-                            vector_results, vec_sb, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
-                        )
-                except Exception as e:
-                    logger.debug("stepback vector search failed: %s", e)
-
-    # HyDE: 가상 문서 생성 후 벡터 검색, 3-way 병합 (방법론 확장). LONG_QUERY_ONLY면 짧은 쿼리(≤3단어)에서는 생략.
     hyde_results: List[Tuple[str, float]] = []
-    if use_vector and getattr(settings, "RAG_HYDE_ENABLE", False):
-        use_hyde = not (getattr(settings, "RAG_HYDE_LONG_QUERY_ONLY", True) and short_keyword)
-        if use_hyde:
-            hyde_doc = generate_hyde_document(query)
-        else:
-            hyde_doc = None
-        if hyde_doc:
-            try:
-                hyde_results = get_vector_search(
-                    db, hyde_doc, top_k=vec_top_k, threshold=vec_threshold, use_rewrite=False
-                )
-            except Exception as e:
-                logger.debug("HyDE vector search failed: %s", e)
-                hyde_results = []
-
-    # BM25: single expansion 또는 multi-expansion(여러 확장 쿼리 검색 후 RRF). 선택 시 PRF.
     bm25_scores: List[Tuple[str, float]] = []
-    if use_bm25 and Path(index_dir).exists():
-        try:
-            # BM25 인덱스는 디스크에서 한 번만 로드하고 이후에는 캐시를 재사용한다.
-            bm25 = load_bm25_index_cached(str(index_dir))
-            if getattr(settings, "RAG_BM25_MULTI_EXPANSION_ENABLE", False):
-                expansions = expand_query(query, max_expansions=4)
-                if len(expansions) <= 1:
-                    bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=query_type)
-                    bm25_scores = bm25.search(bm25_query, k=bm25_top_n)
-                else:
-                    bm25_lists = [bm25.search(q, k=bm25_top_n) for q in expansions[:4]]
-                    bm25_scores = _rrf_merge_n(bm25_lists, rrf_k=_rrf_k())
-            else:
-                bm25_query = expand_query_single_string(query, for_recommendation=True, query_type=query_type)
-                bm25_scores = bm25.search(bm25_query, k=bm25_top_n)
 
-            if getattr(settings, "RAG_BM25_PRF_ENABLE", False) and bm25_scores:
-                prf_top_k = getattr(settings, "RAG_BM25_PRF_TOP_K", 5)
-                prf_n_terms = getattr(settings, "RAG_BM25_PRF_N_TERMS", 10)
-                top_ids = [c[0] for c in bm25_scores[:prf_top_k]]
-                contents = _fetch_contents_by_chunk_ids(db, top_ids)
-                if contents:
-                    terms = _extract_terms_for_prf(contents, query, n_terms=prf_n_terms)
-                    if terms:
-                        expanded_q = f"{bm25_query} {' '.join(terms)}"
-                        bm25_second = bm25.search(expanded_q.strip(), k=top_n)
-                        bm25_scores = _rrf_merge(
-                            bm25_scores, bm25_second, w_bm25=0.5, w_vector=0.5, rrf_k=_rrf_k()
-                        )
+    if parallel_ok:
+        from concurrent.futures import ThreadPoolExecutor
+        from app.database import SessionLocal
+
+        def _run_vec() -> Tuple[List[Tuple[str, float]], List[Tuple[str, float]]]:
+            s = SessionLocal()
+            try:
+                return _hybrid_run_vector_and_hyde(
+                    s,
+                    use_vector=use_vector,
+                    query=query or "",
+                    dense_query=dense_query_for_channels or "",
+                    short_keyword=short_keyword,
+                    query_type=query_type or "",
+                    vec_top_k=vec_top_k,
+                    vec_threshold=vec_threshold,
+                    budget_deadline=budget_deadline,
+                    skip_expansion=skip_expansion,
+                    trace=vec_trace,
+                )
+            finally:
+                s.close()
+
+        def _run_bm() -> List[Tuple[str, float]]:
+            s = SessionLocal()
+            try:
+                return _hybrid_run_bm25(
+                    s,
+                    use_bm25=use_bm25,
+                    index_dir=_idx,
+                    bm25_top_n=bm25_top_n,
+                    top_n=top_n,
+                    query=bm25_query_for_channel or "",
+                    query_type=query_type or "",
+                    enable_prf=False,
+                )
+            finally:
+                s.close()
+
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fv = ex.submit(_run_vec)
+            fb = ex.submit(_run_bm)
+            vector_results, hyde_results = fv.result()
+            bm25_scores = fb.result()
+    else:
+        vector_results, hyde_results = _hybrid_run_vector_and_hyde(
+            db,
+            use_vector=use_vector,
+            query=query or "",
+            dense_query=dense_query_for_channels or "",
+            short_keyword=short_keyword,
+            query_type=query_type or "",
+            vec_top_k=vec_top_k,
+            vec_threshold=vec_threshold,
+            budget_deadline=budget_deadline,
+            skip_expansion=skip_expansion,
+            trace=vec_trace,
+        )
+        bm25_scores = _hybrid_run_bm25(
+            db,
+            use_bm25=use_bm25,
+            index_dir=_idx,
+            bm25_top_n=bm25_top_n,
+            top_n=top_n,
+            query=bm25_query_for_channel or "",
+            query_type=query_type or "",
+            enable_prf=True,
+        )
+
+    # Hierarchical retrieval (child->parent): child BM25를 parent 점수로 환원해 BM25 채널과 내부 결합.
+    if use_bm25 and getattr(settings, "RAG_HIERARCHICAL_RETRIEVAL_ENABLE", False):
+        try:
+            h_top_n = int(getattr(settings, "RAG_HIERARCHICAL_CHILD_TOP_N", bm25_top_n) or bm25_top_n)
+            hier = hierarchical_parent_candidates(db, query or "", top_k=h_top_n)
+            if hier:
+                w_hier = float(getattr(settings, "RAG_HIERARCHICAL_BLEND_WEIGHT", 0.35))
+                w_hier = min(max(w_hier, 0.0), 1.0)
+                w_bm = 1.0 - w_hier
+                if bm25_scores:
+                    bm25_scores = _rrf_merge_n(
+                        [bm25_scores, hier],
+                        weights=[w_bm, w_hier],
+                        rrf_k=_rrf_k(),
+                    )
+                else:
+                    bm25_scores = hier
         except Exception as e:
-            logger.debug("BM25 search failed (index or expansion): %s", e)
+            logger.debug("hierarchical retrieval blend skipped: %s", e)
 
     # Contrastive 768 FAISS arm (별도 retriever, RRF로만 결합)
     contrastive_results: List[Tuple[str, float]] = []
@@ -892,8 +1301,8 @@ def hybrid_retrieve(
                     contrastive_top_n,
                     single_contrastive_only,
                 )
-                # Contrastive 채널도 재질의된 dense_query를 기본 입력으로 사용
-                contrastive_results = contrastive_search(dense_query, top_k=contrastive_top_n)
+                # Contrastive 채널도 재질의 입력을 사용(옵션으로 contextual prompt 적용 가능)
+                contrastive_results = contrastive_search(dense_query_for_channels, top_k=contrastive_top_n)
             except Exception:
                 logger.debug("contrastive_search failed (disabled or deps missing)", exc_info=True)
         else:
@@ -904,6 +1313,42 @@ def hybrid_retrieve(
                 contrastive_enabled,
                 single_contrastive_only,
             )
+
+    # Pre-retrieval trace (§2 스키마에 가까운 관측; fusion 직전)
+    _rem_ms: Optional[float] = None
+    if budget_deadline is not None:
+        _rem_ms = max(0.0, (budget_deadline - time.monotonic()) * 1000.0)
+    _aux_fusion = pre_retrieval_aux_fields(
+        query or "",
+        query_type or "",
+        t_pre_start=t_pre_start,
+        latency_key="pre_retrieval_to_fusion_ms",
+    )
+    _ptrace = PreRetrievalTrace(
+        original_query=query or "",
+        normalized_query=dense_query or "",
+        query_language=_aux_fusion["query_language"],
+        query_type=query_type or "",
+        intent_label=query_type or None,
+        intent_confidence=_aux_fusion["intent_confidence"],
+        difficulty_label=_aux_fusion["difficulty_label"],
+        difficulty_confidence=_aux_fusion["difficulty_confidence"],
+        latency_breakdown_ms=dict(_aux_fusion["latency_breakdown_ms"]),
+        strategy_flags=dict(vec_trace.get("strategy_flags") or {}),
+        budget_remaining_ms=_rem_ms,
+        budget_deadline_set=budget_deadline is not None,
+        skip_expansion_identifier_heavy=skip_expansion,
+        identifier_heavy=identifier_heavy,
+        cache_hit_semantic=False,
+        vector_search_meta=dict(vec_trace.get("vector_search_meta") or {}),
+        rewrite_skipped=rewrite_skipped,
+        rewrite_skip_reason=rewrite_skip_reason,
+    )
+    if pre_retrieval_trace_out is not None:
+        pre_retrieval_trace_out.clear()
+        pre_retrieval_trace_out.update(_ptrace.model_dump())
+    if getattr(settings, "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
+        log_pre_retrieval_trace(_ptrace)
 
     # Query Routing + Weighted fusion (쿼리 타입별·도메인별 가중치, 짧은 쿼리 시 Vector 게이팅)
     if use_query_weights or (alpha is None and getattr(settings, "RAG_ENHANCED_ALPHA", None) is None):
@@ -1100,24 +1545,64 @@ def hybrid_retrieve(
             combined = _rrf_merge(bm25_scores, vector_results, w_bm25=w_bm25, w_vector=w_vector, rrf_k=rrf_k)
     candidates = combined[: top_n * 2]
 
+    # 메타/개인화 soft·리랭커 문맥이 동일 슬롯을 쓰므로 extract_slots_for_dense는 요청당 1회.
+    query_slots_for_scoring: Optional[Dict[str, Any]] = None
+
+    def _ensure_query_slots_for_scoring() -> Dict[str, Any]:
+        nonlocal query_slots_for_scoring
+        if query_slots_for_scoring is None:
+            query_slots_for_scoring = (
+                prefetched_slots
+                if prefetched_slots is not None
+                else extract_slots_for_dense(query, profile=user_profile)
+            )
+        return query_slots_for_scoring
+
+    def _qual_ids_from_candidates(cands: List[Tuple[str, float]]) -> List[int]:
+        """chunk_id(qual:chunk)에서 qual_id 목록을 순서 유지·중복 제거로 추출."""
+        seen: set = set()
+        out: List[int] = []
+        for cid, _ in cands:
+            if ":" in cid:
+                try:
+                    qid = int(cid.split(":")[0])
+                    if qid not in seen:
+                        seen.add(qid)
+                        out.append(qid)
+                except ValueError:
+                    pass
+        return out
+
+    metadata_soft_enabled = getattr(settings, "RAG_METADATA_SOFT_SCORE_ENABLE", False)
+    personalized_enabled = (
+        getattr(settings, "RAG_PERSONALIZED_SOFT_SCORE_ENABLE", False) and user_profile is not None
+    )
+    mmr_enabled = getattr(settings, "RAG_MMR_ENABLE", False)
+    # 메타 soft / 개인화 / MMR이 qual 메타를 쓰면 후보 qual_id 집합에 대해 한 번만 bulk 조회 (DB 왕복 감소).
+    meta_bulk: Optional[Dict[int, Dict[str, Any]]] = None
+    if candidates and (metadata_soft_enabled or personalized_enabled or mmr_enabled):
+        qual_union = _qual_ids_from_candidates(candidates)
+        if qual_union:
+            try:
+                meta_bulk = fetch_qual_metadata_bulk(db, qual_union)
+            except Exception:
+                meta_bulk = None
+
     # Metadata soft scoring (직무/전공 일치 가산, 분야 이탈 감점)
-    if getattr(settings, "RAG_METADATA_SOFT_SCORE_ENABLE", False) and candidates:
+    if metadata_soft_enabled and candidates:
         try:
-            qual_ids_soft = []
-            for cid, _ in candidates:
-                if ":" in cid:
-                    try:
-                        qual_ids_soft.append(int(cid.split(":")[0]))
-                    except ValueError:
-                        pass
+            qual_ids_soft = _qual_ids_from_candidates(candidates)
             if qual_ids_soft:
-                query_slots = extract_slots_for_dense(query, profile=user_profile)
-                meta = fetch_qual_metadata_bulk(db, qual_ids_soft)
+                query_slots = _ensure_query_slots_for_scoring()
+                meta = meta_bulk if meta_bulk is not None else fetch_qual_metadata_bulk(db, qual_ids_soft)
                 soft_config = {
                     "job_bonus": getattr(settings, "RAG_METADATA_SOFT_JOB_BONUS", 0.15),
                     "major_bonus": getattr(settings, "RAG_METADATA_SOFT_MAJOR_BONUS", 0.10),
                     "target_bonus": getattr(settings, "RAG_METADATA_SOFT_TARGET_BONUS", 0.10),
                     "field_penalty": getattr(settings, "RAG_METADATA_SOFT_FIELD_PENALTY", -0.20),
+                    "main_field_in_job_match": getattr(
+                        settings, "RAG_METADATA_SOFT_MAIN_FIELD_IN_JOB_MATCH", True
+                    ),
                 }
                 if getattr(settings, "RAG_METADATA_DOMAIN_MISMATCH_ENABLE", False):
                     soft_config["domain_mismatch_penalty"] = getattr(
@@ -1141,22 +1626,12 @@ def hybrid_retrieve(
         candidates = _dedup_per_cert(candidates)
 
     # 개인화 soft scoring (profile 있을 때만, 전공/즐겨찾기/취득/난이도 적합도)
-    if (
-        getattr(settings, "RAG_PERSONALIZED_SOFT_SCORE_ENABLE", False)
-        and user_profile is not None
-        and candidates
-    ):
+    if personalized_enabled and candidates:
         try:
-            qual_ids_pers = []
-            for cid, _ in candidates:
-                if ":" in cid:
-                    try:
-                        qual_ids_pers.append(int(cid.split(":")[0]))
-                    except ValueError:
-                        pass
+            qual_ids_pers = _qual_ids_from_candidates(candidates)
             if qual_ids_pers:
                 from app.crud import get_qualification_aggregated_stats_bulk
-                meta_pers = fetch_qual_metadata_bulk(db, qual_ids_pers)
+                meta_pers = meta_bulk if meta_bulk is not None else fetch_qual_metadata_bulk(db, qual_ids_pers)
                 stats_bulk = get_qualification_aggregated_stats_bulk(db, qual_ids_pers)
                 diff_by_qual = {
                     qid: s["avg_difficulty"]
@@ -1164,7 +1639,7 @@ def hybrid_retrieve(
                     if s.get("avg_difficulty") is not None
                 }
                 merge_difficulty_into_metadata(meta_pers, diff_by_qual)
-                query_slots = extract_slots_for_dense(query, profile=user_profile)
+                query_slots = _ensure_query_slots_for_scoring()
                 personal_config = {
                     "major_bonus": getattr(settings, "RAG_PERSONALIZED_MAJOR_BONUS", 0.15),
                     "favorite_field_bonus": getattr(settings, "RAG_PERSONALIZED_FAVORITE_FIELD_BONUS", 0.10),
@@ -1188,16 +1663,9 @@ def hybrid_retrieve(
     # MMR 기반 diversity ranking (옵션)
     if getattr(settings, "RAG_MMR_ENABLE", False) and candidates:
         try:
-            # metadata soft score 단계에서 meta를 이미 조회한 경우 재사용, 아니면 한 번만 조회
-            qual_ids_mmr = []
-            for cid, _ in candidates:
-                if ":" in cid:
-                    try:
-                        qual_ids_mmr.append(int(cid.split(":")[0]))
-                    except ValueError:
-                        pass
+            qual_ids_mmr = _qual_ids_from_candidates(candidates)
             if qual_ids_mmr:
-                mmr_meta = locals().get("meta") if "meta" in locals() else fetch_qual_metadata_bulk(db, qual_ids_mmr)
+                mmr_meta = meta_bulk if meta_bulk is not None else fetch_qual_metadata_bulk(db, qual_ids_mmr)
                 candidates = _mmr_diversity_rerank(
                     candidates,
                     mmr_meta or {},
@@ -1269,11 +1737,14 @@ def hybrid_retrieve(
                 qual_names = {}
             # Reranker 입력 쿼리는 dense_query 기반으로 구성 (재질의 필수)
             reranker_query_source = dense_query
-            reranker_query = (
-                _build_reranker_query(reranker_query_source, user_profile)
-                if getattr(settings, "RAG_RERANK_INPUT_ADD_CONTEXT", True)
-                else reranker_query_source
-            )
+            if getattr(settings, "RAG_RERANK_INPUT_ADD_CONTEXT", True):
+                reranker_query = _build_reranker_query(
+                    reranker_query_source,
+                    user_profile,
+                    slots=_ensure_query_slots_for_scoring(),
+                )
+            else:
+                reranker_query = reranker_query_source
             if getattr(settings, "RAG_RERANK_INPUT_ADD_QUERY_TYPE", True) and query_type:
                 reranker_query = "쿼리유형: " + query_type + " " + reranker_query
             pairs = []
@@ -1288,6 +1759,9 @@ def hybrid_retrieve(
             if reranked:
                 return reranked
 
+    if cache_key_for_result is not None:
+        ttl = int(getattr(settings, "RAG_RETRIEVAL_RESULT_CACHE_TTL_SECONDS", 300) or 300)
+        set_cached_result(cache_key_for_result, candidates[:top_k], ttl)
     return candidates[:top_k]
 
 
@@ -1367,12 +1841,17 @@ def _fetch_qual_names_for_chunk_ids(db: Session, chunk_ids: List[str]) -> Dict[s
     return out
 
 
-def _build_reranker_query(query: str, user_profile: Optional[UserProfile] = None) -> str:
+def _build_reranker_query(
+    query: str,
+    user_profile: Optional[UserProfile] = None,
+    slots: Optional[Dict[str, Any]] = None,
+) -> str:
     """§2-9 추천 적합도: 전공·목적·직무 문맥을 붙인 리랭커용 쿼리 문자열."""
     parts: List[str] = []
     if user_profile and user_profile.get("major"):
         parts.append(f"전공: {user_profile['major']}")
-    slots = extract_slots_for_dense(query or "", profile=user_profile)
+    if slots is None:
+        slots = extract_slots_for_dense(query or "", profile=user_profile)
     if slots.get("목적"):
         parts.append(f"목적: {slots['목적']}")
     if slots.get("희망직무"):

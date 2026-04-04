@@ -5,21 +5,91 @@
 import hashlib
 import json
 import logging
-from typing import List, Optional, Dict, Any
+import threading
+from typing import List, Optional, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from app.utils.ai import get_embedding
+from app.utils.ai import get_embedding, get_embeddings_batch
 from app.config import get_settings
 from app.redis_client import redis_client
+from app.rag.ingest.canonical_text import normalize_text_for_embedding
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+_schema_cache_lock = threading.Lock()
+_has_dense_content_cache: Optional[bool] = None
+_has_bm25_text_cache: Optional[bool] = None
+
+
+def _certificates_vectors_has_dense_content_column(db: Session) -> bool:
+    """
+    certificates_vectors.dense_content 컬럼 존재 여부를 1회 조회 후 캐시.
+    스키마 조회 실패 시 보수적으로 False 처리.
+    """
+    global _has_dense_content_cache
+    if _has_dense_content_cache is not None:
+        return _has_dense_content_cache
+    with _schema_cache_lock:
+        if _has_dense_content_cache is not None:
+            return _has_dense_content_cache
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'certificates_vectors'
+                      AND column_name = 'dense_content'
+                    LIMIT 1
+                    """
+                )
+            ).fetchone()
+            _has_dense_content_cache = bool(row)
+        except Exception:
+            logger.exception("failed to inspect certificates_vectors schema for dense_content")
+            _has_dense_content_cache = False
+        return _has_dense_content_cache
+
+
+def _certificates_vectors_has_bm25_text_column(db: Session) -> bool:
+    """certificates_vectors.bm25_text (Indexing_opt text_for_sparse) 존재 여부 캐시."""
+    global _has_bm25_text_cache
+    if _has_bm25_text_cache is not None:
+        return _has_bm25_text_cache
+    with _schema_cache_lock:
+        if _has_bm25_text_cache is not None:
+            return _has_bm25_text_cache
+        try:
+            row = db.execute(
+                text(
+                    """
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_name = 'certificates_vectors'
+                      AND column_name = 'bm25_text'
+                    LIMIT 1
+                    """
+                )
+            ).fetchone()
+            _has_bm25_text_cache = bool(row)
+        except Exception:
+            logger.exception("failed to inspect certificates_vectors schema for bm25_text")
+            _has_bm25_text_cache = False
+        return _has_bm25_text_cache
 
 
 def _content_hash(content: str) -> str:
     """SHA-256 해시. 변경 시에만 임베딩 호출용."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def invalidate_certificates_vectors_schema_cache() -> None:
+    """DB 마이그레이션 직후 등 dense_content/bm25_text 컬럼 가용성이 바뀌었을 때 캐시 무효화."""
+    global _has_dense_content_cache, _has_bm25_text_cache
+    with _schema_cache_lock:
+        _has_dense_content_cache = None
+        _has_bm25_text_cache = None
 
 
 class VectorService:
@@ -34,84 +104,437 @@ class VectorService:
         metadata: Optional[Dict[str, Any]] = None,
         chunk_index: int = 0,
         dense_content: Optional[str] = None,
+        bm25_text: Optional[str] = None,
     ) -> None:
         """
         Insert or update vector data. qual_id가 있을 때 content_hash가 기존과 동일하면 임베딩 호출 생략.
         dense_content가 있으면 임베딩과 content_hash는 dense_content 기준; 없으면 content 기준.
+        bm25_text 컬럼이 있으면 배치와 동일하게 해시 동일·본문 불변 시 bm25만 갱신 가능.
         UNIQUE(qual_id, chunk_index) 적용 시 ON CONFLICT DO UPDATE 사용.
         """
-        text_to_embed = ((dense_content or content) or "").strip() or (content or " ").strip() or " "
+        text_to_embed = normalize_text_for_embedding((dense_content or content) or "") or " "
         if not text_to_embed or not text_to_embed.strip():
             text_to_embed = " "
         content_hash = _content_hash(text_to_embed)
+        bm25_norm = normalize_text_for_embedding(str(bm25_text)) if bm25_text is not None else None
+        has_bm25 = _certificates_vectors_has_bm25_text_column(db)
+
         if qual_id is not None:
             try:
-                row = db.execute(
-                    text("""
-                        SELECT content_hash FROM certificates_vectors
-                        WHERE qual_id = :qual_id AND chunk_index = :chunk_index
-                    """),
-                    {"qual_id": qual_id, "chunk_index": chunk_index},
-                ).fetchone()
+                if has_bm25:
+                    row = db.execute(
+                        text(
+                            """
+                            SELECT content_hash, COALESCE(bm25_text, '') AS bm25_text
+                            FROM certificates_vectors
+                            WHERE qual_id = :qual_id AND chunk_index = :chunk_index
+                            """
+                        ),
+                        {"qual_id": qual_id, "chunk_index": chunk_index},
+                    ).fetchone()
+                else:
+                    row = db.execute(
+                        text(
+                            """
+                            SELECT content_hash FROM certificates_vectors
+                            WHERE qual_id = :qual_id AND chunk_index = :chunk_index
+                            """
+                        ),
+                        {"qual_id": qual_id, "chunk_index": chunk_index},
+                    ).fetchone()
                 if row and getattr(row, "content_hash", None) == content_hash:
+                    if has_bm25 and bm25_norm is not None:
+                        old_bm = getattr(row, "bm25_text", None) or ""
+                        if old_bm != bm25_norm:
+                            db.execute(
+                                text(
+                                    """
+                                    UPDATE certificates_vectors
+                                    SET bm25_text = :bm25_text,
+                                        metadata = CAST(:metadata AS jsonb),
+                                        updated_at = NOW()
+                                    WHERE qual_id = :qual_id AND chunk_index = :chunk_index
+                                    """
+                                ),
+                                {
+                                    "bm25_text": bm25_norm,
+                                    "metadata": json.dumps(metadata or {}),
+                                    "qual_id": qual_id,
+                                    "chunk_index": chunk_index,
+                                },
+                            )
+                            db.commit()
                     return
             except Exception:
-                pass
+                logger.exception("upsert_vector_data hash/bm25 pre-check failed qual_id=%s", qual_id)
 
         try:
             embedding = get_embedding(text_to_embed)
-        except Exception as e:
+        except Exception:
             logger.exception("get_embedding failed for qual_id=%s chunk_index=%s", qual_id, chunk_index)
             raise
         if not embedding or not isinstance(embedding, list):
             raise ValueError("get_embedding returned empty or invalid embedding")
-        dense_val = dense_content if dense_content else None
+        dense_val = normalize_text_for_embedding(dense_content) if dense_content else None
+        has_dense_content = _certificates_vectors_has_dense_content_column(db)
+        meta_js = json.dumps(metadata or {})
         if qual_id is not None:
-            try:
-                db.execute(text("""
-                    INSERT INTO certificates_vectors (qual_id, name, content, dense_content, embedding, metadata, content_hash, chunk_index)
-                    VALUES (:qual_id, :name, :content, :dense_content, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
-                    ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
-                        name = EXCLUDED.name,
-                        content = EXCLUDED.content,
-                        dense_content = EXCLUDED.dense_content,
-                        embedding = EXCLUDED.embedding,
-                        metadata = EXCLUDED.metadata,
-                        content_hash = EXCLUDED.content_hash,
-                        updated_at = NOW()
-                """), {
-                    "qual_id": qual_id,
-                    "name": name,
-                    "content": content,
-                    "dense_content": dense_val,
-                    "embedding": str(embedding),
-                    "metadata": json.dumps(metadata or {}),
-                    "content_hash": content_hash,
-                    "chunk_index": chunk_index,
-                })
-            except Exception:
-                db.execute(text("""
-                    INSERT INTO certificates_vectors (qual_id, name, content, embedding, metadata)
-                    VALUES (:qual_id, :name, :content, CAST(:embedding AS vector), CAST(:metadata AS jsonb))
-                """), {
-                    "qual_id": qual_id,
-                    "name": name,
-                    "content": content,
-                    "embedding": str(embedding),
-                    "metadata": json.dumps(metadata or {}),
-                })
-        else:
-            db.execute(text("""
-                INSERT INTO certificates_vectors (qual_id, name, content, embedding, metadata)
-                VALUES (:qual_id, :name, :content, CAST(:embedding AS vector), CAST(:metadata AS jsonb))
-            """), {
+            payload = {
                 "qual_id": qual_id,
                 "name": name,
                 "content": content,
+                "dense_content": dense_val,
+                "bm25_text": bm25_norm,
                 "embedding": str(embedding),
-                "metadata": json.dumps(metadata or {}),
-            })
+                "metadata": meta_js,
+                "content_hash": content_hash,
+                "chunk_index": chunk_index,
+            }
+            if has_dense_content and has_bm25:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO certificates_vectors
+                            (qual_id, name, content, dense_content, bm25_text, embedding, metadata, content_hash, chunk_index)
+                        VALUES
+                            (:qual_id, :name, :content, :dense_content, :bm25_text, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                        ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            content = EXCLUDED.content,
+                            dense_content = EXCLUDED.dense_content,
+                            bm25_text = EXCLUDED.bm25_text,
+                            embedding = EXCLUDED.embedding,
+                            metadata = EXCLUDED.metadata,
+                            content_hash = EXCLUDED.content_hash,
+                            updated_at = NOW()
+                        """
+                    ),
+                    payload,
+                )
+            elif has_dense_content:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO certificates_vectors
+                            (qual_id, name, content, dense_content, embedding, metadata, content_hash, chunk_index)
+                        VALUES
+                            (:qual_id, :name, :content, :dense_content, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                        ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            content = EXCLUDED.content,
+                            dense_content = EXCLUDED.dense_content,
+                            embedding = EXCLUDED.embedding,
+                            metadata = EXCLUDED.metadata,
+                            content_hash = EXCLUDED.content_hash,
+                            updated_at = NOW()
+                        """
+                    ),
+                    {k: v for k, v in payload.items() if k != "bm25_text"},
+                )
+            elif has_bm25:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO certificates_vectors
+                            (qual_id, name, content, bm25_text, embedding, metadata, content_hash, chunk_index)
+                        VALUES
+                            (:qual_id, :name, :content, :bm25_text, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                        ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            content = EXCLUDED.content,
+                            bm25_text = EXCLUDED.bm25_text,
+                            embedding = EXCLUDED.embedding,
+                            metadata = EXCLUDED.metadata,
+                            content_hash = EXCLUDED.content_hash,
+                            updated_at = NOW()
+                        """
+                    ),
+                    payload,
+                )
+            else:
+                db.execute(
+                    text(
+                        """
+                        INSERT INTO certificates_vectors
+                            (qual_id, name, content, embedding, metadata, content_hash, chunk_index)
+                        VALUES
+                            (:qual_id, :name, :content, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                        ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                            name = EXCLUDED.name,
+                            content = EXCLUDED.content,
+                            embedding = EXCLUDED.embedding,
+                            metadata = EXCLUDED.metadata,
+                            content_hash = EXCLUDED.content_hash,
+                            updated_at = NOW()
+                        """
+                    ),
+                    {k: v for k, v in payload.items() if k != "bm25_text"},
+                )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO certificates_vectors (qual_id, name, content, embedding, metadata)
+                    VALUES (:qual_id, :name, :content, CAST(:embedding AS vector), CAST(:metadata AS jsonb))
+                    """
+                ),
+                {
+                    "qual_id": qual_id,
+                    "name": name,
+                    "content": content,
+                    "embedding": str(embedding),
+                    "metadata": meta_js,
+                },
+            )
         db.commit()
+
+    def upsert_vector_data_batch(
+        self,
+        db: Session,
+        rows: List[Dict[str, Any]],
+    ) -> Tuple[int, int, int]:
+        """
+        배치 upsert:
+        - 변경 없음(content_hash 동일) 항목은 임베딩 스킵
+        - 해시 동일이어도 bm25_text만 바뀐 경우: 임베딩 없이 bm25_text/metadata만 UPDATE (API 비용 절감)
+        반환: (embedding_upsert_count, skipped_count, sparse_only_patch_count)
+        """
+        if not rows:
+            return (0, 0, 0)
+
+        has_bm25 = _certificates_vectors_has_bm25_text_column(db)
+        prepared: List[Dict[str, Any]] = []
+        skipped = 0
+        bm25_patches: List[Dict[str, Any]] = []
+
+        for row in rows:
+            qual_id = row.get("qual_id")
+            chunk_index = int(row.get("chunk_index", 0) or 0)
+            content = str(row.get("content") or "")
+            dense_content = row.get("dense_content")
+            text_to_embed = normalize_text_for_embedding((dense_content or content) or "") or " "
+            content_hash = _content_hash(text_to_embed)
+
+            raw_bm25 = row.get("bm25_text")
+            bm25_text: Optional[str] = None
+            if raw_bm25 is not None:
+                bm25_text = normalize_text_for_embedding(str(raw_bm25)) or None
+
+            if qual_id is not None:
+                try:
+                    if has_bm25:
+                        existing = db.execute(
+                            text(
+                                """
+                                SELECT content_hash, COALESCE(bm25_text, '') AS bm25_text
+                                FROM certificates_vectors
+                                WHERE qual_id = :qual_id AND chunk_index = :chunk_index
+                                """
+                            ),
+                            {"qual_id": int(qual_id), "chunk_index": chunk_index},
+                        ).fetchone()
+                    else:
+                        existing = db.execute(
+                            text(
+                                """
+                                SELECT content_hash FROM certificates_vectors
+                                WHERE qual_id = :qual_id AND chunk_index = :chunk_index
+                                """
+                            ),
+                            {"qual_id": int(qual_id), "chunk_index": chunk_index},
+                        ).fetchone()
+                    if existing and getattr(existing, "content_hash", None) == content_hash:
+                        if has_bm25 and bm25_text is not None:
+                            old_bm = getattr(existing, "bm25_text", None) or ""
+                            if old_bm != bm25_text:
+                                bm25_patches.append(
+                                    {
+                                        "qual_id": int(qual_id),
+                                        "chunk_index": chunk_index,
+                                        "bm25_text": bm25_text,
+                                        "metadata": json.dumps(row.get("metadata") or {}),
+                                    }
+                                )
+                            else:
+                                skipped += 1
+                        else:
+                            skipped += 1
+                        continue
+                except Exception:
+                    pass
+
+            prepared.append(
+                {
+                    "qual_id": qual_id,
+                    "chunk_index": chunk_index,
+                    "name": str(row.get("name") or ""),
+                    "content": content,
+                    "dense_content": normalize_text_for_embedding(dense_content) if dense_content else None,
+                    "bm25_text": bm25_text,
+                    "metadata": row.get("metadata") or {},
+                    "text_to_embed": text_to_embed,
+                    "content_hash": content_hash,
+                }
+            )
+
+        sparse_patched = 0
+        try:
+            for p in bm25_patches:
+                db.execute(
+                    text(
+                        """
+                        UPDATE certificates_vectors
+                        SET bm25_text = :bm25_text,
+                            metadata = CAST(:metadata AS jsonb),
+                            updated_at = NOW()
+                        WHERE qual_id = :qual_id AND chunk_index = :chunk_index
+                        """
+                    ),
+                    p,
+                )
+                sparse_patched += 1
+
+            if not prepared:
+                db.commit()
+                logger.debug(
+                    "upsert_vector_data_batch: sparse_only=%s skipped=%s",
+                    sparse_patched,
+                    skipped,
+                )
+                return (0, skipped, sparse_patched)
+
+            embeddings = get_embeddings_batch([r["text_to_embed"] for r in prepared])
+        except Exception:
+            logger.exception("get_embeddings_batch failed: rows=%s", len(prepared))
+            raise
+        if not isinstance(embeddings, list) or len(embeddings) != len(prepared):
+            logger.error(
+                "embedding batch size mismatch: prepared=%s got=%s",
+                len(prepared),
+                len(embeddings) if isinstance(embeddings, list) else "invalid",
+            )
+            raise ValueError("embedding batch size mismatch")
+        has_dense_content = _certificates_vectors_has_dense_content_column(db)
+
+        updated = 0
+        try:
+            for r, emb in zip(prepared, embeddings):
+                qual_id = r["qual_id"]
+                payload = {
+                    "qual_id": qual_id,
+                    "name": r["name"],
+                    "content": r["content"],
+                    "dense_content": r["dense_content"],
+                    "bm25_text": r.get("bm25_text"),
+                    "embedding": str(emb),
+                    "metadata": json.dumps(r["metadata"]),
+                    "content_hash": r["content_hash"],
+                    "chunk_index": r["chunk_index"],
+                }
+                if qual_id is not None:
+                    if has_dense_content and has_bm25:
+                        db.execute(
+                            text(
+                                """
+                                INSERT INTO certificates_vectors
+                                    (qual_id, name, content, dense_content, bm25_text, embedding, metadata, content_hash, chunk_index)
+                                VALUES
+                                    (:qual_id, :name, :content, :dense_content, :bm25_text, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                                ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                                    name = EXCLUDED.name,
+                                    content = EXCLUDED.content,
+                                    dense_content = EXCLUDED.dense_content,
+                                    bm25_text = EXCLUDED.bm25_text,
+                                    embedding = EXCLUDED.embedding,
+                                    metadata = EXCLUDED.metadata,
+                                    content_hash = EXCLUDED.content_hash,
+                                    updated_at = NOW()
+                                """
+                            ),
+                            payload,
+                        )
+                    elif has_dense_content:
+                        db.execute(
+                            text(
+                                """
+                                INSERT INTO certificates_vectors
+                                    (qual_id, name, content, dense_content, embedding, metadata, content_hash, chunk_index)
+                                VALUES
+                                    (:qual_id, :name, :content, :dense_content, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                                ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                                    name = EXCLUDED.name,
+                                    content = EXCLUDED.content,
+                                    dense_content = EXCLUDED.dense_content,
+                                    embedding = EXCLUDED.embedding,
+                                    metadata = EXCLUDED.metadata,
+                                    content_hash = EXCLUDED.content_hash,
+                                    updated_at = NOW()
+                                """
+                            ),
+                            {k: v for k, v in payload.items() if k != "bm25_text"},
+                        )
+                    elif has_bm25:
+                        db.execute(
+                            text(
+                                """
+                                INSERT INTO certificates_vectors
+                                    (qual_id, name, content, bm25_text, embedding, metadata, content_hash, chunk_index)
+                                VALUES
+                                    (:qual_id, :name, :content, :bm25_text, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                                ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                                    name = EXCLUDED.name,
+                                    content = EXCLUDED.content,
+                                    bm25_text = EXCLUDED.bm25_text,
+                                    embedding = EXCLUDED.embedding,
+                                    metadata = EXCLUDED.metadata,
+                                    content_hash = EXCLUDED.content_hash,
+                                    updated_at = NOW()
+                                """
+                            ),
+                            payload,
+                        )
+                    else:
+                        db.execute(
+                            text(
+                                """
+                                INSERT INTO certificates_vectors
+                                    (qual_id, name, content, embedding, metadata, content_hash, chunk_index)
+                                VALUES
+                                    (:qual_id, :name, :content, CAST(:embedding AS vector), CAST(:metadata AS jsonb), :content_hash, :chunk_index)
+                                ON CONFLICT (qual_id, chunk_index) DO UPDATE SET
+                                    name = EXCLUDED.name,
+                                    content = EXCLUDED.content,
+                                    embedding = EXCLUDED.embedding,
+                                    metadata = EXCLUDED.metadata,
+                                    content_hash = EXCLUDED.content_hash,
+                                    updated_at = NOW()
+                                """
+                            ),
+                            {k: v for k, v in payload.items() if k != "bm25_text"},
+                        )
+                else:
+                    db.execute(
+                        text(
+                            """
+                            INSERT INTO certificates_vectors (qual_id, name, content, embedding, metadata)
+                            VALUES (:qual_id, :name, :content, CAST(:embedding AS vector), CAST(:metadata AS jsonb))
+                            """
+                        ),
+                        payload,
+                    )
+                updated += 1
+            db.commit()
+            logger.debug(
+                "upsert_vector_data_batch committed: updated=%s skipped=%s sparse_patched=%s",
+                updated,
+                skipped,
+                sparse_patched,
+            )
+            return (updated, skipped, sparse_patched)
+        except Exception:
+            db.rollback()
+            logger.exception("upsert_vector_data_batch failed and rolled back: rows=%s", len(prepared))
+            raise
 
     def similarity_search(
         self,

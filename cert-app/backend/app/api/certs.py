@@ -190,7 +190,16 @@ async def get_filter_options(
         logger.warning(f"Cache read failed for filter options: {e}")
     
     options = qualification_crud.get_filter_options(db)
-    
+    # dataset 허용 목록으로 main_fields, ncs_large 제한
+    try:
+        from app.rag.utils.dataset_allowlist import filter_main_fields, filter_ncs_large
+        if options.get("main_fields") is not None:
+            options["main_fields"] = filter_main_fields(options["main_fields"])
+        if options.get("ncs_large") is not None:
+            options["ncs_large"] = filter_ncs_large(options["ncs_large"])
+    except Exception as e:
+        logger.warning("dataset allowlist filter skipped: %s", e)
+
     # Validation
     if not options or not options.get("qual_types"):
         # Emergency fallback if DB query returned nothing unexpected

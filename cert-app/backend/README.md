@@ -71,6 +71,10 @@ backend/
 
 ## 🔍 RAG 파이프라인 개요
 
+> **지연·병목 점검**: `docs/RAG_PIPELINE_BOTTLENECKS.md` — Dense rewrite, 벡터 팔(HyDE/COT 등), BM25∥벡터 병렬, PRF·DB 풀 트레이드오프 정리.  
+> **개선 요약(2026-03, 슬롯·캐시·hybrid·배포)**: `docs/RAG_개선_정리_2026-03.md` — 상세는 `docs/RAG_QUALITY_LATENCY_IMPROVEMENTS.md`.  
+> **넓은 실험(청킹·단일 채널·인덱스)**: `docs/RAG_BROAD_EVAL_GUIDE.md`, 스크립트 `scripts/rag_broad_eval.py` (`--preset channels` = BM25/Vector/Contrastive 단독 + hybrid).
+
 1. **질의 처리**  
    Dense Query Rewrite(전공·학년·북마크·취득 반영), 짧은 쿼리 보조 키워드, Query Type 분류(키워드형/자연어형).
 
@@ -157,7 +161,7 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
   - 위치: `app/rag/retrieve/contrastive_retriever.py`  
   - 키: Redis `contrastive:q2v:v1:{hash(query_text)}`  
   - 값: 정규화된 768-dim 벡터(list[float])  
-  - TTL: 기본 **7일** (`_CONTRASTIVE_CACHE_TTL_SECONDS`)  
+  - TTL: 기본 **12시간** (`_CONTRASTIVE_Q2V_CACHE_TTL_SECONDS`)  
   - 무효화: Contrastive 모델/HF Space 교체 시 prefix(`v1`)만 올려 전체 무효화  
   - 효과 (골든 상위 8개, `top_k=20`, contrastive-only):  
     - Recall@20 / MRR@20: **0.8542 / 0.7708** (캐시 전후 동일)  
@@ -169,7 +173,7 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
   - 위치: `contrastive_retriever.contrastive_search()`  
   - 키: Redis `contrastive:results:v1:{hash(query_text, top_k)}`  
   - 값: `[[chunk_id, score], ...]` 형식의 상위 결과 리스트  
-  - TTL: 기본 **7일**  
+  - TTL: 기본 **24시간** (`_CONTRASTIVE_RESULTS_CACHE_TTL_SECONDS`)  
   - 무효화: FAISS 인덱스 리빌드/교체 시 prefix만 올려 전체 무효화  
   - 의미: HF Space 임베딩 + FAISS 검색까지 포함한 **완성된 후보 리스트**를 캐시하여, 동일 query/top_k 재요청 시 사실상 Redis read 수준 지연으로 응답.
 
@@ -225,15 +229,20 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 ## 📊 평가 및 골든셋
 
-- **표준 골든셋 (이 골든으로 평가)**: `data/reco_golden_recommendation_18.jsonl`
+- **표준 골든셋 (이 골든으로 평가)**: `dataset/reco_golden_recommendation_19_clean.jsonl`
   - **형식**: 질문은 **직무 희망만** (예: "데이터 분석 쪽으로 가고싶어"). 학년·학과·취득/북마크는 **프로필**에서 재질의에 반영.
-  - **건수**: n=34 (프로필 없음 16건 + 프로필 있음 18건, IT·비IT 혼합). **모든 RAG 평가는 이 골든셋 기준.**
+  - **레거시 참고**: `data/reco_golden_recommendation_18.jsonl` (과거 n=34 스펙). **현재 A/B·트리거는 19_clean 기준** (`RAG_Indexing.md`, `RAG_TOP_N_CANDIDATES` 주석 등).
 - **3모델 비교 (리랭커 없음)**  
   `cd cert-app/backend` 후  
-  `uv run python -m app.rag.eval --golden data/reco_golden_recommendation_18.jsonl [--output data/eval_rrf_current.csv] [--max-queries N]`  
+  `uv run python -m app.rag.eval --golden dataset/reco_golden_recommendation_19_clean.jsonl [--output dataset/eval_reco_golden_19_clean_enhanced.csv] [--max-queries N]`  
   → baseline(단일 Vector) / current(2-way 레거시) / current_reranker / enhanced_reranker(3-way BM25+Vector+Contrastive RRF+리랭커) 4-way 비교.
 - **재질의 스냅샷**: `uv run python scripts/build_rewrite_snapshot.py` → `data/reco_golden_recommendation_18_rewrite_snapshot.jsonl`
 - **intent_labels 갱신**: `uv run python scripts/build_intent_labels_init.py` 후 `uv run python scripts/upload_intent_labels_to_supabase.py`
+- **3-way linear fusion 튜닝 (LONG/EXACT 가중치)**: `python scripts/eval_linear_qt_sweep.py` — 골든 부분셋으로 `RAG_LINEAR_QT_LONG_W_*` 등 env 오버라이드를 서브프로세스 스윕. 평가 시 `RAG_EVAL_TOP_K`(기본 10)로 Recall@5/10·MRR_qual 관측 길이를 맞춘다.
+- **개선 축 순차 A/B (스윕 아님)**: `python scripts/eval_sequential_axis_ablation.py` — 메타 도메인 감점/PRF/dense 확장/BM25 옵션 등을 **하나씩** 쌓아 보며 복합(2×R@5_qual+MRR_qual)이 오를 때만 채택. 결과는 `reports/sequential_axis_ablation_YYYY-MM-DD.md`.
+- **linear 후 BM25 순위 prior**: `RAG_LINEAR_BM25_RANK_PRIOR`(기본 0.008) — 3-way linear 병합 직후 BM25 상위 후보에 소량 가산. A/B는 `reports/bm25_rank_prior_ablation_2026-03-21.md` 참고.
+- **원문+재작성 이중 벡터 RRF** (`get_vector_search`·`use_rewrite=True` 경로): `RAG_DUAL_VECTOR_RRF_WHEN` — `divergence`(기본), `legacy_non_it_only`, `off`. **하이브리드 메인**은 `dense_query`를 쓰며 `RAG_DENSE_MULTI_QUERY_ENABLE`이 켜져 있으면 원문+재작성을 이미 병합함(선형 fusion); 본 설정은 베이스라인 벡터-only·RAG `/ask`의 `baseline` 브랜치 등에 주로 영향.
+- **메타 soft 이후 BM25 prior**: `RAG_POST_METADATA_BM25_RANK_PRIOR`(기본 0.004) — 메타데이터 가산/감점으로 순위가 뒤집힌 뒤, BM25 상위 후보를 한 번 더 약하게 보정(메타 soft가 실제 적용된 경우만).
 
 ---
 
@@ -241,10 +250,11 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 | 용도 | 파일·스크립트 |
 |------|----------------|
-| **골든셋** | `data/reco_golden_recommendation_18.jsonl`, `data/reco_golden_recommendation_18_rewrite_snapshot.jsonl` (재질의 스냅샷) |
-| **평가 결과** | `data/eval_rrf_current.csv` (`python -m app.rag.eval --output ...` 실행 결과) |
+| **골든셋** | **`dataset/reco_golden_recommendation_19_clean.jsonl`** (표준). 레거시: `data/reco_golden_recommendation_18.jsonl`, `data/reco_golden_recommendation_18_rewrite_snapshot.jsonl` (재질의 스냅샷) |
+| **평가 결과** | 예: `dataset/eval_reco_golden_19_clean_enhanced.csv` (`python -m app.rag.eval --golden dataset/reco_golden_recommendation_19_clean.jsonl --output ...`) |
 | **intent_labels** | `data/intent_labels_init.json` (audit 기반 job/purpose), `scripts/upload_intent_labels_to_supabase.py`로 Supabase 반영 |
-| **3-way RAG** | `data/contrastive_cleaned_audit_v3.json` (intent 초기값 추출), `data/contrastive_index/` (FAISS), `data/domain_tokens.json` |
+| **3-way RAG** | `data/contrastive_cleaned_audit_v3.json` (intent 초기값 추출), `data/contrastive_index/` (FAISS), `data/domain_tokens_new_cert_full.json` (넓은 도메인·overrides) |
+| **Contrastive triplets (파인튜닝)** | 쿼리-only 생성: `scripts/generate_contrastive_triplets_from_queries.py` + `dataset/contrastive_queries.jsonl`. 최종 산출: `dataset/contrastive_train_triplets.jsonl` (refine·deleak 후). 절차·파일명은 `docs/CONTRASTIVE_TRAINING_DATA.md`. |
 | **리랭커** | `data/reranker_train_from_contrastive.jsonl` (학습 데이터). 어려운 쿼리(통번역/빅데이터 분석가) 패치는 `scripts/patch_reranker_train_hard_queries.py`로 추가됨. |
 
 ---

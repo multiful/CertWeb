@@ -9,8 +9,10 @@ BM25용 expand_query_single_string과 분리된 dense 전용 경로.
 - 2순위: Supabase intent 벡터 테이블을 활용한 라벨 보정
 순으로 동작해, 룰이 애매한 케이스만 벡터로 보정한다.
 """
+import json
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional, TypedDict
 
 from app.config import get_settings
@@ -291,6 +293,28 @@ def _infer_difficulty(
 
 # 재질의 시 IT 계열 보조 키워드(SQLD, 정보처리 등)를 넣을지 판단용.
 # data/domain_tokens.json 있으면 Supabase 데이터셋 기반, 없으면 기본값 사용.
+def query_suggests_identifier_heavy(text: str) -> bool:
+    """
+    §2 규칙 4(식별자·코드 보존) 휴리스틱: 코드·NCS형 번호·짧은 영문+숫자 혼합 등이 두드러지면 True.
+    확장(HyDE·COT·multi-query 병합 등)을 끄는 스위치와 연동할 때 사용.
+    """
+    q = (text or "").strip()
+    if not q:
+        return False
+    n = len(q)
+    digits = sum(1 for c in q if c.isdigit())
+    # NCS·분야코드 형태 (숫자-숫자)
+    if re.search(r"\d{2,}\s*[-–]\s*\d{2,}", q):
+        return True
+    # 짧은 질의에서 숫자 비중이 높음 (수험번호·연도 혼합 등)
+    if n <= 64 and digits >= 4 and (digits / max(n, 1)) >= 0.18:
+        return True
+    # 영문 약어+숫자 (예: ADsP, SQLP, NCS 등)
+    if n <= 48 and re.search(r"[A-Za-z]{2,}\s*\d|\d\s*[A-Za-z]{2,}|[A-Z]{2,}\d+", q):
+        return True
+    return False
+
+
 def _query_suggests_it_domain(slots: Dict[str, str], original: str) -> bool:
     """쿼리나 슬롯이 IT/데이터 계열로 보이면 True. BM25_BASELINE_MODE=1이면 항상 True(기존 동작)."""
     import os
@@ -455,6 +479,52 @@ DENSE_REWRITE_FIXED_KEYS = ["전공", "희망직무", "목적"]
 
 logger = logging.getLogger(__name__)
 _settings = get_settings()
+_LOCAL_QT_CACHE: Dict[str, tuple[float, Optional[str]]] = {}
+_LOCAL_QT_CACHE_MAX = 2048
+
+
+def _local_qt_cache_get(key: str, ttl_s: int) -> tuple[bool, Optional[str]]:
+    """프로세스 로컬 query_type 캐시 조회. Redis 미연결 시 DB 왕복 완화용."""
+    if not key:
+        return False, None
+    row = _LOCAL_QT_CACHE.get(key)
+    if not row:
+        return False, None
+    ts, qt = row
+    if (time.time() - ts) > max(1, ttl_s):
+        _LOCAL_QT_CACHE.pop(key, None)
+        return False, None
+    return True, qt
+
+
+def _local_qt_cache_set(key: str, qt: Optional[str]) -> None:
+    if not key:
+        return
+    _LOCAL_QT_CACHE[key] = (time.time(), qt)
+    if len(_LOCAL_QT_CACHE) > _LOCAL_QT_CACHE_MAX:
+        # 오래된 절반 정리 (간단 LRU 근사)
+        oldest = sorted(_LOCAL_QT_CACHE.items(), key=lambda kv: kv[1][0])[: _LOCAL_QT_CACHE_MAX // 2]
+        for k, _ in oldest:
+            _LOCAL_QT_CACHE.pop(k, None)
+
+
+def _dense_cache_hash(q: str, profile: Optional[UserProfile]) -> str:
+    """
+    Redis 재질의/슬롯 캐시 키용 해시.
+
+    - 프로필이 **없거나 빈 dict** (`None`, `{}`): 과거와 동일하게 **질문 q만** 해시 → 불필요한 캐시 미스·추가 직렬화 비용 방지.
+    - 프로필에 값이 있으면: 동일 질문이라도 재질의·슬롯이 달라지므로 `profile`을 포함해 분리한다.
+    """
+    qn = (q or "").strip()
+    try:
+        if not profile:
+            return redis_client.hash_query_params(q=qn)
+        return redis_client.hash_query_params(
+            q=qn,
+            profile=json.dumps(profile, sort_keys=True, default=str),
+        )
+    except Exception:
+        return redis_client.hash_query_params(q=qn)
 
 
 def _apply_intent_vector_fallback(slots: Dict[str, str], original: str) -> Dict[str, str]:
@@ -551,27 +621,143 @@ def _apply_dense_slot_vector_fallback(
     return slots
 
 
+def _slots_from_rewrite_pipeline(
+    q: str,
+    profile: Optional[UserProfile] = None,
+) -> Dict[str, str]:
+    """
+    재질의(rewrite_for_dense)와 동일한 슬롯 파이프라인.
+    규칙 추출 → intent 벡터 보정 → dense_slot 벡터 보정 → 프로필 병합.
+    """
+    slots = _extract_slots(q)
+    try:
+        slots = _apply_intent_vector_fallback(slots, q)
+    except Exception:
+        logger.debug("slots_from_rewrite_pipeline: intent_vector_fallback failed", exc_info=True)
+    try:
+        slots = _apply_dense_slot_vector_fallback(slots, q, profile)
+    except Exception:
+        logger.debug("slots_from_rewrite_pipeline: dense_slot_vector_fallback failed", exc_info=True)
+    slots = _merge_profile_into_slots(slots, profile)
+    return slots
+
+
+def _annotate_domain_difficulty_in_slots(
+    slots: Dict[str, str],
+    original: str,
+    profile: Optional[UserProfile] = None,
+) -> None:
+    """
+    _slots_to_structured_text / 메타 soft와 동일한 도메인·난이도 규칙을 slots에 in-place 반영.
+    (벡터 fallback 옵션 포함 — 구조화 문자열과 동일 로직)
+    """
+    original = (original or "").strip()
+    domains = _detect_broad_domains_from_slots(slots, original, profile=profile)
+    if not domains:
+        try:
+            from app.rag.config import get_rag_settings
+
+            if get_rag_settings().RAG_DENSE_SLOT_VECTOR_FALLBACK_ENABLE:
+                from app.rag.utils.slot_vector_labels import lookup_slot_label_with_vector
+
+                v = lookup_slot_label_with_vector(original, "domain", top_k=1)
+                if v:
+                    domains = [s.strip() for s in v.split(",") if s.strip()] or [v]
+        except Exception:
+            pass
+    domain_line = ", ".join(domains) if domains else "없음"
+    slots["도메인"] = domain_line
+    # 정규화도메인: 세부 도메인을 기준으로 상위 도메인(top_domain)으로 매핑.
+    # 예) 선박/해양 -> 모빌리티/운송
+    normalized_domains: List[str] = []
+    if domains:
+        try:
+            from app.rag.utils.domain_tokens import get_top_domain_for_domain
+
+            seen_top = set()
+            for d in domains:
+                top = (get_top_domain_for_domain(d) or "").strip()
+                if not top:
+                    continue
+                if top in seen_top:
+                    continue
+                seen_top.add(top)
+                normalized_domains.append(top)
+        except Exception:
+            normalized_domains = []
+    slots["정규화도메인"] = ", ".join(normalized_domains) if normalized_domains else "없음"
+
+    # 희망직무는 비어 있지 않도록 보강한다.
+    # - 1순위: 도메인
+    # - 2순위: 전공
+    # - 3순위: 일반 fallback
+    job = (slots.get("희망직무") or "").strip()
+    if not job:
+        if domains:
+            slots["희망직무"] = domains[0]
+        elif (slots.get("전공") or "").strip():
+            slots["희망직무"] = (slots.get("전공") or "").strip()
+        else:
+            slots["희망직무"] = "관련 직무"
+
+    difficulty = _infer_difficulty(original, slots, profile=profile)
+    if difficulty == "중급":
+        try:
+            from app.rag.config import get_rag_settings
+
+            if get_rag_settings().RAG_DENSE_SLOT_VECTOR_FALLBACK_ENABLE:
+                from app.rag.utils.slot_vector_labels import lookup_slot_label_with_vector
+
+                v = lookup_slot_label_with_vector(original, "difficulty", top_k=1)
+                if v:
+                    difficulty = v
+        except Exception:
+            pass
+    slots["난이도"] = difficulty
+
+
 def _slots_to_structured_text(
     slots: Dict[str, str],
     original: str,
     profile: Optional[UserProfile] = None,
 ) -> str:
     """
-    슬롯을 골든/스냅샷용 고정 구조화 문자열로 변환.
-    순서: 전공 → 학년 → 도메인 → 난이도 → 희망직무 → 관심 자격증 → 취득 자격증 → 목적 → 질문(원문).
-    전공은 원본(profile.major)과 정규화된 major_category를 모두 남기기 위해
-    "원본 (정규화)" 형태로 표기한다.
+    슬롯을 Dense/Vector 검색용 구조화 문자열로 변환.
+
+    필드 출력 정책:
+    ┌─────────────────┬──────────────────────────────────────┐
+    │ 필드            │ 정책                                 │
+    ├─────────────────┼──────────────────────────────────────┤
+    │ 전공            │ 항상 출력 (값이 없으면 생략)          │
+    │ 학년            │ 항상 출력 — NULL이면 "없음"          │
+    │ 도메인          │ 값이 있을 때만                        │
+    │ 난이도          │ "중급"(기본값) 제외, 입문/고급만     │
+    │ 희망직무        │ 값이 있을 때만 (parsing 실패 생략)    │
+    │ 관심 자격증     │ 항상 출력 — 없으면 "없음"            │
+    │ 취득 자격증     │ 항상 출력 — 없으면 "없음"            │
+    │ 목적            │ 값이 있을 때만 (generic 제외)         │
+    │ 키워드(boost)   │ 값이 있을 때만, cert 반복 허용       │
+    │ 질문(원문)      │ 항상 마지막에 출력                    │
+    └─────────────────┴──────────────────────────────────────┘
+
+    학년/관심자격증/취득자격증을 "없음"으로 출력하는 이유:
+    "없음"은 "사용자에게 해당 정보가 없다"는 의미 있는 NULL 신호.
+    필드 자체가 없으면 이 신호를 잃는다.
     """
+    original = (original or "").strip()
+    lines: List[str] = []
+
+    # 1. 전공 (값 있을 때만)
     raw_major = ((profile.get("major") if profile else "") or "").strip()
     major = (slots.get("전공") or "").strip() or raw_major
     if raw_major and major and raw_major != major:
-        major_line = f"{raw_major} ({major})"
+        major_display = f"{raw_major} ({major})"
     else:
-        major_line = major or raw_major
-    job = (slots.get("희망직무") or "").strip()
-    purpose = (slots.get("목적") or "").strip()
+        major_display = major or raw_major
+    if major_display:
+        lines.append("전공: " + major_display)
 
-    # 학년: 슬롯 또는 profile
+    # 2. 학년 — NULL이어도 항상 출력 ("없음" 자체가 정보)
     grade_str = (slots.get("학년") or "").strip()
     if not grade_str and profile and profile.get("grade_level") is not None:
         try:
@@ -580,66 +766,66 @@ def _slots_to_structured_text(
                 grade_str = f"{g}학년"
         except (TypeError, ValueError):
             pass
+    lines.append("학년: " + (grade_str if grade_str else "없음"))
 
-    # 관심 자격증 / 취득 자격증: profile 기준, 없으면 "없음"
+    # 3. 도메인 (값 있을 때만)
+    _annotate_domain_difficulty_in_slots(slots, original, profile=profile)
+    domain_line = (slots.get("도메인") or "").strip()
+    if domain_line and domain_line != "없음":
+        lines.append("도메인: " + domain_line)
+
+    # 4. 난이도: "중급"(기본값, 구별력 없음) 생략
+    difficulty = (slots.get("난이도") or "중급").strip()
+    if difficulty and difficulty != "중급":
+        lines.append("난이도: " + difficulty)
+
+    # 5. 희망직무 (parsing 성공 시만, placeholder 제거)
+    job = (slots.get("희망직무") or "").strip()
+    if job:
+        lines.append("희망직무: " + job)
+
+    # 6. 관심 자격증 — NULL이어도 항상 출력 ("없음" 자체가 정보)
     favorite_names = (profile.get("favorite_cert_names") or [])[:5] if profile else []
+    lines.append(
+        "관심 자격증: " + (", ".join(favorite_names) if favorite_names else "없음")
+    )
+
+    # 7. 취득 자격증 — NULL이어도 항상 출력 ("없음" 자체가 정보)
     acquired_names = (profile.get("acquired_cert_names") or [])[:10] if profile else []
-    interest_line = ", ".join(favorite_names) if favorite_names else "없음"
-    acquired_line = ", ".join(acquired_names) if acquired_names else "없음"
+    lines.append(
+        "취득 자격증: " + (", ".join(acquired_names) if acquired_names else "없음")
+    )
 
-    original = (original or "").strip()
+    # 8. 목적: 값이 있을 때만 출력
+    purpose = (slots.get("목적") or "").strip()
+    if purpose:
+        lines.append("목적: " + purpose)
 
-    # 도메인: 규칙 기반 먼저, 비었을 때만 dense_slot_labels 벡터 fallback
-    domains = _detect_broad_domains_from_slots(slots, original, profile=profile)
-    if not domains:
-        try:
-            from app.rag.config import get_rag_settings
-            if get_rag_settings().RAG_DENSE_SLOT_VECTOR_FALLBACK_ENABLE:
-                from app.rag.utils.slot_vector_labels import lookup_slot_label_with_vector
-                v = lookup_slot_label_with_vector(original, "domain", top_k=1)
-                if v:
-                    domains = [s.strip() for s in v.split(",") if s.strip()] or [v]
-        except Exception:
-            pass
-    domain_line = ", ".join(domains) if domains else "없음"
-    slots["도메인"] = domain_line
-
-    # 난이도: 규칙 기반 먼저, "중급"일 때만 dense_slot_labels 벡터 fallback
-    difficulty = _infer_difficulty(original, slots, profile=profile)
-    if difficulty == "중급":
-        try:
-            from app.rag.config import get_rag_settings
-            if get_rag_settings().RAG_DENSE_SLOT_VECTOR_FALLBACK_ENABLE:
-                from app.rag.utils.slot_vector_labels import lookup_slot_label_with_vector
-                v = lookup_slot_label_with_vector(original, "difficulty", top_k=1)
-                if v:
-                    difficulty = v
-        except Exception:
-            pass
-    slots["난이도"] = difficulty
-
-    # Dense/vector 검색 전용 보조 키워드: 직무/도메인·프로필 기반 키워드를 추가해
-    # "데이터 분석 취업 자격증 SQLD ADsP 데이터분석" 수준까지 의미를 강화한다.
+    # 9. 보조 키워드 — cert 이름 반복 허용 (임베딩 가중치 강화)
     dense_boost_terms = _build_dense_boost_terms(slots, original, profile=profile)
-
-    lines = [
-        "전공: " + major_line,
-        "학년: " + grade_str,
-        "도메인: " + domain_line,
-        "난이도: " + difficulty,
-        "희망직무: " + (job if job else "(쿼리 미포함)"),
-        "관심 자격증: " + interest_line,
-        "취득 자격증: " + acquired_line,
-        "목적: " + purpose,
-    ]
     if dense_boost_terms:
-        lines.append("Dense 보조 키워드: " + " ".join(dense_boost_terms))
-    # dense/vector/contrastive용 재질의에는 항상 raw query도 함께 포함시켜,
-    # 구조화 슬롯 + 원문 문맥을 동시에 보게 한다.
+        lines.append("키워드: " + " ".join(dense_boost_terms))
+
+    # 10. 질문(원문) — 항상 마지막 (구조화 슬롯 + 원문 문맥 동시 제공)
     if original:
         lines.append("질문: " + original)
 
     return "\n".join(lines)
+
+
+def _rewrite_for_dense_core(
+    q: str,
+    profile: Optional[UserProfile] = None,
+) -> tuple[str, Dict[str, Any]]:
+    """
+    재질의 문자열 + 메타 soft/리랭커용 슬롯 dict(도메인·난이도 포함)를 한 번에 계산.
+    hybrid_retrieve에서 extract_slots_for_dense 중복 호출을 막기 위해 사용한다.
+    """
+    base = _slots_from_rewrite_pipeline(q, profile)
+    slots_copy = dict(base)
+    rewritten = _slots_to_structured_text(slots_copy, q, profile=profile)
+    scoring_slots: Dict[str, Any] = dict(slots_copy)
+    return rewritten, scoring_slots
 
 
 def rewrite_for_dense(
@@ -661,30 +847,27 @@ def rewrite_for_dense(
         return q
     # 규칙 기반 rewrite는 순수 파이썬이지만, intent-vector 보정 등과 결합되면
     # 재질의에서 불필요한 계산이 반복될 수 있으므로 Redis에 TTL 캐시를 둔다.
+    # v4 문자열 / v6 번들: 학년·관심자격증·취득자격증 항상 출력 + 질문 마지막 구조 반영.
     cache_key: Optional[str] = None
+    h = ""
     if redis_client.is_connected():
         try:
-            h = redis_client.hash_query_params(q=q)
-            cache_key = f"rag:dense_rewrite:v2:{h}"
+            h = _dense_cache_hash(q, profile)
+            cache_key = f"rag:dense_rewrite:v4:{h}"
             cached = redis_client.get(cache_key)
             if isinstance(cached, str):
                 return cached
         except Exception:
             cache_key = None
-    slots = _extract_slots(q)
-    # Supabase intent 벡터 테이블이 활성화된 경우에만, 룰이 애매한 케이스에 한해 보정 라벨 적용
-    try:
-        slots = _apply_intent_vector_fallback(slots, q)
-    except Exception:
-        logger.debug("rewrite_for_dense: intent_vector_fallback failed", exc_info=True)
-    try:
-        slots = _apply_dense_slot_vector_fallback(slots, q, profile)
-    except Exception:
-        logger.debug("rewrite_for_dense: dense_slot_vector_fallback failed", exc_info=True)
-    rewritten = _slots_to_structured_text(slots, q, profile=profile)
-    if cache_key:
+    rewritten, scoring_slots = _rewrite_for_dense_core(q, profile)
+    if cache_key and h:
         try:
             redis_client.set(cache_key, rewritten, ttl=_settings.CACHE_TTL_RAG)
+            redis_client.set(
+                f"rag:dense_bundle:v6:{h}",
+                {"rewrite": rewritten, "slots": scoring_slots},
+                ttl=_settings.CACHE_TTL_RAG,
+            )
         except Exception:
             pass
     return rewritten
@@ -717,17 +900,15 @@ def rewrite_and_slots_for_dense(
     반환: (rewrite: str, slots: Dict[str, str])
     """
     q = (query or "").strip()
-    slots = _extract_slots(q)
-    if use_intent_fallback:
+    if not use_intent_fallback:
+        slots = _extract_slots(q)
         try:
-            slots = _apply_intent_vector_fallback(slots, q)
+            slots = _apply_dense_slot_vector_fallback(slots, q, profile)
         except Exception:
             pass
-    try:
-        slots = _apply_dense_slot_vector_fallback(slots, q, profile)
-    except Exception:
-        pass
-    slots = _merge_profile_into_slots(slots, profile)
+        slots = _merge_profile_into_slots(slots, profile)
+    else:
+        slots = _slots_from_rewrite_pipeline(q, profile)
     rewrite = _slots_to_structured_text(slots, q, profile=profile)
     return (rewrite, dict(slots))
 
@@ -735,9 +916,13 @@ def rewrite_and_slots_for_dense(
 def rewrite_for_dense_with_type(
     query: str,
     profile: Optional[UserProfile] = None,
-) -> tuple[str, Optional[str]]:
+) -> tuple[str, Optional[str], Optional[Dict[str, Any]]]:
     """
-    Dense 재질의 문자열과 query_type을 함께 반환.
+    Dense 재질의 문자열, query_type, 그리고 메타 soft용 슬롯 dict를 함께 반환.
+
+    세 번째 값은 재질의와 동일 슬롯 파이프라인으로 계산된다.
+    Redis `rag:dense_bundle:v7:*` 히트 시 재질의+슬롯+query_type을 함께 복원하고,
+    v6 번들(rewrite+slots) 또는 v4 문자열 캐시 순으로 fallback한다.
 
     query_type은 우선적으로 Supabase query_type_labels 벡터 테이블에서
     raw_query(+프로필) 기반으로 조회하고, 실패 시 기존 rule-based
@@ -745,22 +930,98 @@ def rewrite_for_dense_with_type(
     """
     q = (query or "").strip()
     if not q:
-        return q, None
+        return q, None, None
 
-    rewrite = rewrite_for_dense(q, profile=profile)
+    # v4 문자열 / v6 번들(rewrite+slots) / v7 번들(rewrite+slots+qt)
+    # 포맷 변경 이력: v4 = 학년·관심·취득자격증 항상 출력, 질문 마지막
+    cache_key_v4: Optional[str] = None
+    bundle_key_v7: Optional[str] = None
+    qt_cache_key: Optional[str] = None
+    h = ""
+    if redis_client.is_connected():
+        try:
+            h = _dense_cache_hash(q, profile)
+            cache_key_v4 = f"rag:dense_rewrite:v4:{h}"
+            bundle_key_v7 = f"rag:dense_bundle:v7:{h}"
+            qt_cache_key = f"rag:dense_qt:v1:{h}"
+            bundle_v7 = redis_client.get(bundle_key_v7)
+            if (
+                isinstance(bundle_v7, dict)
+                and bundle_v7.get("rewrite") is not None
+                and isinstance(bundle_v7.get("slots"), dict)
+                and ("qt" in bundle_v7)
+            ):
+                return str(bundle_v7["rewrite"]), (bundle_v7.get("qt") or None), dict(bundle_v7["slots"])
+            key_v6 = f"rag:dense_bundle:v6:{h}"
+            bundle = redis_client.get(key_v6)
+            if (
+                isinstance(bundle, dict)
+                and bundle.get("rewrite") is not None
+                and isinstance(bundle.get("slots"), dict)
+            ):
+                rewrite = str(bundle["rewrite"])
+                scoring_slots = dict(bundle["slots"])
+            else:
+                cached_v4 = redis_client.get(cache_key_v4)
+                if isinstance(cached_v4, str):
+                    rewrite = cached_v4
+                    scoring_slots = extract_slots_for_dense(q, profile)
+                else:
+                    rewrite, scoring_slots = _rewrite_for_dense_core(q, profile)
+                    try:
+                        redis_client.set(cache_key_v4, rewrite, ttl=_settings.CACHE_TTL_RAG)
+                        redis_client.set(
+                            key_v6,
+                            {"rewrite": rewrite, "slots": scoring_slots},
+                            ttl=_settings.CACHE_TTL_RAG,
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            rewrite, scoring_slots = _rewrite_for_dense_core(q, profile)
+            if h and cache_key_v4:
+                try:
+                    redis_client.set(cache_key_v4, rewrite, ttl=_settings.CACHE_TTL_RAG)
+                    redis_client.set(
+                        f"rag:dense_bundle:v6:{h}",
+                        {"rewrite": rewrite, "slots": scoring_slots},
+                        ttl=_settings.CACHE_TTL_RAG,
+                    )
+                except Exception:
+                    pass
+    else:
+        rewrite, scoring_slots = _rewrite_for_dense_core(q, profile)
 
-    # 1) Supabase query_type_labels 벡터 매칭 시도
+    # 1) query_type 캐시 확인 (질문+프로필 해시)
     qt: Optional[str] = None
-    try:
-        from app.rag.utils.query_type_vector_labels import lookup_query_type_with_vector
+    qt_cached = False
+    if redis_client.is_connected() and qt_cache_key:
+        try:
+            cached_qt = redis_client.get(qt_cache_key)
+            if isinstance(cached_qt, str):
+                qt_cached = True
+                qt = None if cached_qt == "__NONE__" else cached_qt
+        except Exception:
+            qt = None
+    # Redis가 없거나 캐시 미스면 로컬 캐시 사용
+    if not qt_cached and qt_cache_key:
+        hit, local_qt = _local_qt_cache_get(qt_cache_key, int(_settings.CACHE_TTL_RAG))
+        if hit:
+            qt_cached = True
+            qt = local_qt
 
-        major = profile.get("major") if profile else None
-        grade_level = profile.get("grade_level") if profile else None
-        qt = lookup_query_type_with_vector(q, major=major, grade_level=grade_level)
-    except Exception:
-        qt = None
+    # 2) 캐시 미스 시 Supabase query_type_labels 벡터 매칭 시도
+    if not qt_cached:
+        try:
+            from app.rag.utils.query_type_vector_labels import lookup_query_type_with_vector
 
-    # 2) 실패 시 기존 rule-based query_type 분류로 fallback
+            major = profile.get("major") if profile else None
+            grade_level = profile.get("grade_level") if profile else None
+            qt = lookup_query_type_with_vector(q, major=major, grade_level=grade_level)
+        except Exception:
+            qt = None
+
+    # 3) 실패 시 기존 rule-based query_type 분류로 fallback
     if not qt:
         try:
             from app.rag.eval.query_type import classify_query_type
@@ -768,26 +1029,50 @@ def rewrite_for_dense_with_type(
             qt = classify_query_type(q, from_golden=None)
         except Exception:
             qt = None
+    if redis_client.is_connected() and qt_cache_key:
+        try:
+            redis_client.set(
+                qt_cache_key,
+                qt if qt else "__NONE__",
+                ttl=_settings.CACHE_TTL_RAG,
+            )
+        except Exception:
+            pass
+    if qt_cache_key:
+        _local_qt_cache_set(qt_cache_key, qt)
 
     # 선택: 재질의 문자열에 쿼리유형 추가 (벡터/contrastive 입력 품질·리랭커 학습 일치용)
     try:
         from app.rag.config import get_rag_settings
+
         if get_rag_settings().RAG_REWRITE_ADD_QUERY_TYPE and qt:
             rewrite = rewrite + "\n쿼리유형: " + qt
     except Exception:
         pass
-    return rewrite, qt
+
+    # 최종 결과(v7) 캐시: rewrite/slots/query_type
+    if redis_client.is_connected() and bundle_key_v7:
+        try:
+            redis_client.set(
+                bundle_key_v7,
+                {"rewrite": rewrite, "slots": scoring_slots, "qt": qt},
+                ttl=_settings.CACHE_TTL_RAG,
+            )
+        except Exception:
+            pass
+    return rewrite, qt, scoring_slots
 
 
 def extract_slots_for_dense(query: str, profile: Optional[UserProfile] = None) -> Dict[str, Any]:
-    """다른 모듈에서 슬롯만 필요할 때 (예: metadata soft scoring). profile 있으면 전공/학년 반영."""
+    """
+    메타 soft / 리랭커 등에서 사용하는 슬롯 dict.
+    재질의(rewrite_for_dense)와 동일 파이프라인(intent·dense_slot 보정 포함) 후
+    도메인·난이도를 구조화 경로와 동일 규칙으로 채운다.
+    """
     q = (query or "").strip()
-    slots = _extract_slots(q)
-    if profile:
-        slots = _merge_profile_into_slots(slots, profile)
-    # 도메인/난이도도 slots에 포함시켜 메타데이터 soft score 등에서 재사용
-    domains = _detect_broad_domains_from_slots(slots, q, profile=profile)
-    domain_line = ", ".join(domains) if domains else "없음"
-    slots["도메인"] = domain_line
-    slots["난이도"] = _infer_difficulty(q, slots, profile=profile)
-    return slots
+    if not q:
+        return {}
+    base = _slots_from_rewrite_pipeline(q, profile)
+    slots_copy: Dict[str, Any] = dict(base)
+    _annotate_domain_difficulty_in_slots(slots_copy, q, profile=profile)
+    return slots_copy

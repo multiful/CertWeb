@@ -77,7 +77,7 @@ export function RecommendationPage() {
           className="bg-purple-500/10 text-purple-400 border-purple-500/20"
         >
           <Sparkles className="w-3 h-3 mr-1" />
-          AI 기반 맞춤 추천
+          전공·DB 매핑 기반 추천
         </Badge>
         <h1 className="text-3xl font-bold text-white">
           <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
@@ -85,8 +85,8 @@ export function RecommendationPage() {
           </span>
         </h1>
         <p className="text-slate-300 max-w-lg mx-auto">
-          전공을 입력하면 해당 분야에 적합한 자격증을 추천해드립니다.
-          합격률, 난이도, 연관성을 실시간 데이터로 분석합니다.
+          전공을 입력하면 DB에 축적된 전공–자격증 매핑과 합격률·난이도 데이터를 바탕으로 목록을 구성합니다.
+          하이브리드 RAG 엔진은 AI 추천 메뉴에서 이용할 수 있습니다.
         </p>
       </div>
 

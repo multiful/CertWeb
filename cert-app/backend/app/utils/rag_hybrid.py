@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 TOP_PER_QUERY = 30
 RRF_K = 60
 RRF_K_SPARSE_INTERNAL = 30
+# ENHANCED_VECTOR_THRESHOLD는 과거 실험값(0.3) 레거시입니다.
+# 실제 운영/평가에서는 vector 테이블/스케일에 맞춰 RAG_VECTOR_THRESHOLD를 따르도록 enhanced_rag_03_hybrid에서 동적으로 계산합니다.
 ENHANCED_VECTOR_THRESHOLD = 0.3
 
 
@@ -80,7 +82,13 @@ def _keyword_overlap_rerank(
     """
     if not qual_ids or not query_tokens:
         return qual_ids[:top_k]
-    token_set = set(t.lower() for t in query_tokens if t.strip())
+    # 너무 짧은 토큰(조사/단독 키워드 등)은 name에 우연히 매칭되기 쉬워,
+    # 히트 수를 부풀려 RRF 순서를 뒤집는 원인이 된다. (품질 저하 방지)
+    token_set = set(
+        t.lower()
+        for t in query_tokens
+        if t and isinstance(t, str) and t.strip() and len(t.strip()) >= 2
+    )
     if not token_set:
         return qual_ids[:top_k]
     sql = text(
@@ -95,6 +103,18 @@ def _keyword_overlap_rerank(
         return sum(1 for t in token_set if t in s)
 
     scored = [(qid, count_hits(qid)) for qid in qual_ids]
+    # overlap signal이 너무 약하거나(대부분 0~2 hits),
+    # top1과 top2 히트 격차가 작으면(=대부분 우연 매칭),
+    # rerank가 오히려 RRF 순서를 뒤집어 recall을 깎을 수 있어 스킵한다.
+    scored_sorted = sorted(scored, key=lambda x: -x[1])
+    top1_hits = scored_sorted[0][1] if scored_sorted else 0
+    top2_hits = scored_sorted[1][1] if len(scored_sorted) >= 2 else 0
+    if top1_hits <= 2:
+        return qual_ids[:top_k]
+    if (top1_hits - top2_hits) <= 1:
+        return qual_ids[:top_k]
+
+    # 동일 hit 수에서는 파이썬 stable sort 특성상 기존 qual_ids 순서를 유지한다.
     scored.sort(key=lambda x: -x[1])
     return [qid for qid, _ in scored][:top_k]
 
@@ -112,7 +132,17 @@ def enhanced_rag_03_hybrid(
     w_d_override, w_s_override 가 있으면 classify_query_and_expand 대신 해당 가중치 사용(랜덤 서치 등).
     """
     from app.rag.config import get_rag_settings
-    max_dist = 1.0 - ENHANCED_VECTOR_THRESHOLD
+    # Dense 채널의 distance threshold는 vector 테이블의 스케일과 일치해야 함.
+    # 기존엔 ENHANCED_VECTOR_THRESHOLD(0.3)를 하드코딩했는데,
+    # vector table 재구성/스케일 변경 후 dense 후보가 과도하게 줄어들면서
+    # Recall@5_qual/MRR_qual이 크게 하락하는 문제가 확인됐다.
+    settings = get_rag_settings()
+    enhanced_vector_threshold = getattr(settings, "RAG_VECTOR_THRESHOLD", None)
+    if enhanced_vector_threshold is None:
+        enhanced_vector_threshold = ENHANCED_VECTOR_THRESHOLD
+    enhanced_vector_threshold = float(enhanced_vector_threshold)
+    # similarity threshold -> pgvector distance upper-bound로 변환 (현행 벡터 서비스 방식과 동일)
+    max_dist = 1.0 - enhanced_vector_threshold
     if w_d_override is not None and w_s_override is not None:
         w_d, w_s = w_d_override, w_s_override
         expanded_q = (query or "").strip()

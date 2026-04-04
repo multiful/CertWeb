@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Search,
   Award,
@@ -16,7 +16,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useRouter } from '@/lib/router';
-import { getTrendingCerts } from '@/lib/api';
+import { getTrendingCerts, getCertificationsCatalogTotal, FALLBACK_CERT_CATALOG_TOTAL } from '@/lib/api';
 import type { TrendingQualification } from '@/types';
 import { toast } from 'sonner';
 
@@ -27,8 +27,13 @@ export function HomePage() {
   const [loading, setLoading] = useState(false);
   const [hasRequestedTrending, setHasRequestedTrending] = useState(false);
   const [trendingError, setTrendingError] = useState(false);
+  const [certCatalogTotal, setCertCatalogTotal] = useState(FALLBACK_CERT_CATALOG_TOTAL);
   const trendingSectionRef = useRef<HTMLElement>(null);
   const fetchStartedRef = useRef(false);
+
+  useEffect(() => {
+    getCertificationsCatalogTotal().then(setCertCatalogTotal).catch(() => {});
+  }, []);
 
   const fetchTrendingData = useCallback(async () => {
     if (fetchStartedRef.current && !trendingError) return;
@@ -62,6 +67,18 @@ export function HomePage() {
     return () => observer.disconnect();
   }, [fetchTrendingData]);
 
+  /** API score는 조회·검색 가중치 누적값(또는 응시자 수 fallback)이라 %가 아님 → 목록 내 1위 대비 상대 지표로만 표시 */
+  const trendingRelativePctById = useMemo(() => {
+    const valid = trendingCerts.map((c) => (Number.isFinite(c.score) && c.score >= 0 ? c.score : 0));
+    const max = valid.length ? Math.max(...valid) : 0;
+    const map = new Map<number, number>();
+    trendingCerts.forEach((c, i) => {
+      const s = valid[i] ?? 0;
+      map.set(c.qual_id, max > 0 ? Math.round((s / max) * 100) : 0);
+    });
+    return map;
+  }, [trendingCerts]);
+
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     if (search.trim()) {
@@ -79,7 +96,12 @@ export function HomePage() {
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-full -z-10">
           <div className="absolute top-20 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-[100px] animate-pulse" />
           <div className="absolute bottom-20 right-1/4 w-96 h-96 bg-indigo-500/10 rounded-full blur-[100px] animate-pulse delay-700" />
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20 brightness-50 contrast-150" />
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] opacity-[0.18] brightness-50 contrast-150 pointer-events-none mix-blend-overlay"
+            style={{
+              backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
+            }}
+          />
         </div>
 
         <div className="container mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
@@ -128,7 +150,7 @@ export function HomePage() {
 
             <div className="flex items-center justify-center lg:justify-start gap-8 pt-8 text-slate-500 text-sm font-medium">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> 1,101개 자격증 데이터
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {certCatalogTotal.toLocaleString('ko-KR')}개 자격증 데이터
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" /> 실시간 합격률 분석
@@ -290,9 +312,14 @@ export function HomePage() {
                   <div className="relative space-y-4">
                     <div className="flex justify-between items-start">
                       <Badge className="bg-slate-800 text-slate-300 border-none px-2 py-0">{cert.qual_type}</Badge>
-                      <div className="flex items-center gap-1 text-blue-400 text-sm font-bold bg-blue-400/5 px-2 py-1 rounded-lg border border-blue-400/10">
-                        <TrendingUp className="w-3 h-3" />
-                        {cert.score.toFixed(1)}
+                      <div
+                        className="flex items-center gap-1 text-blue-400 text-sm font-bold bg-blue-400/5 px-2 py-1 rounded-lg border border-blue-400/10"
+                        title="이 화면에 표시된 목록에서 1위 대비 상대 인기도입니다. (실제 상승률·합격률과는 다릅니다)"
+                      >
+                        <TrendingUp className="w-3 h-3 shrink-0" aria-hidden />
+                        <span className="tabular-nums">
+                          {trendingRelativePctById.get(cert.qual_id) ?? 0}%
+                        </span>
                       </div>
                     </div>
 
