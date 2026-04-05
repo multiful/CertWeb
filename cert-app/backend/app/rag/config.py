@@ -226,7 +226,8 @@ class RAGSettings(BaseSettings):
     RAG_MULTIVIEW_ENABLE: bool = False
 
     # Metadata soft scoring (RRF 후보에 직무/전공 일치 가산, 분야 이탈 감점). 운영 기본 ON (full_challenger 경로).
-    RAG_METADATA_SOFT_SCORE_ENABLE: bool = True
+    # 기본 OFF: 퓨전 직후 메타 가산/감점이 질의(품질·데이터 등)와 어긋난 제조·기계 자격을 상위로 밀어 올리는 사례가 잦음. 분기 튜닝 대신 끄고 채널·퓨전만 쓰는 편이 안정적.
+    RAG_METADATA_SOFT_SCORE_ENABLE: bool = False
     RAG_METADATA_SOFT_JOB_BONUS: float = 0.25  # 직무 일치 가산 (옵션 비교 후 소폭 상향, 지표 동일·지연 개선)
     RAG_METADATA_SOFT_MAJOR_BONUS: float = 0.1493  # 전공 일치 가산(골든셋 균형점, random-search best)
     RAG_METADATA_SOFT_TARGET_BONUS: float = 0.16  # 목적 일치 가산
