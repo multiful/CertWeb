@@ -1,6 +1,6 @@
 
 import { useState } from 'react';
-import { Mail, MessageSquare, Send, CheckCircle2, ChevronLeft, Building2 } from 'lucide-react';
+import { Mail, MessageSquare, Send, CheckCircle2, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent } from '@/components/ui/card';
@@ -51,7 +51,11 @@ export function ContactPage() {
             setIsSubmitted(true);
             toast.success('문의가 성공적으로 접수되었습니다.');
         } catch (error) {
-            toast.error('문의 접수에 실패했습니다. 잠시 후 다시 시도해주세요.');
+            const msg =
+                error instanceof Error && error.message
+                    ? error.message
+                    : '문의 접수에 실패했습니다. 잠시 후 다시 시도해주세요.';
+            toast.error(msg);
         } finally {
             setLoading(false);
         }
@@ -128,16 +132,6 @@ export function ContactPage() {
                             <div>
                                 <h4 className="font-bold text-slate-200">고객 지원 시간</h4>
                                 <p className="text-sm text-slate-500">평일 09:00 - 18:00 (KST)</p>
-                            </div>
-                        </div>
-
-                        <div className="flex gap-4 items-start p-4 rounded-2xl bg-slate-900/40 border border-slate-800">
-                            <div className="p-3 bg-indigo-600/10 rounded-xl border border-indigo-500/20">
-                                <Building2 className="w-5 h-5 text-indigo-400" />
-                            </div>
-                            <div>
-                                <h4 className="font-bold text-slate-200">운영사</h4>
-                                <p className="text-sm text-slate-500">CertFinder Lab.</p>
                             </div>
                         </div>
                     </div>
