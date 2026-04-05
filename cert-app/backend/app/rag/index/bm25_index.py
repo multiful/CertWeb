@@ -176,6 +176,11 @@ class BM25Index:
         self._b = data.get("b", 0.75)
 
 
+def clear_bm25_index_cache() -> None:
+    """bm25.pkl 재빌드 후 프로세스 내 캐시를 비울 때 사용."""
+    load_bm25_index_cached.cache_clear()
+
+
 @lru_cache()
 def load_bm25_index_cached(index_path_str: str) -> BM25Index:
     """

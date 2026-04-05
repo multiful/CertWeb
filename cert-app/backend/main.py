@@ -162,6 +162,27 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(_background_contrastive_prewarm())
 
+    async def _background_hierarchical_prewarm():
+        """계층 child BM25 인덱스 선구축 — 첫 hybrid 질의에서 full-table 스캔·빌드 지연 완화."""
+        await asyncio.sleep(8)
+        try:
+            from app.rag.config import get_rag_settings
+            from app.rag.retrieve.hierarchical import prewarm_hierarchical_index
+
+            rg = get_rag_settings()
+            if not getattr(rg, "RAG_HIERARCHICAL_RETRIEVAL_ENABLE", False):
+                return
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(None, prewarm_hierarchical_index)
+            if ok:
+                logger.info("Hierarchical child BM25 index pre-warm completed.")
+            else:
+                logger.debug("Hierarchical pre-warm skipped or failed (see hierarchical logs).")
+        except Exception as e:
+            logger.warning("Hierarchical pre-warm task failed: %s", e)
+
+    asyncio.create_task(_background_hierarchical_prewarm())
+
     yield
     
     # Shutdown

@@ -17,12 +17,12 @@ from typing import Dict, List, Optional
 from sqlalchemy import text
 
 from app.database import SessionLocal
+from app.rag.config import get_rag_settings
 from app.rag.ingest.chunker import (
     build_canonical_metadata_from_row,
-    build_content_from_row,
     section_chunk_with_metadata,
 )
-from app.rag.ingest.canonical_text import build_bm25_sparse_text
+from app.rag.ingest.canonical_text import build_bm25_sparse_text, build_canonical_content, canonicalize_cert_row
 from app.rag.ingest.dlq import append_ingest_dlq
 from app.rag.ingest.metadata import build_chunk_metadata
 from app.services.vector_service import vector_service
@@ -44,17 +44,27 @@ def _iter_qualification_rows(limit: Optional[int] = None) -> List[Dict]:
     qualification + certificates_vectors LEFT JOIN으로
     written_cnt/practical_cnt(exam_type 정확도), cert_summary/cert_description(content 품질),
     related_majors(도메인 태깅)를 함께 조회.
+
+    RAG_CANONICAL_NCS_CSV=False(기본)이면 ncs_large_mapped·ncs_mid 컬럼을 SELECT하지 않는다.
+    - canonical/BM25는 DB ncs_large만 사용(레거시 파이프라인과 동일).
+    - 아직 해당 컬럼 마이그레이션이 없는 DB에서도 재색인이 실패하지 않게 한다.
     """
     db = SessionLocal()
     try:
-        sql = """
+        use_csv_ncs = bool(getattr(get_rag_settings(), "RAG_CANONICAL_NCS_CSV", False))
+        ncs_csv_cols = (
+            "q.ncs_large_mapped,\n                q.ncs_mid,\n                "
+            if use_csv_ncs
+            else ""
+        )
+        sql = f"""
             SELECT
                 q.qual_id,
                 q.qual_name,
                 q.qual_type,
                 q.main_field,
                 q.ncs_large,
-                q.managing_body,
+                {ncs_csv_cols}q.managing_body,
                 q.grade_code,
                 q.written_cnt,
                 q.practical_cnt,
@@ -73,7 +83,16 @@ def _iter_qualification_rows(limit: Optional[int] = None) -> List[Dict]:
         else:
             rows = db.execute(text(sql)).mappings().all()
         out = [dict(r) for r in rows]
-        logger.info("reindex rows loaded: count=%s limit=%s", len(out), limit)
+        if not use_csv_ncs:
+            for d in out:
+                d.setdefault("ncs_large_mapped", None)
+                d.setdefault("ncs_mid", None)
+        logger.info(
+            "reindex rows loaded: count=%s limit=%s RAG_CANONICAL_NCS_CSV=%s",
+            len(out),
+            limit,
+            use_csv_ncs,
+        )
         return out
     except Exception:
         logger.exception("failed to fetch qualification rows")
@@ -123,7 +142,8 @@ def reindex_cert_vectors(
                 else:
                     related_majors = []
 
-                content = build_content_from_row(row, related_majors=related_majors)
+                canonical = canonicalize_cert_row(dict(row), related_majors=related_majors)
+                content = build_canonical_content(canonical)
                 canonical_meta = build_canonical_metadata_from_row(row, related_majors=related_majors)
                 chunks = section_chunk_with_metadata(
                     full_content=content,
@@ -140,7 +160,10 @@ def reindex_cert_vectors(
                         chunk_text,
                         qual_type=row.get("qual_type"),
                         main_field=row.get("main_field"),
-                        ncs_large=row.get("ncs_large"),
+                        ncs_large=canonical.get("ncs_large"),
+                        ncs_mid=(canonical.get("ncs_mid") or None) or None,
+                        domain=canonical.get("domain"),
+                        top_domain=canonical.get("top_domain"),
                         managing_body=row.get("managing_body"),
                         grade_code=row.get("grade_code"),
                         related_majors=related_majors,
@@ -150,7 +173,7 @@ def reindex_cert_vectors(
                         qual_name=qual_name,
                         qual_type=row.get("qual_type"),
                         main_field=row.get("main_field"),
-                        ncs_large=row.get("ncs_large"),
+                        ncs_large=canonical.get("ncs_large"),
                         managing_body=row.get("managing_body"),
                         grade_code=row.get("grade_code"),
                         section_type="overview",
@@ -158,6 +181,7 @@ def reindex_cert_vectors(
                         written_cnt=row.get("written_cnt"),
                         practical_cnt=row.get("practical_cnt"),
                         chunk_hash=chash,
+                        ncs_mid=canonical.get("ncs_mid") or None,
                         **canonical_meta,
                     )
                     pending_batch.append(

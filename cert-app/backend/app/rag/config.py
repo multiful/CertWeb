@@ -61,6 +61,8 @@ class RAGSettings(BaseSettings):
     RAG_HIERARCHICAL_RETRIEVAL_ENABLE: bool = True
     RAG_HIERARCHICAL_CHILD_TOP_N: int = 90
     RAG_HIERARCHICAL_BLEND_WEIGHT: float = 0.38
+    # 계층 BM25: 0이면 매 질의 COUNT로 무효화 확인(과거와 동일·랭킹 스냅샷 일치). >0이면 해당 초 동안 COUNT 생략(지연↓, 그 사이 DB 갱신은 child 인덱스에 반영 지연).
+    RAG_HIERARCHICAL_STAT_SKIP_SEC: float = 0.0
 
     # CombMNZ 전용 설정: 정규화/zero 판정 방식
     # - norm_mode: "minmax" (채널별 min-max 정규화; 기존 동작) 또는 "rank" (순위 기반 1/(k+rank)^p 점수화)
@@ -225,8 +227,8 @@ class RAGSettings(BaseSettings):
     # 멀티뷰 임베딩 (job/major/skill/recommendation view). False면 단일 뷰만 사용
     RAG_MULTIVIEW_ENABLE: bool = False
 
-    # Metadata soft scoring (RRF 후보에 직무/전공 일치 가산, 분야 이탈 감점). 운영 기본 ON (full_challenger 경로).
-    # 기본 OFF: 퓨전 직후 메타 가산/감점이 질의(품질·데이터 등)와 어긋난 제조·기계 자격을 상위로 밀어 올리는 사례가 잦음. 분기 튜닝 대신 끄고 채널·퓨전만 쓰는 편이 안정적.
+    # Metadata soft scoring (RRF 후 직무/전공·도메인 등 가산/감점). 기본 OFF(미사용 권장·fusion_ranking 지연 감소).
+    # 실험 시에만 true. Railway 등에 RAG_METADATA_SOFT_SCORE_ENABLE=true가 남아 있으면 false로 두거나 변수 제거.
     RAG_METADATA_SOFT_SCORE_ENABLE: bool = False
     RAG_METADATA_SOFT_JOB_BONUS: float = 0.25  # 직무 일치 가산 (옵션 비교 후 소폭 상향, 지표 동일·지연 개선)
     RAG_METADATA_SOFT_MAJOR_BONUS: float = 0.1493  # 전공 일치 가산(골든셋 균형점, random-search best)
@@ -306,6 +308,11 @@ class RAGSettings(BaseSettings):
     # Railway 등 Redis 연결 시 반복 질의 지연 감소(리랭커 미사용 경로).
     RAG_RETRIEVAL_RESULT_CACHE_ENABLE: bool = True
     RAG_RETRIEVAL_RESULT_CACHE_TTL_SECONDS: int = 300
+
+    # True면 qualification.ncs_large_mapped + ncs_mid 를 canonical/BM25에 반영 (CSV 조인 버전).
+    # False(기본·레거시): CSV 매핑 미사용, DB qualification.ncs_large 만 인덱싱·허용목록 필터에 사용.
+    # True로 켤 경우: DB에 두 컬럼 존재 + CSV 반영(선택 스크립트) + 재색인 전제. 운영에서 켜두지 말 것(실수 방지).
+    RAG_CANONICAL_NCS_CSV: bool = False
 
     # Cache
     RAG_CACHE_TTL: int = 600  # Redis 캐시 TTL(초)

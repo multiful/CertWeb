@@ -28,6 +28,7 @@ export function RecommendationPage() {
   const [inputValue, setInputValue] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [majorExactMode, setMajorExactMode] = useState(false);
   const { navigate } = useRouter();
 
   const { data: recommendations, loading, error } = useRecommendations(
@@ -39,14 +40,15 @@ export function RecommendationPage() {
 
   const filteredMajors = useMemo(() => {
     const list = (availableMajors && availableMajors.length > 0) ? availableMajors : sampleMajors;
-    if (!inputValue.trim()) return list.slice(0, 50);
-    return list
-      .filter(m => m.toLowerCase().includes(inputValue.toLowerCase()))
-      .slice(0, 50);
-  }, [availableMajors, inputValue]);
+    const t = inputValue.trim();
+    if (!t) return list.slice(0, 40);
+    if (majorExactMode) return list.filter(m => m === t);
+    return list.filter(m => m.toLowerCase().includes(t.toLowerCase()));
+  }, [availableMajors, inputValue, majorExactMode]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setMajorExactMode(false);
     if (inputValue.trim()) {
       setMajor(inputValue.trim());
       setSubmitted(true);
@@ -55,6 +57,7 @@ export function RecommendationPage() {
   };
 
   const handleMajorClick = (m: string) => {
+    setMajorExactMode(false);
     setMajor(m);
     setInputValue(m);
     setSubmitted(true);
@@ -105,7 +108,28 @@ export function RecommendationPage() {
             onFocus={() => setShowSuggestions(true)}
             onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
             onChange={(e) => {
+              setMajorExactMode(false);
               setInputValue(e.target.value);
+              setShowSuggestions(true);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setMajorExactMode(false);
+                setShowSuggestions(false);
+                return;
+              }
+              if (e.key !== 'Enter') return;
+              const t = inputValue.trim();
+              if (!t) return;
+              const list = (availableMajors && availableMajors.length > 0) ? availableMajors : sampleMajors;
+              const exact = list.filter(m => m === t);
+              if (exact.length === 1) {
+                e.preventDefault();
+                handleMajorClick(exact[0]!);
+                return;
+              }
+              e.preventDefault();
+              setMajorExactMode(true);
               setShowSuggestions(true);
             }}
             className="pl-12 pr-36 h-14 text-lg bg-slate-900/50 border-slate-700 rounded-xl focus:border-purple-500 focus:ring-purple-500/20 text-white placeholder:text-slate-600 shadow-xl"
@@ -124,24 +148,35 @@ export function RecommendationPage() {
         </form>
 
         {/* Custom Suggestions Dropdown */}
-        {showSuggestions && filteredMajors.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 max-h-72 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-slate-700 animate-in fade-in slide-in-from-top-2 duration-200">
+        {showSuggestions && (filteredMajors.length > 0 || majorExactMode) && (
+          <div className="absolute top-full left-0 right-0 mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 max-h-[min(22rem,70vh)] overflow-y-auto overflow-x-hidden overscroll-contain scrollbar-thin scrollbar-thumb-slate-700 animate-in fade-in slide-in-from-top-2 duration-200">
             <div className="p-2 text-[10px] font-bold text-slate-500 uppercase tracking-widest bg-slate-950/20 border-b border-slate-800">
               전공 검색 결과 ({filteredMajors.length})
             </div>
-            {filteredMajors.map((m) => (
-              <div
-                key={m}
-                className="px-4 py-3 hover:bg-slate-800 cursor-pointer text-slate-200 border-b border-slate-800/50 last:border-0 flex items-center justify-between group/item transition-colors"
-                onMouseDown={() => handleMajorClick(m)}
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-purple-500/30 group-hover/item:bg-purple-500 transition-colors" />
-                  <span className="group-hover/item:text-white">{m}</span>
+            {filteredMajors.length > 0 ? (
+              filteredMajors.map((m, idx) => (
+                <div
+                  key={`${m}__${idx}`}
+                  className="px-4 py-3 hover:bg-slate-800 cursor-pointer text-slate-200 border-b border-slate-800/50 last:border-0 flex items-center justify-between group/item transition-colors"
+                  onMouseDown={() => handleMajorClick(m)}
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-2 h-2 rounded-full bg-purple-500/30 group-hover/item:bg-purple-500 transition-colors shrink-0" />
+                    <span className="group-hover/item:text-white break-words">{m}</span>
+                  </div>
+                  <ArrowRight className="w-3 h-3 text-slate-600 opacity-0 group-hover/item:opacity-100 -translate-x-2 group-hover/item:translate-x-0 transition-all shrink-0" />
                 </div>
-                <ArrowRight className="w-3 h-3 text-slate-600 opacity-0 group-hover/item:opacity-100 -translate-x-2 group-hover/item:translate-x-0 transition-all" />
+              ))
+            ) : (
+              <div className="px-4 py-3 text-sm text-slate-500">
+                입력과 정확히 같은 이름의 전공이 없습니다. Esc로 포함 검색으로 돌아가거나 &quot;전공 탐색&quot; 버튼을 눌러 주세요.
               </div>
-            ))}
+            )}
+            <p className="px-4 py-2 text-[10px] text-slate-600 border-t border-slate-800 bg-slate-950/40">
+              {majorExactMode
+                ? 'Esc: 포함 검색으로 · 정확 일치만 표시 중'
+                : 'Enter: 정확히 일치하는 전공만 목록에 남깁니다 (1건이면 바로 선택)'}
+            </p>
           </div>
         )}
       </div>

@@ -17,6 +17,7 @@ from app.rag.corpus_rules import (
     MAJOR_NOISE_KEYWORDS,
     QUAL_NAMES_DOMAIN_FIX_JOOSEON,
 )
+from app.rag.config import get_rag_settings
 from app.rag.utils.dataset_allowlist import filter_main_fields, filter_ncs_large
 from app.rag.utils.domain_tokens import detect_broad_domains_in_text, get_top_domain_for_domain
 from app.rag.utils.major_normalize import normalize_major
@@ -100,12 +101,24 @@ def canonicalize_cert_row(
 ) -> Dict[str, Any]:
     """
     qualification/certificates_vectors 원천 row를 인덱싱용 canonical dict로 변환.
+    RAG_CANONICAL_NCS_CSV=True 이고 ncs_large_mapped 가 있으면 대직무에 우선 사용하고
+    ncs_mid(중직무)를 canonical에 포함한다.
     """
     try:
+        use_ncs_csv = bool(getattr(get_rag_settings(), "RAG_CANONICAL_NCS_CSV", False))
+
         qual_name = normalize_text_for_embedding(str(row.get("qual_name") or ""))
         qual_type = normalize_text_for_embedding(str(row.get("qual_type") or ""))
         main_field = normalize_text_for_embedding(str(row.get("main_field") or ""))
-        ncs_large = normalize_text_for_embedding(str(row.get("ncs_large") or ""))
+
+        mapped_src = ""
+        if use_ncs_csv:
+            mapped_src = normalize_text_for_embedding(
+                str(row.get("ncs_large_mapped") or "").replace(".", "·")
+            )
+        base_ncs = normalize_text_for_embedding(str(row.get("ncs_large") or ""))
+        ncs_large = mapped_src if (use_ncs_csv and mapped_src) else base_ncs
+
         managing_body = normalize_text_for_embedding(str(row.get("managing_body") or ""))
         grade_code = normalize_text_for_embedding(str(row.get("grade_code") or ""))
 
@@ -113,7 +126,16 @@ def canonicalize_cert_row(
 
         # 허용 목록 필터(비어 있으면 그대로 통과)
         main_field = (filter_main_fields([main_field]) or [""])[0] if main_field else ""
-        ncs_large = (filter_ncs_large([ncs_large]) or [""])[0] if ncs_large else ""
+        filtered_ncs = (filter_ncs_large([ncs_large]) or [""])[0] if ncs_large else ""
+        # CSV 매핑값이 allowlist에 없으면 필터가 비워 버림 → 매핑 신호 보존
+        if use_ncs_csv and mapped_src and not filtered_ncs:
+            ncs_large = mapped_src
+        else:
+            ncs_large = filtered_ncs
+
+        ncs_mid = ""
+        if use_ncs_csv:
+            ncs_mid = normalize_text_for_embedding(str(row.get("ncs_mid") or "").replace(".", "·"))
 
         majors = _normalize_related_majors(qual_name, related_majors)
         domain_candidates = detect_broad_domains_in_text(
@@ -132,6 +154,7 @@ def canonicalize_cert_row(
             "qual_type": qual_type,
             "main_field": main_field,
             "ncs_large": ncs_large,
+            "ncs_mid": ncs_mid,
             "managing_body": managing_body,
             "grade_code": grade_code,
             "related_majors": majors,
@@ -150,6 +173,7 @@ def canonicalize_cert_row(
             "qual_type": "",
             "main_field": "",
             "ncs_large": "",
+            "ncs_mid": "",
             "managing_body": "",
             "grade_code": "",
             "related_majors": [],
@@ -173,7 +197,9 @@ def build_canonical_content(c: Dict[str, Any]) -> str:
     if c.get("main_field"):
         parts.append(f"분야: {c['main_field']}")
     if c.get("ncs_large"):
-        parts.append(f"NCS분류: {c['ncs_large']}")
+        parts.append(f"NCS대직무: {c['ncs_large']}")
+    if c.get("ncs_mid"):
+        parts.append(f"NCS중직무: {c['ncs_mid']}")
     if c.get("domain"):
         parts.append(f"도메인: {c['domain']}")
     if c.get("top_domain"):
@@ -206,6 +232,9 @@ def build_bm25_sparse_text(
     qual_type: Optional[str] = None,
     main_field: Optional[str] = None,
     ncs_large: Optional[str] = None,
+    ncs_mid: Optional[str] = None,
+    domain: Optional[str] = None,
+    top_domain: Optional[str] = None,
     managing_body: Optional[str] = None,
     grade_code: Optional[str] = None,
     related_majors: Optional[List[str]] = None,
@@ -213,6 +242,7 @@ def build_bm25_sparse_text(
     """
     Indexing_opt.md §2·§5.3: Hybrid용 sparse(BM25) 전용 문자열(text_for_sparse).
     Dense 임베딩과 분리해 키워드·시행기관·등급·qual_id 토큰을 앞쪽에 밀도 있게 둔다.
+    domain·top_domain 은 dense 본문과 동기화해 BM25·벡터 키워드 정합을 맞춘다.
     임베딩 API 호출 수는 늘리지 않으며, BM25 인덱스 재빌드 시 exact match 품질·역색인 비용만 증가.
     """
     head: List[str] = [f"qual_id:{qual_id}"]
@@ -220,7 +250,16 @@ def build_bm25_sparse_text(
     if qn:
         head.append(qn)
         head.append(qn)
-    for x in (managing_body, grade_code, main_field, ncs_large, qual_type):
+    for x in (
+        managing_body,
+        grade_code,
+        main_field,
+        ncs_large,
+        ncs_mid,
+        domain,
+        top_domain,
+        qual_type,
+    ):
         xs = (x or "").strip()
         if xs:
             head.append(xs)

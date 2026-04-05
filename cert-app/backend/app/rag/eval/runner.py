@@ -119,6 +119,7 @@ def _run_enhanced_reranker_rag(
     channels_override: Optional[List[str]] = None,
     force_reranker: bool = False,
     user_profile: Optional[Dict[str, Any]] = None,
+    hybrid_phase_timings_out: Optional[Dict[str, float]] = None,
 ) -> tuple:
     """Enhanced RAG: RRF 후보 + (옵션) Cross-Encoder → Top4. use_reranker=False면 검색만. force_reranker=True면 게이팅 무시하고 항상 HF API 호출(평가용)."""
     start = time.perf_counter()
@@ -135,6 +136,7 @@ def _run_enhanced_reranker_rag(
         channels_override=channels_override,
         force_reranker=force_reranker,
         user_profile=user_profile,
+        hybrid_phase_timings_out=hybrid_phase_timings_out,
     )
     chunk_ids = [c[0] for c in candidates]
     latency = (time.perf_counter() - start) * 1000
@@ -164,6 +166,8 @@ def run_eval_three_way(
     contrastive_top_n_override: Optional[int] = None,
     vector_threshold_override: Optional[float] = None,
     force_reranker: bool = True,
+    latency_samples_by_pipeline: Optional[Dict[str, List[float]]] = None,
+    enhanced_hybrid_phase_rows: Optional[List[Dict[str, float]]] = None,
 ) -> Dict[str, Dict[str, float]]:
     """
     골든셋으로 4-way 실행 후 메트릭 집계. RRF 후보는 설정(RAG_TOP_N_CANDIDATES 등)을 따름.
@@ -172,6 +176,8 @@ def run_eval_three_way(
     current_w_d, current_w_s / enhanced_alpha 가 있으면 해당 가중치로 실행.
     verbose=True 이면 질의별 검색 결과 출력.
     반환: { "baseline": {...}, "enhanced_reranker": {...}, "current": {...}, "current_reranker": {...} }
+    latency_samples_by_pipeline: 평가 종료 시 질의별 latency(ms) 리스트를 파이프라인명으로 채움(벤치·분산 추정용).
+    enhanced_hybrid_phase_rows: enhanced_reranker 질의마다 hybrid_phase_timings_out dict를 append(리랭커 제외 구간).
     """
     golden = load_golden(golden_path)
     if not golden:
@@ -195,6 +201,11 @@ def run_eval_three_way(
         "enhanced_reranker" in (pipelines or []) or "contrastive_only" in (pipelines or [])
     ):
         prewarm_contrastive()
+
+    if getattr(settings, "RAG_HIERARCHICAL_RETRIEVAL_ENABLE", False):
+        from app.rag.retrieve.hierarchical import prewarm_hierarchical_index
+
+        prewarm_hierarchical_index()
 
     per_query_results: List[Dict[str, Any]] = []
     try:
@@ -298,6 +309,7 @@ def run_eval_three_way(
 
             # Enhanced Reranker (RRF 후보 + (옵션) Cross-Encoder → Top4; 3-way 시 가중치 오버라이드)
             if "enhanced_reranker" in pipelines:
+                _er_phase: Optional[Dict[str, float]] = {} if enhanced_hybrid_phase_rows is not None else None
                 ids_er, lat_er = _run_enhanced_reranker_rag(
                     db, q, top_k, gold_ids, alpha=enhanced_alpha,
                     rrf_w_bm25=rrf_w_bm25, rrf_w_dense1536=rrf_w_dense1536, rrf_w_contrastive768=rrf_w_contrastive768,
@@ -311,7 +323,10 @@ def run_eval_three_way(
                     vector_threshold_override=vector_threshold_override,
                     force_reranker=force_reranker,
                     user_profile=user_profile,
+                    hybrid_phase_timings_out=_er_phase,
                 )
+                if enhanced_hybrid_phase_rows is not None and _er_phase is not None:
+                    enhanced_hybrid_phase_rows.append(dict(_er_phase))
                 agg["enhanced_reranker"]["recall5"].append(recall_at_k(ids_er, gold_ids, 5))
                 agg["enhanced_reranker"]["recall10"].append(recall_at_k(ids_er, gold_ids, 10))
                 agg["enhanced_reranker"]["precision5"].append(precision_at_k(ids_er, gold_ids, 5))
@@ -496,6 +511,11 @@ def run_eval_three_way(
             s = sorted(x)
             i = int(len(s) * 0.95) - 1
             return s[min(max(i, 0), len(s) - 1)]
+
+        if latency_samples_by_pipeline is not None:
+            latency_samples_by_pipeline.clear()
+            for name in agg:
+                latency_samples_by_pipeline[name] = list(agg[name]["latency"])
 
         results: Dict[str, Dict[str, float]] = {}
         for name, vals in agg.items():

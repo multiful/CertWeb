@@ -47,3 +47,21 @@
    - query rewrite/slot/intent 가중치
    - domain filtering 강도
    - reranker fallback 정책
+
+## 6) NCS CSV 파이프라인 (DB 우선)
+
+| 파일 | 역할 |
+|------|------|
+| `dataset/ncs_mapping1.csv` | NCS 원천(동일 자격증명 다행). Git/수급 기준. |
+| `dataset/ncs_mapping_resolved.csv` | 자격증명당 1행. `scripts/export_resolved_ncs_csv.py`가 DB `ncs_large`·`main_field`(읽기) + 원천으로 생성. |
+| `apply_ncs_mapping_to_qualification.py` | 기본 입력: **resolved가 있으면 resolved**, 없으면 원천(행 선택 로직 동일). 갱신 컬럼만 `ncs_large_mapped`·`ncs_mid`. |
+| `run_ncs_canonical_ab_eval.py` | `--csv` 기본값 동일. |
+
+권장 순서(원천 변경 시): `export_resolved_ncs_csv.py` → apply → `reindex_cert_vectors` → `build_bm25_from_db`.
+
+## 7) 인덱싱 병목 점검 (현 구조)
+
+- **임베딩 API**: 재색인 시간·비용의 대부분. 배치 크기 `reindex_cert_vectors --batch-size`(기본 128) 조절.
+- **DB**: 자격 한 줄당 청크 소수; `certificates_vectors` 배치 upsert. UPDATE 다발은 apply 단계(자격 수만큼)이며 현재 규모(~1k)에서는 허용 범위.
+- **BM25**: `certificates_vectors` 풀 스캔 1회 후 `bm25.pkl` 기록. 메모리·디스크 I/O 위주.
+- **Redis**: 검색 결과 캐시가 켜져 있으면 인덱스 교체 직후 오래된 히트 가능 → 평가 스크립트는 캐시 off 권장.

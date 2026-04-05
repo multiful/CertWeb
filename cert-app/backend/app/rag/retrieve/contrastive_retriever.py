@@ -12,6 +12,7 @@ Contrastive retriever: 768-dim 한국어 bi-encoder + FAISS 인덱스.
 """
 import json
 import logging
+import threading
 import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -135,6 +136,24 @@ def diagnose_contrastive_status() -> Dict[str, str]:
     return out
 
 
+# httpx 동기 Client는 스레드 간 공유 시 경합 이슈가 있어, 워커 스레드마다 1개씩 유지(커넥션/TLS 재사용).
+_thread_local_httpx = threading.local()
+
+
+def _contrastive_httpx_client():
+    """Contrastive 원격 임베딩 전용. 응답 스키마·재시도 로직 불변, RTT만 완화."""
+    import httpx
+
+    c = getattr(_thread_local_httpx, "client", None)
+    if c is None:
+        _thread_local_httpx.client = httpx.Client(
+            timeout=httpx.Timeout(60.0, connect=15.0),
+            limits=httpx.Limits(max_keepalive_connections=6, max_connections=12),
+        )
+        c = _thread_local_httpx.client
+    return c
+
+
 def _embed_via_api(query: str):
     """RAG_CONTRASTIVE_EMBEDDING_URL로 POST하여 768-dim 벡터 반환. L2 정규화 적용. 실패 시 None."""
     global _remote_fail_streak, _remote_unhealthy_until
@@ -178,46 +197,46 @@ def _embed_via_api(query: str):
         last_error = None
 
         # warmup/배포 타이밍에 404가 순간적으로 튀는 경우가 있어, 루트(/, /)만 대상으로 1회 더 재시도합니다.
+        client = _contrastive_httpx_client()
         for attempt in range(2):
-            with httpx.Client(timeout=60.0) as client:
-                for base in to_try:
-                    try:
-                        r = client.post(base, json=body, headers=headers)
-                        if r.status_code != 200:
-                            last_error = f"HTTP {r.status_code}"
-                            continue
-                        data = r.json()
-                        if isinstance(data, list):
-                            vec = data[0] if data and isinstance(data[0], list) else data
-                        elif isinstance(data, dict) and "embedding" in data:
-                            vec = data["embedding"]
-                        else:
-                            vec = data
-                        if not vec or not isinstance(vec, (list, tuple)):
-                            continue
-                        arr = np.array(vec, dtype=np.float32).flatten()
-                        if arr.size != _embedding_dim:
-                            continue
-                        norm = np.linalg.norm(arr)
-                        if norm > 1e-9:
-                            arr = arr / norm
-                        arr = arr.reshape(1, -1)
-                        # 성공 시 캐시에 저장 (query → embedding)
-                        if cache_key is not None:
-                            try:
-                                redis_client.set(
-                                    cache_key,
-                                    arr.flatten().tolist(),
-                                    ttl=_CONTRASTIVE_Q2V_CACHE_TTL_SECONDS,
-                                )
-                            except Exception:
-                                pass
-                        _remote_fail_streak = 0
-                        _remote_unhealthy_until = 0.0
-                        return arr
-                    except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as e:
-                        last_error = e
+            for base in to_try:
+                try:
+                    r = client.post(base, json=body, headers=headers)
+                    if r.status_code != 200:
+                        last_error = f"HTTP {r.status_code}"
                         continue
+                    data = r.json()
+                    if isinstance(data, list):
+                        vec = data[0] if data and isinstance(data[0], list) else data
+                    elif isinstance(data, dict) and "embedding" in data:
+                        vec = data["embedding"]
+                    else:
+                        vec = data
+                    if not vec or not isinstance(vec, (list, tuple)):
+                        continue
+                    arr = np.array(vec, dtype=np.float32).flatten()
+                    if arr.size != _embedding_dim:
+                        continue
+                    norm = np.linalg.norm(arr)
+                    if norm > 1e-9:
+                        arr = arr / norm
+                    arr = arr.reshape(1, -1)
+                    # 성공 시 캐시에 저장 (query → embedding)
+                    if cache_key is not None:
+                        try:
+                            redis_client.set(
+                                cache_key,
+                                arr.flatten().tolist(),
+                                ttl=_CONTRASTIVE_Q2V_CACHE_TTL_SECONDS,
+                            )
+                        except Exception:
+                            pass
+                    _remote_fail_streak = 0
+                    _remote_unhealthy_until = 0.0
+                    return arr
+                except (httpx.HTTPStatusError, httpx.RequestError, ValueError) as e:
+                    last_error = e
+                    continue
 
             # 첫 시도에서 HTTP 404 또는 5xx(스페이스 cold-start·일시 과부하)로 실패한 경우 1회 더 재시도
             retry_transient = False

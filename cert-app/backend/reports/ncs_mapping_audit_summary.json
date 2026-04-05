@@ -1,0 +1,11 @@
+{
+  "csv_path": "Z:\\CertWeb\\cert-app\\backend\\dataset\\ncs_mapping1.csv",
+  "total_csv_rows": 4060,
+  "distinct_cert_names": 998,
+  "cert_names_with_multiple_csv_rows": 616,
+  "cert_names_with_conflicting_ncs_mapping": 503,
+  "empty_cert_id_rows": 317,
+  "empty_name_csv_lines": [],
+  "invalid_large_not_in_ncs_large_all_txt": 0,
+  "spurious_fishery_boilerplate_with_sibling_rows": 0
+}

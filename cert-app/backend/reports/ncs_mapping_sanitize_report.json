@@ -1,0 +1,12 @@
+{
+  "csv": "Z:\\CertWeb\\cert-app\\backend\\dataset\\ncs_mapping1.csv",
+  "before_rows": 4060,
+  "after_empty_boiler_removal": 4060,
+  "after_rows": 4060,
+  "removed_empty_name": 0,
+  "removed_spurious_boilerplate": 0,
+  "removed_duplicate_rows": 0,
+  "backfilled_cert_id_cells": 4,
+  "removed_boilerplate_detail": [],
+  "removed_duplicate_detail": []
+}

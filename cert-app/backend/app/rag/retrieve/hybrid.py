@@ -967,6 +967,37 @@ def _hybrid_run_bm25(
     return bm25_scores
 
 
+def _hybrid_contrastive_query_gate(
+    settings: Any,
+    *,
+    query_type: str,
+    short_keyword: bool,
+    use_contrastive_ch: bool,
+    use_bm25: bool,
+    use_vector: bool,
+    channels_override: Optional[List[str]],
+) -> Tuple[bool, bool]:
+    """
+    (이 질의에서 contrastive_search를 돌릴지, single_contrastive_only 평가 모드인지).
+    hybrid_retrieve 본문과 동일 게이팅을 한곳에 둬 병렬 스케줄과 순차 경로가 어긋나지 않게 함.
+    """
+    if not (getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and use_contrastive_ch):
+        return False, False
+    ch_list = channels_override or []
+    has_channel_filter = bool(ch_list)
+    single_only = use_contrastive_ch and not use_bm25 and not use_vector and has_channel_filter
+    allowed_types_raw = getattr(settings, "RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES", "") or ""
+    allowed_types = {t.strip() for t in allowed_types_raw.split(",") if t.strip()}
+    if single_only:
+        return True, True
+    use_cq = True
+    if allowed_types:
+        use_cq = query_type in allowed_types
+    if short_keyword and query_type in ("cert_name_included", "keyword"):
+        use_cq = False
+    return use_cq, False
+
+
 def hybrid_retrieve(
     db: Session,
     query: str,
@@ -991,6 +1022,7 @@ def hybrid_retrieve(
     force_reranker: bool = False,
     pre_retrieval_budget_ms: Optional[int] = None,
     pre_retrieval_trace_out: Optional[Dict[str, Any]] = None,
+    hybrid_phase_timings_out: Optional[Dict[str, float]] = None,
 ) -> List[Tuple[str, float]]:
     """
     BM25 + Vector를 RRF로 병합.
@@ -1004,6 +1036,7 @@ def hybrid_retrieve(
     filters 있으면 메타데이터 필터. 반환: [(chunk_id, score), ...]
     - pre_retrieval_budget_ms: Pre-retrieval 잔여 예산(ms). None이면 RAG_PRE_RETRIEVAL_BUDGET_MS(기본 15s). 0 이하면 게이트 없음.
     - pre_retrieval_trace_out: 설정 시 PreRetrievalTrace 필드가 dict로 채워짐(호출자가 재사용 가능한 mutable dict).
+    - hybrid_phase_timings_out: 설정 시 리랭커 직전까지(ms). pre_parallel_ms, parallel_ms, fusion_ranking_ms
     """
     settings = get_rag_settings()
     q = (query or "").strip()
@@ -1011,6 +1044,7 @@ def hybrid_retrieve(
     if _qmax > 0 and len(q) > _qmax:
         q = q[:_qmax]
     query = q
+    t_wall_start = time.perf_counter()
     t_pre_start = time.monotonic()
     _bud = pre_retrieval_budget_ms
     if _bud is None:
@@ -1185,10 +1219,26 @@ def hybrid_retrieve(
         and not getattr(settings, "RAG_BM25_PRF_ENABLE", False)
         and getattr(settings, "RAG_HYBRID_BM25_VECTOR_PARALLEL_ENABLE", True)
     )
+    use_contrastive_for_query, single_contrastive_only = _hybrid_contrastive_query_gate(
+        settings,
+        query_type=query_type or "",
+        short_keyword=short_keyword,
+        use_contrastive_ch=use_contrastive_ch,
+        use_bm25=use_bm25,
+        use_vector=use_vector,
+        channels_override=channels_override,
+    )
+    run_ct_parallel = bool(parallel_ok and use_contrastive_for_query)
+
     vector_results: List[Tuple[str, float]] = []
     hyde_results: List[Tuple[str, float]] = []
     bm25_scores: List[Tuple[str, float]] = []
+    contrastive_results: List[Tuple[str, float]] = []
+    contrastive_parallel_done = False
 
+    _t_parallel_start = time.perf_counter()
+    if hybrid_phase_timings_out is not None:
+        hybrid_phase_timings_out["pre_parallel_ms"] = (_t_parallel_start - t_wall_start) * 1000.0
     if parallel_ok:
         from concurrent.futures import ThreadPoolExecutor
         from app.database import SessionLocal
@@ -1228,11 +1278,27 @@ def hybrid_retrieve(
             finally:
                 s.close()
 
-        with ThreadPoolExecutor(max_workers=2) as ex:
+        def _run_ct() -> List[Tuple[str, float]]:
+            try:
+                return contrastive_search(dense_query_for_channels or "", top_k=contrastive_top_n)
+            except Exception:
+                logger.debug("contrastive_search failed (parallel arm)", exc_info=True)
+                return []
+
+        _max_workers = 3 if run_ct_parallel else 2
+        with ThreadPoolExecutor(max_workers=_max_workers) as ex:
             fv = ex.submit(_run_vec)
             fb = ex.submit(_run_bm)
+            fct = ex.submit(_run_ct) if run_ct_parallel else None
             vector_results, hyde_results = fv.result()
             bm25_scores = fb.result()
+            if fct is not None:
+                contrastive_results = fct.result()
+                contrastive_parallel_done = True
+                logger.debug(
+                    "contrastive arm ran in parallel with bm25/vector (single_only=%s)",
+                    single_contrastive_only,
+                )
     else:
         vector_results, hyde_results = _hybrid_run_vector_and_hyde(
             db,
@@ -1258,6 +1324,17 @@ def hybrid_retrieve(
             enable_prf=True,
         )
 
+    t_after_parallel = time.perf_counter()
+    if getattr(settings, "RAG_HYBRID_DEBUG_LOG", False):
+        logger.info(
+            "hybrid parallel_phase_ms=%.1f parallel_ok=%s run_ct_parallel=%s",
+            (t_after_parallel - _t_parallel_start) * 1000.0,
+            parallel_ok,
+            run_ct_parallel,
+        )
+    if hybrid_phase_timings_out is not None:
+        hybrid_phase_timings_out["parallel_ms"] = (t_after_parallel - _t_parallel_start) * 1000.0
+
     # Hierarchical retrieval (child->parent): child BM25를 parent 점수로 환원해 BM25 채널과 내부 결합.
     if use_bm25 and getattr(settings, "RAG_HIERARCHICAL_RETRIEVAL_ENABLE", False):
         try:
@@ -1278,24 +1355,9 @@ def hybrid_retrieve(
         except Exception as e:
             logger.debug("hierarchical retrieval blend skipped: %s", e)
 
-    # Contrastive 768 FAISS arm (별도 retriever, RRF로만 결합)
-    contrastive_results: List[Tuple[str, float]] = []
+    # Contrastive 768 FAISS arm (별도 retriever, RRF로만 결합). parallel_ok일 때는 위에서 bm25/vector와 동시 실행됨.
     contrastive_enabled = getattr(settings, "RAG_CONTRASTIVE_ENABLE", False) and use_contrastive_ch
-    if contrastive_enabled:
-        # 단일 Contrastive 채널 평가(bm25_only/vector_only/contrastive_only 중 contrastive_only)는 게이팅을 끄고 항상 사용.
-        single_contrastive_only = use_contrastive_ch and not use_bm25 and not use_vector and bool(channels_set)
-        # 질의 타입 기반 Contrastive 게이팅: 자연어·복합 목적 질의 위주로만 사용해 비용·지연 절감
-        allowed_types_raw = getattr(settings, "RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES", "") or ""
-        allowed_types = {t.strip() for t in allowed_types_raw.split(",") if t.strip()}
-        if single_contrastive_only:
-            use_contrastive_for_query = True
-        else:
-            use_contrastive_for_query = True
-            if allowed_types:
-                use_contrastive_for_query = query_type in allowed_types
-            # 짧은 키워드·자격증명 위주 쿼리는 BM25+Vector로 충분한 경우가 많으므로 기본적으로 contrastive 비활성
-            if short_keyword and query_type in ("cert_name_included", "keyword"):
-                use_contrastive_for_query = False
+    if contrastive_enabled and not contrastive_parallel_done:
         if use_contrastive_for_query:
             try:
                 logger.debug(
@@ -1306,8 +1368,7 @@ def hybrid_retrieve(
                     contrastive_top_n,
                     single_contrastive_only,
                 )
-                # Contrastive 채널도 재질의 입력을 사용(옵션으로 contextual prompt 적용 가능)
-                contrastive_results = contrastive_search(dense_query_for_channels, top_k=contrastive_top_n)
+                contrastive_results = contrastive_search(dense_query_for_channels or "", top_k=contrastive_top_n)
             except Exception:
                 logger.debug("contrastive_search failed (disabled or deps missing)", exc_info=True)
         else:
@@ -1587,13 +1648,44 @@ def hybrid_retrieve(
     mmr_enabled = getattr(settings, "RAG_MMR_ENABLE", False)
     # 메타 soft / 개인화 / MMR이 qual 메타를 쓰면 후보 qual_id 집합에 대해 한 번만 bulk 조회 (DB 왕복 감소).
     meta_bulk: Optional[Dict[int, Dict[str, Any]]] = None
+    # 개인화 시 qual 메타 bulk와 qualification_stats bulk가 순차면 RTT가 합산됨 → 별도 세션으로 병렬(결과 동일).
+    stats_bulk_pre: Optional[dict] = None
     if candidates and (metadata_soft_enabled or personalized_enabled or mmr_enabled):
         qual_union = _qual_ids_from_candidates(candidates)
         if qual_union:
             try:
-                meta_bulk = fetch_qual_metadata_bulk(db, qual_union)
+                if personalized_enabled:
+                    from concurrent.futures import ThreadPoolExecutor
+                    from app.database import SessionLocal
+                    from app.crud import get_qualification_aggregated_stats_bulk
+
+                    def _load_meta_bulk() -> Dict[int, Dict[str, Any]]:
+                        s = SessionLocal()
+                        try:
+                            return fetch_qual_metadata_bulk(s, qual_union)
+                        finally:
+                            s.close()
+
+                    def _load_stats_bulk() -> dict:
+                        s = SessionLocal()
+                        try:
+                            return get_qualification_aggregated_stats_bulk(s, qual_union)
+                        finally:
+                            s.close()
+
+                    with ThreadPoolExecutor(max_workers=2) as ex:
+                        fm = ex.submit(_load_meta_bulk)
+                        fs = ex.submit(_load_stats_bulk)
+                        meta_bulk = fm.result()
+                        stats_bulk_pre = fs.result()
+                else:
+                    meta_bulk = fetch_qual_metadata_bulk(db, qual_union)
             except Exception:
-                meta_bulk = None
+                try:
+                    meta_bulk = fetch_qual_metadata_bulk(db, qual_union)
+                except Exception:
+                    meta_bulk = None
+                stats_bulk_pre = None
 
     # Metadata soft scoring (직무/전공 일치 가산, 분야 이탈 감점)
     if metadata_soft_enabled and candidates:
@@ -1642,8 +1734,13 @@ def hybrid_retrieve(
             qual_ids_pers = _qual_ids_from_candidates(candidates)
             if qual_ids_pers:
                 from app.crud import get_qualification_aggregated_stats_bulk
+
                 meta_pers = meta_bulk if meta_bulk is not None else fetch_qual_metadata_bulk(db, qual_ids_pers)
-                stats_bulk = get_qualification_aggregated_stats_bulk(db, qual_ids_pers)
+                stats_bulk = (
+                    stats_bulk_pre
+                    if stats_bulk_pre is not None
+                    else get_qualification_aggregated_stats_bulk(db, qual_ids_pers)
+                )
                 diff_by_qual = {
                     qid: s["avg_difficulty"]
                     for qid, s in (stats_bulk or {}).items()
@@ -1689,6 +1786,10 @@ def hybrid_retrieve(
     # 메타데이터 필터
     if filters and candidates:
         candidates = _apply_metadata_filter(db, candidates, filters)
+
+    t_pre_rerank = time.perf_counter()
+    if hybrid_phase_timings_out is not None:
+        hybrid_phase_timings_out["fusion_ranking_ms"] = (t_pre_rerank - t_after_parallel) * 1000.0
 
     # (선택) 경량 Cross-Encoder Reranker
     do_rerank = use_reranker if use_reranker is not None else getattr(settings, "RAG_USE_CROSS_ENCODER_RERANKER", False)
