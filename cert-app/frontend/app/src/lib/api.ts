@@ -534,10 +534,12 @@ export async function checkUserId(userid: string): Promise<{ available: boolean,
 
 // ============== Contact / Feedback ==============
 export async function sendContactEmail(data: { name: string; email: string; subject: string; message: string }): Promise<void> {
+  // SMTP·TLS는 지연이 길 수 있어 기본 15초보다 넉넉히 둠
   await apiRequest('/contact', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
+    timeoutMs: 30000,
   });
 }
 
