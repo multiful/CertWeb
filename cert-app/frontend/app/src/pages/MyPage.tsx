@@ -171,14 +171,27 @@ export function MyPage() {
         };
     }, [certSearchQuery, isAcquiredDialogOpen]);
 
-    // Sync state when dialog opens
+    // 설정 다이얼로그: DB 프로필이 있으면 항상 그것을 우선 (JWT 메타는 동기화 지연·옛 값에 뒤처질 수 있음)
     useEffect(() => {
         if (isSettingsOpen && user) {
-            setNickname(user.user_metadata?.nickname || user.user_metadata?.userid || '');
-            setUserMajor(user.user_metadata?.detail_major || '');
-            setGradeYear(user.user_metadata?.grade_year !== undefined ? Number(user.user_metadata.grade_year) : null);
+            setNickname(
+                profile?.nickname ||
+                    user.user_metadata?.nickname ||
+                    user.user_metadata?.userid ||
+                    ''
+            );
+            setUserMajor(profile?.detail_major || user.user_metadata?.detail_major || '');
+            let gy: number | null = null;
+            if (profile?.grade_year !== undefined && profile?.grade_year !== null) {
+                const n = Number(profile.grade_year);
+                gy = Number.isFinite(n) ? n : null;
+            } else if (user.user_metadata?.grade_year !== undefined) {
+                const n = Number(user.user_metadata.grade_year);
+                gy = Number.isFinite(n) ? n : null;
+            }
+            setGradeYear(gy);
         }
-    }, [isSettingsOpen, user]);
+    }, [isSettingsOpen, user, profile]);
 
     // Major autocomplete
     const [showMajorSuggestions, setShowMajorSuggestions] = useState(false);
@@ -191,7 +204,7 @@ export function MyPage() {
     const loadData = async (showLoading = true) => {
         if (showLoading) setDataLoading(true);
         try {
-            const majorFromUser = user?.user_metadata?.detail_major;
+            const metaMajor = user?.user_metadata?.detail_major;
 
             if (!token) {
                 setDataLoading(false);
@@ -210,7 +223,9 @@ export function MyPage() {
             setProfile(profileData);
             setAcquiredCerts(acquiredRes.items);
 
-            const finalMajor = (profileData?.detail_major ?? majorFromUser)?.trim();
+            // 전공은 DB(profiles)가 단일 기준. 비어 있을 때만 JWT 메타 폴백 (로그인 전 검색 등과 무관하게 사용자 저장 전공 고정)
+            const dbMajor = (profileData?.detail_major && String(profileData.detail_major).trim()) || '';
+            const finalMajor = dbMajor || (typeof metaMajor === 'string' ? metaMajor.trim() : '') || null;
             let recList: any[] = [];
             if (finalMajor) {
                 try {
@@ -340,7 +355,7 @@ export function MyPage() {
             <div className="max-w-6xl mx-auto space-y-12">
 
                 {/* 1. Header & Profile Summary */}
-                <div className="relative group p-8 rounded-[3rem] bg-gradient-to-br from-slate-900/60 to-slate-800/20 border border-slate-700/30 backdrop-blur-3xl overflow-hidden shadow-2xl">
+                <div className="relative group p-8 rounded-[3rem] bg-gradient-to-br from-slate-900/60 to-slate-800/20 border border-slate-700/30 backdrop-blur-3xl overflow-x-hidden shadow-2xl">
                     <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-[120px] -mr-64 -mt-64 transition-all group-hover:bg-blue-500/15 duration-1000" />
                     <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-indigo-500/5 rounded-full blur-[100px] -ml-48 -mb-48" />
 
@@ -359,9 +374,9 @@ export function MyPage() {
 
                         {/* User Basic Info */}
                         <div className="flex-1 space-y-6 text-center md:text-left">
-                            <div className="space-y-2">
+                            <div className="space-y-2 pb-1">
                                 <div className="flex items-center justify-center md:justify-start gap-4 flex-wrap">
-                                    <h1 className="text-5xl font-black tracking-tighter bg-gradient-to-r from-white via-blue-50 to-slate-400 bg-clip-text text-transparent">
+                                    <h1 className="text-5xl font-black tracking-tight bg-gradient-to-r from-white via-blue-50 to-slate-400 bg-clip-text text-transparent leading-[1.18] py-0.5">
                                         {profile?.nickname || user.user_metadata?.nickname || user.user_metadata?.userid || user.email?.split('@')[0]}
                                     </h1>
                                     <Dialog open={isSettingsOpen} onOpenChange={(open) => { setIsSettingsOpen(open); if (!open) setNicknameError(null); }}>
@@ -798,7 +813,9 @@ export function MyPage() {
                                                     </div>
                                                     <h3 className="text-base font-black text-slate-100 mb-1 group-hover:text-amber-400 transition-colors truncate tracking-tight">{item.qual_name}</h3>
                                                     <p className="text-[10px] text-slate-500 font-bold opacity-70">
-                                                        "{user.user_metadata?.detail_major}" 추천 자격증
+                                                        &quot;
+                                                        {profile?.detail_major || user.user_metadata?.detail_major || '전공'}
+                                                        &quot; 추천 자격증
                                                     </p>
                                                 </div>
                                             ))
