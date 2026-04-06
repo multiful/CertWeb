@@ -36,6 +36,13 @@ const sampleMajors = [
 ];
 
 const AI_CACHE_KEY = 'ai-rec-cache';
+
+type AiRecCachePayload = {
+    userId: string | null;
+    major?: string;
+    interest?: string;
+    results?: HybridRecommendationResponse;
+};
 /** 로그인 사용자 하이브리드 추천 API limit (백엔드 le=20). 늘려도 RAG 비용은 거의 동일. */
 const HYBRID_RECOMMEND_LIMIT = 15;
 
@@ -135,27 +142,78 @@ export function AiRecommendationPage() {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
-    // 마운트 시 sessionStorage에서 이전 검색 상태 복원
+    // sessionStorage 복원은 user.id(로그인 전환) 기준만 — 매 입력마다 돌면 캐시가 입력을 덮어씀
     useEffect(() => {
+        const currentUid = user?.id ?? null;
+        let payload: AiRecCachePayload | null = null;
         try {
-            const cached = sessionStorage.getItem(AI_CACHE_KEY);
-            if (cached) {
-                const { major: m, interest: i, results: r } = JSON.parse(cached);
-                if (m) { setMajor(m); setInputValue(m); }
-                if (i) setInterest(i);
-                if (r) setResults(r);
-                return;
+            const raw = sessionStorage.getItem(AI_CACHE_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw) as Partial<AiRecCachePayload> & {
+                    major?: string;
+                    interest?: string;
+                    results?: HybridRecommendationResponse;
+                };
+                const owner =
+                    parsed.userId === undefined || parsed.userId === ''
+                        ? null
+                        : String(parsed.userId);
+
+                const cacheValidForCurrentSession =
+                    (currentUid == null && owner == null) ||
+                    (currentUid != null && owner === currentUid);
+
+                if (!cacheValidForCurrentSession) {
+                    sessionStorage.removeItem(AI_CACHE_KEY);
+                    if (currentUid != null) {
+                        setInterest('');
+                        setResults(null);
+                        if (profileMajor) {
+                            setMajor(profileMajor);
+                            setInputValue(profileMajor);
+                        } else {
+                            setMajor('');
+                            setInputValue('');
+                        }
+                    } else {
+                        setMajor('');
+                        setInputValue('');
+                        setInterest('');
+                        setResults(null);
+                    }
+                    return;
+                }
+
+                payload = {
+                    userId: owner,
+                    major: parsed.major,
+                    interest: parsed.interest,
+                    results: parsed.results,
+                };
             }
         } catch {
-            // 캐시 파싱 실패 시 무시
+            sessionStorage.removeItem(AI_CACHE_KEY);
         }
-        // 캐시가 없고 로그인 사용자인 경우, 프로필 전공(detail_major)로 초기값 자동 채움
-        if (profileMajor && !major && !inputValue) {
-            setMajor(profileMajor);
-            setInputValue(profileMajor);
+
+        if (payload) {
+            const { major: m, interest: i, results: r } = payload;
+            if (m) {
+                setMajor(m);
+                setInputValue(m);
+            }
+            if (i) setInterest(i);
+            if (r) setResults(r);
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // invalid 분기에서 profileMajor 참조 — 의도적으로 [user?.id]만 의존 (profileMajor 넣으면 캐시 재복원 위험)
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user?.id]);
+
+    // 로그인 + JWT에 전공이 늦게 붙는 경우·캐시 없이 진입 시 전공 칸만 자동 채움 (이미 입력 있으면 유지)
+    useEffect(() => {
+        if (!user?.id || !profileMajor) return;
+        setMajor((m) => (m.trim() ? m : profileMajor));
+        setInputValue((v) => (v.trim() ? v : profileMajor));
+    }, [user?.id, profileMajor]);
 
     React.useEffect(() => {
         getAvailableMajors().then(res => setAvailableMajors(res.majors)).catch(() => { });
@@ -192,7 +250,13 @@ export function AiRecommendationPage() {
             setResults(res);
             // 결과를 sessionStorage에 캐싱 → 뒤로가기 시 재호출 없이 복원
             try {
-                sessionStorage.setItem(AI_CACHE_KEY, JSON.stringify({ major, interest, results: res }));
+                const cache: AiRecCachePayload = {
+                    userId: user?.id ?? null,
+                    major,
+                    interest,
+                    results: res,
+                };
+                sessionStorage.setItem(AI_CACHE_KEY, JSON.stringify(cache));
             } catch {
                 // storage 용량 초과 등 무시
             }
