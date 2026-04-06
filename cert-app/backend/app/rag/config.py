@@ -44,7 +44,7 @@ class RAGSettings(BaseSettings):
     RAG_LINEAR_BM25_RANK_PRIOR: float = 0.009
     RAG_POST_METADATA_BM25_RANK_PRIOR: float = 0.0055
     # 3-way linear fusion 가중치 오버라이드(세 값 모두 설정 시에만 적용, 합으로 정규화).
-    # 비우면 hybrid.py의 LINEAR_QT_WEIGHTS_EXACT / LINEAR_QT_WEIGHTS_LONG 상수 사용.
+    # EXACT 또는 LONG 묶음에서 세 값이 모두 있을 때만 적용. 아니면 hybrid.py 상수 LINEAR_QT_WEIGHTS_* 사용.
     RAG_LINEAR_QT_EXACT_W_BM25: Optional[float] = None
     RAG_LINEAR_QT_EXACT_W_DENSE: Optional[float] = None
     RAG_LINEAR_QT_EXACT_W_CONTRASTIVE: Optional[float] = None
