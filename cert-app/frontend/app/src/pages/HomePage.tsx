@@ -19,7 +19,6 @@ import { useRouter } from '@/lib/router';
 import { getTrendingCerts, getCertificationsCatalogTotal, FALLBACK_CERT_CATALOG_TOTAL } from '@/lib/api';
 import type { TrendingQualification } from '@/types';
 import { toast } from 'sonner';
-import { RAG_RELEASE_LABEL } from '@/lib/ragProductCopy';
 
 export function HomePage() {
   const router = useRouter();
@@ -109,7 +108,7 @@ export function HomePage() {
           <div className="space-y-8 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm font-medium animate-fade-in">
               <Sparkles className="w-4 h-4" />
-              <span>국가자격 데이터 · {RAG_RELEASE_LABEL}</span>
+              <span>국가자격 데이터 · 하이브리드 AI 추천</span>
             </div>
 
             <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-white leading-[1.1]">
@@ -122,7 +121,7 @@ export function HomePage() {
             <p className="text-slate-400 text-lg lg:text-xl max-w-xl mx-auto lg:mx-0 leading-relaxed">
               합격률·난이도·직무 매칭은 DB 통계로, 전공·관심사 맞춤 추천은{' '}
               <span className="text-slate-300 font-semibold">BM25·시맨틱·Contrastive 하이브리드 RAG</span>
-              ({RAG_RELEASE_LABEL})로 제공합니다.
+              로 제공합니다.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-4">
@@ -199,8 +198,8 @@ export function HomePage() {
                     <p className="text-lg font-bold text-emerald-400 leading-tight">BM25 + 벡터 + Contrastive</p>
                   </div>
                   <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <p className="text-xs text-slate-500 mb-1">RAG 엔진</p>
-                    <p className="text-lg font-bold text-blue-400 leading-tight">2026.04 종결본</p>
+                    <p className="text-xs text-slate-500 mb-1">순위 융합</p>
+                    <p className="text-lg font-bold text-blue-400 leading-tight">Linear · 조건부 리랭커</p>
                   </div>
                 </div>
               </div>
@@ -379,7 +378,7 @@ export function HomePage() {
               커리어의 다음 단계를<br />지금 바로 설계해 보세요
             </h2>
             <p className="text-blue-100 text-lg opacity-80">
-              DB 통계 기반 전공 추천과 {RAG_RELEASE_LABEL} 하이브리드 AI 추천을 함께 쓸 수 있습니다.
+              DB 통계 기반 전공 추천과 하이브리드 RAG AI 추천을 함께 쓸 수 있습니다.
               회원가입 없이 대부분의 기능을 무료로 이용할 수 있습니다.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4 flex-wrap">

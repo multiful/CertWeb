@@ -9,7 +9,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription, EmptyContent } from '@/components/ui/empty';
 import { useRecommendations, useMajors, usePopularMajors } from '@/hooks/useRecommendations';
 import { useRouter } from '@/lib/router';
-import { RAG_VERSION_MARK } from '@/lib/ragProductCopy';
 
 const sampleMajors = [
   '컴퓨터공학',
@@ -91,7 +90,7 @@ export function RecommendationPage() {
         </h1>
         <p className="text-slate-300 max-w-lg mx-auto">
           전공을 입력하면 DB에 축적된 전공–자격증 매핑과 합격률·난이도 데이터를 바탕으로 목록을 구성합니다.
-          BM25·시맨틱·Contrastive 하이브리드 RAG({RAG_VERSION_MARK}) 기반 맞춤 추천은 상단 메뉴의{' '}
+          BM25·시맨틱·Contrastive 하이브리드 RAG 기반 맞춤 추천은 상단 메뉴의{' '}
           <span className="text-purple-300 font-semibold">AI 추천</span>에서 이용할 수 있습니다.
         </p>
       </div>

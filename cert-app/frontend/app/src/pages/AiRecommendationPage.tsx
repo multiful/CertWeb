@@ -28,11 +28,7 @@ import { useRouter } from '@/lib/router';
 import { useAuth } from '@/hooks/useAuth';
 import type { HybridRecommendationResponse } from '@/types';
 import { toast } from 'sonner';
-import {
-    RAG_RELEASE_LABEL,
-    RAG_RETRIEVAL_DETAIL_LINE,
-    RAG_RETRIEVAL_LOADING_LINE,
-} from '@/lib/ragProductCopy';
+import { RAG_RETRIEVAL_DETAIL_LINE, RAG_RETRIEVAL_LOADING_LINE } from '@/lib/ragProductCopy';
 
 const sampleMajors = [
     '컴퓨터공학', '정보통신공학', '전자공학', '전기공학', '기계공학',
@@ -85,12 +81,12 @@ const AI_ENGINE_STATS = [
         descSmall: true,
     },
     {
-        label: 'RAG 엔진',
-        value: '2026.04',
-        unit: ' 종결본',
+        label: '검색·품질',
+        value: 'Recall',
+        unit: ' · MRR',
         icon: TrendingUp,
         color: 'green' as const,
-        desc: '오프라인 골든셋 A/B로 기본값 확정(Recall·MRR 내부 벤치)',
+        desc: '전공·관심사에 맞는 후보 순위를 유지합니다',
         descSmall: true,
     },
 ] as const;
@@ -248,7 +244,7 @@ export function AiRecommendationPage() {
                     <div className="flex-1 space-y-6">
                         <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 px-3 py-1">
                             <BrainCircuit className="w-4 h-4 mr-2" />
-                            AI 추천 · {RAG_RELEASE_LABEL}
+                            AI 추천 · 하이브리드 검색
                         </Badge>
                         <h1 className="text-4xl md:text-5xl font-extrabold text-white leading-tight">
                             관심사와 전공을 <br />
@@ -260,7 +256,7 @@ export function AiRecommendationPage() {
                             전공·관심사·프로필을 반영해 자격 후보를 고릅니다.
                             <br />
                             <span className="text-slate-500 text-base">
-                                검색층은 BM25·시맨틱(pgvector)·Contrastive 3채널 하이브리드({RAG_RELEASE_LABEL})입니다.
+                                검색층은 BM25·시맨틱(pgvector)·Contrastive 3채널 하이브리드입니다.
                             </span>
                         </p>
                     </div>
