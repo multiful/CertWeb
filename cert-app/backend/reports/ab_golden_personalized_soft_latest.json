@@ -1,0 +1,121 @@
+{
+  "golden": "C:\\Users\\rlaeh\\OneDrive\\바탕 화면\\Projects\\CertWeb\\cert-app\\backend\\dataset\\reco_golden_recommendation_19_clean.jsonl",
+  "max_queries": 20,
+  "env_personalized_soft_before_run": true,
+  "run_orders": [
+    "off_then_on",
+    "on_then_off"
+  ],
+  "rows": [
+    {
+      "variant": "personalized_soft_off",
+      "overrides": {
+        "RAG_PERSONALIZED_SOFT_SCORE_ENABLE": false
+      },
+      "trials": [
+        {
+          "variant": "personalized_soft_off",
+          "overrides": {
+            "RAG_PERSONALIZED_SOFT_SCORE_ENABLE": false
+          },
+          "run_order_index": 0,
+          "Recall@5_qual": 0.44261904761904763,
+          "Recall@10_qual": 0.6024999999999999,
+          "MRR_qual": 0.6916666666666667,
+          "Hit@5": 0.9,
+          "Hit@10": 1.0,
+          "Avg_Latency_ms": 1078.9954799998668,
+          "P95_Latency_ms": 1249.783799999932,
+          "pre_parallel_ms": 387.3353850000058,
+          "parallel_ms": 613.9228749999347,
+          "fusion_ranking_ms": 77.54733499996291,
+          "hybrid_sum_ms": 1078.8055949999034
+        },
+        {
+          "variant": "personalized_soft_off",
+          "overrides": {
+            "RAG_PERSONALIZED_SOFT_SCORE_ENABLE": false
+          },
+          "run_order_index": 1,
+          "Recall@5_qual": 0.44261904761904763,
+          "Recall@10_qual": 0.6024999999999999,
+          "MRR_qual": 0.6916666666666667,
+          "Hit@5": 0.9,
+          "Hit@10": 1.0,
+          "Avg_Latency_ms": 401.52140999994117,
+          "P95_Latency_ms": 488.3215999998356,
+          "pre_parallel_ms": 117.33284499991896,
+          "parallel_ms": 234.886324999934,
+          "fusion_ranking_ms": 49.15786000024127,
+          "hybrid_sum_ms": 401.37703000009424
+        }
+      ],
+      "Recall@5_qual": 0.44261904761904763,
+      "Recall@10_qual": 0.6024999999999999,
+      "MRR_qual": 0.6916666666666667,
+      "Hit@5": 0.9,
+      "Hit@10": 1.0,
+      "Avg_Latency_ms": 740.258444999904,
+      "P95_Latency_ms": 869.0526999998838,
+      "pre_parallel_ms": 252.33411499996237,
+      "parallel_ms": 424.40459999993436,
+      "fusion_ranking_ms": 63.35259750010209,
+      "hybrid_sum_ms": 740.0913124999988
+    },
+    {
+      "variant": "personalized_soft_on",
+      "overrides": {
+        "RAG_PERSONALIZED_SOFT_SCORE_ENABLE": true
+      },
+      "trials": [
+        {
+          "variant": "personalized_soft_on",
+          "overrides": {
+            "RAG_PERSONALIZED_SOFT_SCORE_ENABLE": true
+          },
+          "run_order_index": 0,
+          "Recall@5_qual": 0.4705952380952382,
+          "Recall@10_qual": 0.6048809523809524,
+          "MRR_qual": 0.6958333333333333,
+          "Hit@5": 0.9,
+          "Hit@10": 0.95,
+          "Avg_Latency_ms": 1249.9541999999565,
+          "P95_Latency_ms": 1833.3922000001621,
+          "pre_parallel_ms": 114.2807300000186,
+          "parallel_ms": 253.31067500001154,
+          "fusion_ranking_ms": 881.9684749999396,
+          "hybrid_sum_ms": 1249.5598799999698
+        },
+        {
+          "variant": "personalized_soft_on",
+          "overrides": {
+            "RAG_PERSONALIZED_SOFT_SCORE_ENABLE": true
+          },
+          "run_order_index": 1,
+          "Recall@5_qual": 0.4705952380952382,
+          "Recall@10_qual": 0.6048809523809524,
+          "MRR_qual": 0.6958333333333333,
+          "Hit@5": 0.9,
+          "Hit@10": 0.95,
+          "Avg_Latency_ms": 1017.597829999977,
+          "P95_Latency_ms": 1141.885999999431,
+          "pre_parallel_ms": 111.86883999998827,
+          "parallel_ms": 234.38404000003175,
+          "fusion_ranking_ms": 670.931254999914,
+          "hybrid_sum_ms": 1017.184134999934
+        }
+      ],
+      "Recall@5_qual": 0.4705952380952382,
+      "Recall@10_qual": 0.6048809523809524,
+      "MRR_qual": 0.6958333333333333,
+      "Hit@5": 0.9,
+      "Hit@10": 0.95,
+      "Avg_Latency_ms": 1133.7760149999667,
+      "P95_Latency_ms": 1487.6390999997966,
+      "pre_parallel_ms": 113.07478500000343,
+      "parallel_ms": 243.84735750002164,
+      "fusion_ranking_ms": 776.4498649999268,
+      "hybrid_sum_ms": 1133.372007499952
+    }
+  ]
+}

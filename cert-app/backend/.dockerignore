@@ -11,11 +11,13 @@ venv
 *.md
 !README.md
 
-# 스크립트·평가 (배포 불필요). data/rag_index/ 는 RAG BM25용으로 포함
+# 스크립트·평가 (배포 불필요). data/rag_index·contrastive_index 는 RAG용으로 포함
 scripts/
 data/*
 !data/rag_index/
 !data/rag_index/**
+!data/contrastive_index/
+!data/contrastive_index/**
 **/reranker_*.jsonl
 **/cert_*.jsonl
 RAG_IMPROVEMENT.md
