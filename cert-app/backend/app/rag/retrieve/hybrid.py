@@ -1054,7 +1054,7 @@ def hybrid_retrieve(
     - channels_override: 채널 제한. ["bm25"], ["vector"], ["contrastive"] 또는 조합. None이면 3채널 모두 사용.
     filters 있으면 메타데이터 필터. 반환: [(chunk_id, score), ...]
     - pre_retrieval_budget_ms: Pre-retrieval 잔여 예산(ms). None이면 RAG_PRE_RETRIEVAL_BUDGET_MS(기본 15s). 0 이하면 게이트 없음.
-    - pre_retrieval_trace_out: 설정 시 PreRetrievalTrace 필드가 dict로 채워짐(호출자가 재사용 가능한 mutable dict).
+    - pre_retrieval_trace_out: 설정 시 PreRetrievalTrace 필드가 dict로 채워짐. RAG_PRE_RETRIEVAL_TRACE_ENABLE=True일 때도 dict 없이 로깅용 trace만 조립.
     - hybrid_phase_timings_out: 설정 시 리랭커 직전까지(ms). pre_parallel_ms, parallel_ms, fusion_ranking_ms
     """
     settings = get_rag_settings()
@@ -1076,6 +1076,9 @@ def hybrid_retrieve(
     use_bm25 = len(channels_set) == 0 or "bm25" in channels_set
     use_vector = len(channels_set) == 0 or "vector" in channels_set
     use_contrastive_ch = len(channels_set) == 0 or "contrastive" in channels_set
+    need_pre_trace = pre_retrieval_trace_out is not None or getattr(
+        settings, "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False
+    )
 
     top_n = (top_n_candidates_override if top_n_candidates_override is not None else settings.RAG_TOP_N_CANDIDATES)
     # 채널별 후보 수(N): 오버라이드 있으면 우선, 없으면 설정값 또는 top_n
@@ -1193,40 +1196,41 @@ def hybrid_retrieve(
         )
         hit = get_cached_result(cache_key_for_result)
         if hit:
-            _rem_hit: Optional[float] = None
-            if budget_deadline is not None:
-                _rem_hit = max(0.0, (budget_deadline - time.monotonic()) * 1000.0)
-            _aux_hit = pre_retrieval_aux_fields(
-                query or "",
-                query_type or "",
-                t_pre_start=t_pre_start,
-                latency_key="pre_retrieval_cache_return_ms",
-            )
-            _ptr_hit = PreRetrievalTrace(
-                original_query=query or "",
-                normalized_query=dense_query or "",
-                query_language=_aux_hit["query_language"],
-                query_type=query_type or "",
-                intent_label=query_type or None,
-                intent_confidence=_aux_hit["intent_confidence"],
-                difficulty_label=_aux_hit["difficulty_label"],
-                difficulty_confidence=_aux_hit["difficulty_confidence"],
-                latency_breakdown_ms=dict(_aux_hit["latency_breakdown_ms"]),
-                strategy_flags={"retrieval_result_cache": "hit"},
-                budget_remaining_ms=_rem_hit,
-                budget_deadline_set=budget_deadline is not None,
-                skip_expansion_identifier_heavy=skip_expansion,
-                identifier_heavy=identifier_heavy,
-                cache_hit_semantic=True,
-                vector_search_meta={},
-                rewrite_skipped=rewrite_skipped,
-                rewrite_skip_reason=rewrite_skip_reason,
-            )
-            if pre_retrieval_trace_out is not None:
-                pre_retrieval_trace_out.clear()
-                pre_retrieval_trace_out.update(_ptr_hit.model_dump())
-            if getattr(settings, "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
-                log_pre_retrieval_trace(_ptr_hit)
+            if need_pre_trace:
+                _rem_hit: Optional[float] = None
+                if budget_deadline is not None:
+                    _rem_hit = max(0.0, (budget_deadline - time.monotonic()) * 1000.0)
+                _aux_hit = pre_retrieval_aux_fields(
+                    query or "",
+                    query_type or "",
+                    t_pre_start=t_pre_start,
+                    latency_key="pre_retrieval_cache_return_ms",
+                )
+                _ptr_hit = PreRetrievalTrace(
+                    original_query=query or "",
+                    normalized_query=dense_query or "",
+                    query_language=_aux_hit["query_language"],
+                    query_type=query_type or "",
+                    intent_label=query_type or None,
+                    intent_confidence=_aux_hit["intent_confidence"],
+                    difficulty_label=_aux_hit["difficulty_label"],
+                    difficulty_confidence=_aux_hit["difficulty_confidence"],
+                    latency_breakdown_ms=dict(_aux_hit["latency_breakdown_ms"]),
+                    strategy_flags={"retrieval_result_cache": "hit"},
+                    budget_remaining_ms=_rem_hit,
+                    budget_deadline_set=budget_deadline is not None,
+                    skip_expansion_identifier_heavy=skip_expansion,
+                    identifier_heavy=identifier_heavy,
+                    cache_hit_semantic=True,
+                    vector_search_meta={},
+                    rewrite_skipped=rewrite_skipped,
+                    rewrite_skip_reason=rewrite_skip_reason,
+                )
+                if pre_retrieval_trace_out is not None:
+                    pre_retrieval_trace_out.clear()
+                    pre_retrieval_trace_out.update(_ptr_hit.model_dump())
+                if getattr(settings, "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
+                    log_pre_retrieval_trace(_ptr_hit)
             return hit[:top_k] if len(hit) >= top_k else hit
 
     # Vector + HyDE / BM25: PRF 사용 시 BM25 2단계 의존 → 순차. 그 외 스레드 병렬로 p95 완화
@@ -1399,41 +1403,42 @@ def hybrid_retrieve(
                 single_contrastive_only,
             )
 
-    # Pre-retrieval trace (§2 스키마에 가까운 관측; fusion 직전)
-    _rem_ms: Optional[float] = None
-    if budget_deadline is not None:
-        _rem_ms = max(0.0, (budget_deadline - time.monotonic()) * 1000.0)
-    _aux_fusion = pre_retrieval_aux_fields(
-        query or "",
-        query_type or "",
-        t_pre_start=t_pre_start,
-        latency_key="pre_retrieval_to_fusion_ms",
-    )
-    _ptrace = PreRetrievalTrace(
-        original_query=query or "",
-        normalized_query=dense_query or "",
-        query_language=_aux_fusion["query_language"],
-        query_type=query_type or "",
-        intent_label=query_type or None,
-        intent_confidence=_aux_fusion["intent_confidence"],
-        difficulty_label=_aux_fusion["difficulty_label"],
-        difficulty_confidence=_aux_fusion["difficulty_confidence"],
-        latency_breakdown_ms=dict(_aux_fusion["latency_breakdown_ms"]),
-        strategy_flags=dict(vec_trace.get("strategy_flags") or {}),
-        budget_remaining_ms=_rem_ms,
-        budget_deadline_set=budget_deadline is not None,
-        skip_expansion_identifier_heavy=skip_expansion,
-        identifier_heavy=identifier_heavy,
-        cache_hit_semantic=False,
-        vector_search_meta=dict(vec_trace.get("vector_search_meta") or {}),
-        rewrite_skipped=rewrite_skipped,
-        rewrite_skip_reason=rewrite_skip_reason,
-    )
-    if pre_retrieval_trace_out is not None:
-        pre_retrieval_trace_out.clear()
-        pre_retrieval_trace_out.update(_ptrace.model_dump())
-    if getattr(settings, "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
-        log_pre_retrieval_trace(_ptrace)
+    # Pre-retrieval trace (§2 스키마에 가까운 관측; fusion 직전) — 호출자가 dict를 넘기거나 TRACE 로깅 ON일 때만 조립
+    if need_pre_trace:
+        _rem_ms: Optional[float] = None
+        if budget_deadline is not None:
+            _rem_ms = max(0.0, (budget_deadline - time.monotonic()) * 1000.0)
+        _aux_fusion = pre_retrieval_aux_fields(
+            query or "",
+            query_type or "",
+            t_pre_start=t_pre_start,
+            latency_key="pre_retrieval_to_fusion_ms",
+        )
+        _ptrace = PreRetrievalTrace(
+            original_query=query or "",
+            normalized_query=dense_query or "",
+            query_language=_aux_fusion["query_language"],
+            query_type=query_type or "",
+            intent_label=query_type or None,
+            intent_confidence=_aux_fusion["intent_confidence"],
+            difficulty_label=_aux_fusion["difficulty_label"],
+            difficulty_confidence=_aux_fusion["difficulty_confidence"],
+            latency_breakdown_ms=dict(_aux_fusion["latency_breakdown_ms"]),
+            strategy_flags=dict(vec_trace.get("strategy_flags") or {}),
+            budget_remaining_ms=_rem_ms,
+            budget_deadline_set=budget_deadline is not None,
+            skip_expansion_identifier_heavy=skip_expansion,
+            identifier_heavy=identifier_heavy,
+            cache_hit_semantic=False,
+            vector_search_meta=dict(vec_trace.get("vector_search_meta") or {}),
+            rewrite_skipped=rewrite_skipped,
+            rewrite_skip_reason=rewrite_skip_reason,
+        )
+        if pre_retrieval_trace_out is not None:
+            pre_retrieval_trace_out.clear()
+            pre_retrieval_trace_out.update(_ptrace.model_dump())
+        if getattr(settings, "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
+            log_pre_retrieval_trace(_ptrace)
 
     # Query Routing + Weighted fusion (쿼리 타입별·도메인별 가중치, 짧은 쿼리 시 Vector 게이팅)
     if use_query_weights or (alpha is None and getattr(settings, "RAG_ENHANCED_ALPHA", None) is None):

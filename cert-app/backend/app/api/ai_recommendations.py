@@ -147,7 +147,8 @@ def _run_enhanced_rag_sync(
                 acq_set.add(int(x))
             except (TypeError, ValueError):
                 continue
-        pre_trace: Dict[str, Any] = {}
+        trace_on = getattr(get_rag_settings(), "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False)
+        pre_trace: Optional[Dict[str, Any]] = {} if trace_on else None
         hybrid_kw: Dict[str, Any] = {
             "use_reranker": False,
             "dedup_per_cert_override": True,
@@ -170,7 +171,7 @@ def _run_enhanced_rag_sync(
             top_k=rag_top_k,
             **hybrid_kw,
         )
-        if getattr(get_rag_settings(), "RAG_PRE_RETRIEVAL_TRACE_ENABLE", False):
+        if trace_on and pre_trace:
             logger.debug(
                 "ai_recommendations pre_retrieval query_type=%s rewrite_skipped=%s",
                 pre_trace.get("query_type"),
