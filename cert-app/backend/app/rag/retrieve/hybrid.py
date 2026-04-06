@@ -108,7 +108,7 @@ def _query_weights_for_rrf(query: str) -> Tuple[float, float]:
 
 
 # query_type별 2-way 비율 (BM25, Dense). RRF fusion 또는 _three_way_weights_by_query_type에서 사용.
-# linear fusion 시에는 사용하지 않음 — linear는 _linear_weights_by_query_type → LINEAR_QT_WEIGHTS_EXACT/LONG 사용.
+# linear fusion: _linear_weights_by_query_type → RAG_LINEAR_QT_* 세트가 있으면 env, 없으면 아래 상수.
 # - "진짜 키워드/자격증명" 쿼리 → BM25 비중 크게
 # - 나머지 자연어/의도형 쿼리 → Dense/Contrastive 비중 크게
 QUERY_TYPE_RRF_WEIGHTS: Dict[str, Tuple[float, float]] = {
@@ -201,21 +201,40 @@ def _is_exact_or_long_like(query: str, query_type: str) -> Tuple[bool, bool]:
     return is_exact_like, is_long_like
 
 
-def _linear_weights_by_query_type(query: str, query_type: str) -> Tuple[float, float, float]:
+def _linear_weights_from_settings_exact(settings: Any) -> Tuple[float, float, float]:
+    b = getattr(settings, "RAG_LINEAR_QT_EXACT_W_BM25", None)
+    d = getattr(settings, "RAG_LINEAR_QT_EXACT_W_DENSE", None)
+    c = getattr(settings, "RAG_LINEAR_QT_EXACT_W_CONTRASTIVE", None)
+    if b is not None and d is not None and c is not None:
+        return (float(b), float(d), float(c))
+    return LINEAR_QT_WEIGHTS_EXACT
+
+
+def _linear_weights_from_settings_long(settings: Any) -> Tuple[float, float, float]:
+    b = getattr(settings, "RAG_LINEAR_QT_LONG_W_BM25", None)
+    d = getattr(settings, "RAG_LINEAR_QT_LONG_W_DENSE", None)
+    c = getattr(settings, "RAG_LINEAR_QT_LONG_W_CONTRASTIVE", None)
+    if b is not None and d is not None and c is not None:
+        return (float(b), float(d), float(c))
+    return LINEAR_QT_WEIGHTS_LONG
+
+
+def _linear_weights_by_query_type(
+    query: str, query_type: str, settings: Any
+) -> Tuple[float, float, float]:
     """
     선형 fusion용 3-way 가중치 (BM25, Dense, Contrastive)를 질의 타입에 따라 선택.
 
-    - exact/short: LINEAR_QT_WEIGHTS_EXACT
-    - long/natural: LINEAR_QT_WEIGHTS_LONG
+    - exact/short: RAG_LINEAR_QT_EXACT_W_* 세 값이 모두 있으면 사용, 아니면 LINEAR_QT_WEIGHTS_EXACT
+    - long/natural: RAG_LINEAR_QT_LONG_W_* 세 값이 모두 있으면 사용, 아니면 LINEAR_QT_WEIGHTS_LONG
     - 둘 다이거나 모호하면 long 쪽을 기본으로 사용 (자연어/로드맵에 유리하게).
     """
     is_exact_like, is_long_like = _is_exact_or_long_like(query, query_type)
     if is_exact_like and not is_long_like:
-        return LINEAR_QT_WEIGHTS_EXACT
+        return _linear_weights_from_settings_exact(settings)
     if is_long_like and not is_exact_like:
-        return LINEAR_QT_WEIGHTS_LONG
-    # 모호한 경우: long 설정을 기본으로 사용
-    return LINEAR_QT_WEIGHTS_LONG
+        return _linear_weights_from_settings_long(settings)
+    return _linear_weights_from_settings_long(settings)
 
 
 def _query_weights_by_type(query: str) -> Tuple[float, float]:
@@ -1460,7 +1479,9 @@ def hybrid_retrieve(
     _raw_fusion = (getattr(settings, "RAG_FUSION_METHOD", None) or "linear").strip().lower()
     fusion_method = "linear" if _raw_fusion == "rrf" else _raw_fusion
     # Query-type adaptive linear fusion용 3-way 가중치 (BM25, Dense, Contrastive)
-    linear_w_bm25, linear_w_dense, linear_w_contrastive = _linear_weights_by_query_type(query, query_type)
+    linear_w_bm25, linear_w_dense, linear_w_contrastive = _linear_weights_by_query_type(
+        query, query_type, settings
+    )
     rrf_k = rrf_k_override if rrf_k_override is not None else _rrf_k()
     if channels_set:
         lists_to_merge: List[List[Tuple[str, float]]] = []
