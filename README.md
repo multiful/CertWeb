@@ -45,7 +45,7 @@
 - **퍼지 전공 매칭**: DB에 없는 전공명은 pg_trgm 유사도로 근접 전공 사용
 - **취득 자격증 제외**: 로그인 시 이미 취득한 자격증은 추천 후보에서 제외(하드 제외·개인화 감점 등 설정 가능)
 - **게스트**: 비로그인 시 결과 3개 제한; 로그인 시 **최대 15개** 결과 제공
-- **개발자 문서**: `cert-app/backend/docs/RAG_FEATURES.md`에 RAG 스위치·모듈·평가 CLI 전체 정리
+- **개발자 문서**: `cert-app/backend/docs/RAG_TECHNIQUES_SUMMARY.md`(기법 요약·종료본), `docs/RAG_FEATURES.md`(표 형 카탈로그)
 
 ### 4. 계정·마이페이지
 

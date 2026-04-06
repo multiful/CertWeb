@@ -273,7 +273,8 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 ## 📚 참고 문서
 
-- **RAG 기능 카탈로그(전체)**: [`docs/RAG_FEATURES.md`](docs/RAG_FEATURES.md)
+- **RAG 기법 요약서(프로젝트 종료본)**: [`docs/RAG_TECHNIQUES_SUMMARY.md`](docs/RAG_TECHNIQUES_SUMMARY.md)
+- **RAG 기능 카탈로그(표·모듈)**: [`docs/RAG_FEATURES.md`](docs/RAG_FEATURES.md)
 - **인덱싱**: `RAG_Indexing.md` · **E2E 파이프라인**: `data/rag_e2e_pipeline.md` · **개선 이력**: `RAG_IMPROVEMENT.md`
 - **Contrastive**: `app/rag/contrastive/README.md`, `data/contrastive_index/README.md`
 - **배포·CORS·환경변수**: `.cursor/rules/deployment.mdc`

@@ -7,6 +7,7 @@
 
 아래 문서들은 현재 `POST /api/v1/rag/ask` 기준 E2E 흐름(Rewrite/Hybrid Retrieve/Fusion/Metadata·개인화 Soft/Rerank/Gating/Evidence-first 생성)과 인덱싱/운영 튜닝 상태를 직접 다루거나, 최신 Contrastive(768-dim) 구성에 필수인 참조 문서를 포함합니다.
 
+- `cert-app/backend/docs/RAG_TECHNIQUES_SUMMARY.md` — **프로젝트 종료본·기법 요약서**(단계별 적용 여부·인수인계)
 - `cert-app/backend/docs/RAG_FEATURES.md` — **구현된 RAG 기능 전체 카탈로그**(스위치·모듈·CLI)
 - `cert-app/backend/RAG_Indexing.md`
 - `cert-app/backend/data/rag_e2e_pipeline.md`

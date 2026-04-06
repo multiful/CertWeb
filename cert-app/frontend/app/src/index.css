@@ -113,13 +113,18 @@
   }
 }
 
+/*
+ * AI 추천 로딩 바: 트랙 전체를 스캔 (왕복은 animation-direction: alternate)
+ * 내부 막대 너비 = 트랙의 36% 일 때, translateX % 는 막대 자기 너비 기준이므로
+ * 한 끝에서 반대 끝까지 = (1 + 0.36) / 0.36 ≈ 378%
+ */
 @keyframes aiRecIndeterminate {
   0% {
-    transform: scaleX(0.35) translateX(0%);
-    opacity: 0.85;
+    transform: translateX(-100%);
+    opacity: 0.9;
   }
   100% {
-    transform: scaleX(0.85) translateX(40%);
+    transform: translateX(378%);
     opacity: 1;
   }
 }
