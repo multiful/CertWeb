@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
 ];
 
 import { CertLogo } from '../common/CertLogo';
+import { PRODUCT_FOOTER_LINE } from '@/lib/ragProductCopy';
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -181,8 +182,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </div>
               <span className="font-black text-sm tracking-tighter bg-gradient-to-r from-white/80 to-slate-500 bg-clip-text text-transparent uppercase">CertFinder</span>
             </Link>
-            <p className="text-slate-500 text-sm font-medium">
-              2026 CertFinder 국가자격 통합 분석 시스템
+            <p className="text-slate-500 text-sm font-medium text-center sm:text-left max-w-md leading-snug">
+              {PRODUCT_FOOTER_LINE}
             </p>
             <div className="flex gap-4 text-xs font-bold text-slate-600">
               <Link to="/privacy" className="hover:text-slate-400 cursor-pointer transition-colors">개인정보 처리방침</Link>

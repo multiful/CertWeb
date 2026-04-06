@@ -19,6 +19,7 @@ import { useRouter } from '@/lib/router';
 import { getTrendingCerts, getCertificationsCatalogTotal, FALLBACK_CERT_CATALOG_TOTAL } from '@/lib/api';
 import type { TrendingQualification } from '@/types';
 import { toast } from 'sonner';
+import { RAG_RELEASE_LABEL } from '@/lib/ragProductCopy';
 
 export function HomePage() {
   const router = useRouter();
@@ -108,7 +109,7 @@ export function HomePage() {
           <div className="space-y-8 text-center lg:text-left">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-sm font-medium animate-fade-in">
               <Sparkles className="w-4 h-4" />
-              <span>Next-Gen Career Analysis Platform</span>
+              <span>국가자격 데이터 · {RAG_RELEASE_LABEL}</span>
             </div>
 
             <h1 className="text-5xl lg:text-7xl font-extrabold tracking-tight text-white leading-[1.1]">
@@ -119,8 +120,9 @@ export function HomePage() {
             </h1>
 
             <p className="text-slate-400 text-lg lg:text-xl max-w-xl mx-auto lg:mx-0 leading-relaxed">
-              국가 기술 자격증의 합격 확률, 난이도 분석, 그리고 맞춤형 직무 추천까지.
-              검증된 데이터를 통해 최적의 목표를 설정하세요.
+              합격률·난이도·직무 매칭은 DB 통계로, 전공·관심사 맞춤 추천은{' '}
+              <span className="text-slate-300 font-semibold">BM25·시맨틱·Contrastive 하이브리드 RAG</span>
+              ({RAG_RELEASE_LABEL})로 제공합니다.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-4 justify-center lg:justify-start pt-4">
@@ -159,7 +161,7 @@ export function HomePage() {
                 <CheckCircle2 className="w-4 h-4 text-emerald-500" /> {certCatalogTotal.toLocaleString('ko-KR')}개 자격증 데이터
               </div>
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> 실시간 합격률 분석
+                <CheckCircle2 className="w-4 h-4 text-emerald-500" /> AI 추천: 3채널 하이브리드 검색
               </div>
             </div>
           </div>
@@ -171,8 +173,8 @@ export function HomePage() {
               <div className="relative bg-slate-950 rounded-[22px] p-8 space-y-6">
                 <div className="flex justify-between items-center">
                   <div className="space-y-1">
-                    <p className="text-xs font-bold text-blue-400 uppercase tracking-widest">Global Statistics</p>
-                    <h3 className="text-xl font-bold text-white">Trend Analysis</h3>
+                    <p className="text-xs font-bold text-blue-400 uppercase tracking-widest">서비스 구성</p>
+                    <h3 className="text-xl font-bold text-white">데이터 · 검색</h3>
                   </div>
                   <div className="p-2 bg-slate-900 rounded-lg">
                     <TrendingUp className="w-5 h-5 text-indigo-400" />
@@ -190,14 +192,15 @@ export function HomePage() {
                   ))}
                 </div>
 
+                <p className="text-[10px] text-slate-600 text-center -mt-2">막대 그래프는 UI 예시이며 실제 합격률 수치가 아닙니다.</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <p className="text-xs text-slate-500 mb-1">Pass Rate</p>
-                    <p className="text-2xl font-bold text-emerald-400">74.2%</p>
+                    <p className="text-xs text-slate-500 mb-1">AI 추천 검색</p>
+                    <p className="text-lg font-bold text-emerald-400 leading-tight">BM25 + 벡터 + Contrastive</p>
                   </div>
                   <div className="p-4 bg-slate-900/50 rounded-xl border border-slate-800">
-                    <p className="text-xs text-slate-500 mb-1">Growth</p>
-                    <p className="text-2xl font-bold text-blue-400">+12%</p>
+                    <p className="text-xs text-slate-500 mb-1">RAG 엔진</p>
+                    <p className="text-lg font-bold text-blue-400 leading-tight">2026.04 종결본</p>
                   </div>
                 </div>
               </div>
@@ -225,7 +228,7 @@ export function HomePage() {
           {[
             {
               title: "맞춤형 추천 시스템",
-              desc: "당신의 전공과 경력을 분석하여 가장 적합한 자격증 로드맵을 제안합니다.",
+              desc: "전공–자격증 DB 매핑과 시험 통계로 목록을 구성합니다. 시맨틱·RAG 기반 추천은 상단 메뉴의 AI 추천에서 이용하세요.",
               icon: Target,
               color: "text-blue-400",
               bg: "bg-blue-400/5",
@@ -376,16 +379,23 @@ export function HomePage() {
               커리어의 다음 단계를<br />지금 바로 설계해 보세요
             </h2>
             <p className="text-blue-100 text-lg opacity-80">
-              전문가 수준의 데이터 분석을 통해 당신의 성공 가능성을 획기적으로 높여드립니다.
-              회원가입 없이 모든 분석 기능을 무료로 이용할 수 있습니다.
+              DB 통계 기반 전공 추천과 {RAG_RELEASE_LABEL} 하이브리드 AI 추천을 함께 쓸 수 있습니다.
+              회원가입 없이 대부분의 기능을 무료로 이용할 수 있습니다.
             </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
+            <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4 flex-wrap">
               <Button
                 onClick={() => router.navigate('/recommendation')}
                 size="lg"
                 className="bg-white text-blue-600 hover:bg-blue-50 text-lg font-bold rounded-xl h-14 px-10 shadow-xl"
               >
                 전공별 자격증 추천
+              </Button>
+              <Button
+                onClick={() => router.navigate('/ai-recommendations')}
+                size="lg"
+                className="bg-indigo-500/90 text-white hover:bg-indigo-400 text-lg font-bold rounded-xl h-14 px-10 shadow-xl border border-white/20"
+              >
+                AI 추천 (하이브리드 RAG)
               </Button>
               <Button
                 onClick={() => router.navigate('/jobs')}

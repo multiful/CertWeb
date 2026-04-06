@@ -28,6 +28,11 @@ import { useRouter } from '@/lib/router';
 import { useAuth } from '@/hooks/useAuth';
 import type { HybridRecommendationResponse } from '@/types';
 import { toast } from 'sonner';
+import {
+    RAG_RELEASE_LABEL,
+    RAG_RETRIEVAL_DETAIL_LINE,
+    RAG_RETRIEVAL_LOADING_LINE,
+} from '@/lib/ragProductCopy';
 
 const sampleMajors = [
     '컴퓨터공학', '정보통신공학', '전자공학', '전기공학', '기계공학',
@@ -80,12 +85,12 @@ const AI_ENGINE_STATS = [
         descSmall: true,
     },
     {
-        label: '검색 품질',
-        value: 'Recall · MRR',
-        unit: '',
+        label: 'RAG 엔진',
+        value: '2026.04',
+        unit: ' 종결본',
         icon: TrendingUp,
         color: 'green' as const,
-        desc: '평가·모니터링 지표(내부 벤치)',
+        desc: '오프라인 골든셋 A/B로 기본값 확정(Recall·MRR 내부 벤치)',
         descSmall: true,
     },
 ] as const;
@@ -243,7 +248,7 @@ export function AiRecommendationPage() {
                     <div className="flex-1 space-y-6">
                         <Badge variant="outline" className="bg-blue-500/10 text-blue-400 border-blue-500/20 px-3 py-1">
                             <BrainCircuit className="w-4 h-4 mr-2" />
-                            AI 추천
+                            AI 추천 · {RAG_RELEASE_LABEL}
                         </Badge>
                         <h1 className="text-4xl md:text-5xl font-extrabold text-white leading-tight">
                             관심사와 전공을 <br />
@@ -252,8 +257,11 @@ export function AiRecommendationPage() {
                             </span>
                         </h1>
                         <p className="text-slate-400 text-lg max-w-xl">
-                            나만의 전공과 커리어 목표에 딱 맞는 자격증을 <br />
-                            인공지능이 실시간으로 분석하여 찾아드립니다.
+                            전공·관심사·프로필을 반영해 자격 후보를 고릅니다.
+                            <br />
+                            <span className="text-slate-500 text-base">
+                                검색층은 BM25·시맨틱(pgvector)·Contrastive 3채널 하이브리드({RAG_RELEASE_LABEL})입니다.
+                            </span>
                         </p>
                     </div>
 
@@ -380,7 +388,7 @@ export function AiRecommendationPage() {
                 <div className="space-y-6">
                     <div className="rounded-2xl border border-slate-800 bg-slate-900/40 px-4 py-4 text-center space-y-3">
                         <p className="text-sm text-slate-300 font-medium">
-                            BM25 · 시맨틱 · Contrastive 하이브리드 검색과 합격률·난이도 통계를 합치는 중입니다.
+                            {RAG_RETRIEVAL_LOADING_LINE}
                         </p>
                         <p className="text-xs text-slate-500">
                             비로그인 미리보기는 후보 탐색을 가볍게 해 더 빠르게 응답합니다. 통상 약 5~25초입니다.
@@ -700,8 +708,9 @@ export function AiRecommendationPage() {
                                     </p>
                                 </div>
                             </div>
-                            <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800">
-                                검색: BM25 + Vector + Contrastive. 정합성 = (전공 + 융합 가중 평균) × 난이도·합격률 보정
+                            <p className="text-[11px] text-slate-500 pt-1 border-t border-slate-800 leading-relaxed">
+                                {RAG_RETRIEVAL_DETAIL_LINE} 정합성 점수는 전공·융합 신호에 합격률·난이도 보정을 곱한 형태로
+                                표시됩니다.
                             </p>
                             <p className="text-[10px] text-slate-600 leading-relaxed">
                                 막대 길이·표시 비율은 이해를 돕는 예시이며, 실제 서버 가중치·분기와 수치가 일치하지 않을 수 있습니다.
