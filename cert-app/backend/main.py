@@ -97,17 +97,21 @@ async def lifespan(app: FastAPI):
             "Admin API (X-Job-Secret) will reject requests until configured."
         )
 
-    # SMTP 설정 상태 체크 (배포 환경변수 누락 조기 감지)
-    if settings.EMAIL_USER and settings.EMAIL_PASSWORD:
+    # 문의 메일: Resend(HTTPS) 우선, 없으면 SMTP
+    if (settings.RESEND_API_KEY or "").strip():
+        logger.info(
+            "Contact mail: Resend API enabled (from=%s)",
+            (settings.RESEND_FROM_EMAIL or "").strip() or "onboarding@resend.dev",
+        )
+    elif settings.EMAIL_USER and settings.EMAIL_PASSWORD:
         logger.info(
             "SMTP configured: host=%s port=%d user=%s",
             settings.SMTP_HOST, settings.SMTP_PORT, settings.EMAIL_USER,
         )
     else:
         logger.warning(
-            "SMTP NOT configured (EMAIL_USER/EMAIL_PASSWORD missing). "
-            "Contact form emails will NOT be sent. "
-            "Set SMTP variables in the host dashboard (e.g. Railway Variables)."
+            "Contact mail NOT configured: set RESEND_API_KEY (Railway 권장) "
+            "or EMAIL_USER + EMAIL_PASSWORD for SMTP."
         )
 
     # Check database connection
