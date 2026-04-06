@@ -9,6 +9,7 @@
 - [프로젝트 구조](#-프로젝트-구조)
 - [주요 기술 스택](#-주요-기술-스택)
 - [RAG 파이프라인 개요](#-rag-파이프라인-개요)
+- [RAG 기능 전체 목록 (문서)](#-rag-기능-전체-목록-문서)
 - [RAG 고도화 방식 및 성과](#-rag-고도화-방식-및-성과)
 - [실행 방법](#-실행-방법)
 - [평가 및 골든셋](#-평가-및-골든셋)
@@ -31,15 +32,17 @@ backend/
 │   │   ├── jobs.py, majors.py, favorites.py, acquired_certs.py, admin.py, contact.py
 │   │   └── deps.py
 │   ├── rag/                  # RAG 검색·생성
-│   │   ├── api/routes.py     # POST /rag/ask
-│   │   ├── config.py         # RAG 하이퍼파라미터
-│   │   ├── retrieve/hybrid.py      # BM25+Vector+Contrastive RRF, Query Routing, Gating
-│   │   ├── retrieve/metadata_soft_score.py   # 직무·전공·분야 가산/감점
+│   │   ├── api/routes.py     # RAG HTTP 라우트
+│   │   ├── config.py         # RAG 하이퍼파라미터 (RAGSettings)
+│   │   ├── retrieve/hybrid.py      # BM25+Vector+Contrastive 융합, 라우팅, soft, 리랭커
+│   │   ├── retrieve/metadata_soft_score.py   # 메타데이터 soft (옵션)
+│   │   ├── retrieve/personalized_soft_score.py  # 개인화 soft (프로필 시)
 │   │   ├── rerank/cross_encoder.py # Reranker HF Space API (CertFinder Reranker)
 │   │   ├── generate/evidence_first.py, gating.py
 │   │   ├── index/            # BM25·Vector 인덱스 빌드
 │   │   ├── eval/             # Recall@k, MRR, nDCG, 골든 로더
-│   │   └── utils/            # Dense rewrite, HyDE, CoT, personalized query
+│   │   └── utils/            # Dense rewrite, HyDE, CoT, domain_tokens, …
+│   ├── docs/                 # RAG_FEATURES.md 등
 │   ├── services/
 │   │   ├── vector_service.py # OpenAI Embedding
 │   │   ├── fast_sync_service.py  # Redis 벌크 동기화
@@ -47,9 +50,12 @@ backend/
 │   ├── redis_client.py, database.py, models.py, schemas/, config.py
 │   └── utils/ai.py, auth.py, stream_producer.py
 ├── scripts/                     # 데이터·평가 파이프라인
-│   ├── build_rewrite_snapshot.py         # 골든 → 재질의 스냅샷 (reco_golden_recommendation_18_rewrite_snapshot.jsonl)
-│   ├── build_intent_labels_init.py      # audit → intent_labels_init.json (job/purpose)
-│   └── upload_intent_labels_to_supabase.py  # intent_labels_init → Supabase intent_labels
+│   ├── ab_golden_hybrid_tuning.py       # 골든 hybrid A/B (enhanced만, CE off)
+│   ├── ab_golden_personalized_soft.py   # 개인화 soft ON/OFF 골든 A/B
+│   ├── run_rag_golden_ab.py             # hybrid A/B 위임
+│   ├── build_rewrite_snapshot.py        # 골든 → 재질의 스냅샷
+│   ├── build_intent_labels_init.py      # audit → intent_labels_init.json
+│   └── upload_intent_labels_to_supabase.py
 ├── data/                     # 골든셋, 코퍼스, contrastive 학습 데이터
 ├── main.py
 ├── requirements.txt
@@ -65,38 +71,44 @@ backend/
 | **API** | FastAPI, Pydantic, SQLAlchemy, Supabase(PostgreSQL) |
 | **캐시·속도** | Redis (orjson 직렬화), FastSyncService 부팅 시 전체 인덱스 로드, StreamProducer Pub/Sub |
 | **RAG** | BM25 + Vector + Contrastive 3-way RRF/Linear Fusion, Query Routing, Dense Query Rewrite, Reranker(HF Space API), Metadata·개인화 Soft Score |
-| **배포** | Render, UptimeRobot 모니터링 (규칙: `.cursor/rules/deployment.mdc` 참고) |
+| **배포** | Railway(API), Vercel(프론트), UptimeRobot 등 `/health` 모니터링 (`.cursor/rules/deployment.mdc`) |
 
 ---
 
 ## 🔍 RAG 파이프라인 개요
 
-> **지연·병목 점검**: `docs/RAG_PIPELINE_BOTTLENECKS.md` — Dense rewrite, 벡터 팔(HyDE/COT 등), BM25∥벡터 병렬, PRF·DB 풀 트레이드오프 정리.  
-> **개선 요약(2026-03, 슬롯·캐시·hybrid·배포)**: `docs/RAG_개선_정리_2026-03.md` — 상세는 `docs/RAG_QUALITY_LATENCY_IMPROVEMENTS.md`.  
-> **넓은 실험(청킹·단일 채널·인덱스)**: `docs/RAG_BROAD_EVAL_GUIDE.md`, 스크립트 `scripts/rag_broad_eval.py` (`--preset channels` = BM25/Vector/Contrastive 단독 + hybrid).
+> **기능 전체 목록(표·모듈 맵)**: [`docs/RAG_FEATURES.md`](docs/RAG_FEATURES.md) — 구현된 `RAG_*` 스위치·채널·캐시·평가 CLI를 한곳에 정리.  
+> **인덱싱·재색인**: `RAG_Indexing.md` · **E2E(ask)**: `data/rag_e2e_pipeline.md` · **개선 이력**: `RAG_IMPROVEMENT.md`
 
 1. **질의 처리**  
-   Dense Query Rewrite(전공·학년·북마크·취득 반영), 짧은 쿼리 보조 키워드, Query Type 분류(키워드형/자연어형).
+   Dense Query Rewrite(전공·학년·북마크·취득 반영), 짧은 쿼리 보조 키워드, Query Type 분류(DB 라벨 또는 폴백), 식별자 위주 질의 시 확장·rewrite 스킵, pre-retrieval 예산(옵션).
 
 2. **검색**  
-   - **BM25**: 한글 2-gram, 자격명 부스팅, 추천용 purpose/직무 필드.  
-   - **Vector**: `certificates_vectors` OpenAI 임베딩 검색, 임계값·게이팅.  
-   - **Contrastive**: 768-dim 질의·청크 임베딩(FAISS 또는 HF Space API) 검색, Redis 캐시.  
-   - **Query Routing**: 짧은 키워드 쿼리는 BM25 비중 확대, Vector 게이팅으로 오탐 억제.  
-   - **Contrastive 게이팅**: `RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES`로 natural/purpose_only/roadmap 등 자연어·의도형만 Contrastive arm 사용. keyword/cert_name_included는 Contrastive 비활성.
+   - **BM25**: 디스크 `bm25.pkl`, 한글 2-gram, 자격명 부스팅, 쿼리 확장 규칙.  
+   - **계층 BM25(옵션)**: `content` 문단 단위 child 검색 → `qual_id` 환원 후 BM25 채널과 블렌드(`RAG_HIERARCHICAL_*`).  
+   - **Vector**: `certificates_vectors` pgvector, 원문+rewrite 다중 검색·키워드 확장 벡터(설정 시).  
+   - **Contrastive**: 768-dim FAISS/원격 임베딩, Redis 캐시.  
+   - **Query Routing**: 짧은 키워드형에서 BM25 비중·벡터 게이팅.  
+   - **Contrastive 게이팅**: `RAG_CONTRASTIVE_ALLOWED_QUERY_TYPES` — DB 라벨이 없을 때 폴백 타입만 허용되도록 목록을 맞출 것.
 
 3. **융합**  
-   RRF(설정 `RAG_RRF_K`, 기본 28) 또는 Linear Fusion으로 BM25·Vector·Contrastive 3-way 순위 병합 → 상위 N개 후보(기본 110).  
-   **쿼리 타입별 Contrastive 가중치**: `RAG_QUERY_TYPE_CONTRASTIVE_WEIGHTS_ENABLE=true` 시 natural/roadmap 계열은 Contrastive 비중 강화, keyword/cert_name_included는 약화.
+   **Linear**(기본) / CombSum / CombMNZ, `RAG_RRF_K`·채널 가중·쿼리타입별 linear 3-way 가중. 후보 풀: `RAG_TOP_N_CANDIDATES` 등(기본 88 전후, `.env`로 조정).
 
 4. **메타데이터·개인화**  
-   직무/전공/목적 일치 가산, 분야 이탈 감점. (선택) 개인화 soft score.
+   **메타 soft**(옵션, 기본 OFF): 직무·전공·도메인 가산/감점. **개인화 soft**(프로필 시): 전공·즐겨찾기 분야·취득 감점·학년-난이도 등. **취득 hard exclude** 옵션.
 
 5. **리랭커**  
-   Reranker(HF Space API)로 후보 풀(기본 30) 재정렬 → 상위 4개 선택. Gating으로 확신 높은 질의는 리랭커 스킵(지연 절감).
+   Cross-Encoder HF Space API(기본 OFF). 풀 크기·게이팅·입력 보강·pair 캐시.
 
 6. **생성**  
-   Evidence-first 프롬프트로 상위 청크 기반 답변 생성, Gating 조건 시 “근거 부족” 응답.
+   Evidence-first 프롬프트·Gating(근거 부족 응답).
+
+---
+
+## 📑 RAG 기능 전체 목록 (문서)
+
+- **[`docs/RAG_FEATURES.md`](docs/RAG_FEATURES.md)**  
+  채널·융합·soft·캐시·실험 플래그·디렉터리 맵·자주 쓰는 스크립트를 표로 정리. 코드와 달라질 때는 `app/rag/config.py`를 기준으로 본 문서를 갱신한다.
 
 ---
 
@@ -261,7 +273,9 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 
 ## 📚 참고 문서
 
-- **RAG·Contrastive**: `app/rag/contrastive/README.md`, `data/contrastive_index/README.md`
+- **RAG 기능 카탈로그(전체)**: [`docs/RAG_FEATURES.md`](docs/RAG_FEATURES.md)
+- **인덱싱**: `RAG_Indexing.md` · **E2E 파이프라인**: `data/rag_e2e_pipeline.md` · **개선 이력**: `RAG_IMPROVEMENT.md`
+- **Contrastive**: `app/rag/contrastive/README.md`, `data/contrastive_index/README.md`
 - **배포·CORS·환경변수**: `.cursor/rules/deployment.mdc`
 
 ---
@@ -269,6 +283,6 @@ RAG는 외부 API 호출(OpenAI, HF Space)과 대형 인덱스(FAISS, PostgreSQL
 ## Reranker
 
 - **CertFinder Reranker**: HF Hub 모델·Space API로 서빙. 환경변수 `RAG_RERANKER_MODEL_REPO_ID`, `RAG_RERANKER_SPACE_REPO_ID`, `RAG_RERANKER_API_URL` 참고.
-- **역할**: RRF 상위 30개 후보 재정렬 → Top 4 선택. Gating 적용 시 확신 높은 질의는 스킵.
+- **역할**: RRF/융합 상위 풀(`RAG_RERANK_POOL_SIZE`, 기본 20 전후) 재정렬 → Top-k 선택. Gating 적용 시 확신 높은 질의는 스킵.
 - **평가**: 기본은 리랭커 **미적용**으로 3모델·채널 Ablation 지표 측정. 리랭커 ON/OFF 비교는 `scripts/eval_reranker_on_off.py` 및 `docs/RERANKER_LATENCY_AND_METRICS.md` 참고.
 - **베이스라인 vs RRF 고도화 비교표**: `scripts/eval_baseline_vs_enhanced.py` — Vector만(baseline) vs BM25+Vector+Contrastive+RRF+리랭커(enhanced). 전체 골든 사용 시 `--max-queries` 생략. 결과: `data/eval_baseline_vs_enhanced.json`.

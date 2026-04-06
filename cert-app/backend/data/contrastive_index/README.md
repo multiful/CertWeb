@@ -1,6 +1,7 @@
 # Contrastive 인덱스 디렉터리
 
-3-way RRF(BM25 + Dense1536 + **Contrastive768**) 사용 시 이 디렉터리에 다음 파일이 필요합니다.
+3-way 하이브리드(BM25 + Dense1536 + **Contrastive768**) 사용 시 이 디렉터리에 다음 파일이 필요합니다.  
+전체 RAG 스위치 요약: [`../../docs/RAG_FEATURES.md`](../../docs/RAG_FEATURES.md).
 
 - **cert_index.faiss** – FAISS 인덱스 (768-dim, inner product)
 - **cert_metadata.json** – row_id → qual_id, qual_name, text 매핑

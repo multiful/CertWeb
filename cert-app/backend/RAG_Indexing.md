@@ -1,7 +1,8 @@
 # RAG Indexing Baseline 운영 상태
 
 > 생성일시: 2026-03-28 01:44:01  
-> **본 인덱싱 파이프라인은 Baseline 기반으로 작동한다.**
+> **본 인덱싱 파이프라인은 Baseline 기반으로 작동한다.**  
+> 검색·융합·캐시 등 **런타임 RAG 기능 목록**: [`docs/RAG_FEATURES.md`](docs/RAG_FEATURES.md)
 
 ## 1) 현재 적용 범위 (Indexing 단계)
 
