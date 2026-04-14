@@ -60,3 +60,4 @@ class ResetPasswordDirectRequest(BaseModel):
     userid: str = Field(..., min_length=1, max_length=64)
     email: EmailStr
     new_password: str = Field(..., min_length=6, max_length=512)
+    reset_token: str = Field(..., description="Short-lived HMAC token from /verify-userid-email")

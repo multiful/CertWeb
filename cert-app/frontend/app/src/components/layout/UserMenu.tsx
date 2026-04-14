@@ -58,6 +58,7 @@ export function UserMenu() {
     const [forgotPwEmail, setForgotPwEmail] = useState('');
     const [forgotPwNewPassword, setForgotPwNewPassword] = useState('');
     const [forgotPwNewPasswordConfirm, setForgotPwNewPasswordConfirm] = useState('');
+    const [forgotPwResetToken, setForgotPwResetToken] = useState('');
 
     const API_BASE = import.meta.env.VITE_API_BASE_URL ||
         (import.meta as any).env?.VITE_API_BASE_URL ||
@@ -225,6 +226,7 @@ export function UserMenu() {
             });
             const data = await res.json();
             if (res.ok && data.verified) {
+                setForgotPwResetToken(data.reset_token || '');
                 setForgotPwStep(2);
             } else {
                 toast.error(data.detail || '아이디와 이메일이 일치하는 회원이 없습니다.');
@@ -253,7 +255,8 @@ export function UserMenu() {
                 body: JSON.stringify({
                     userid: forgotPwUserid.trim(),
                     email: forgotPwEmail.trim(),
-                    new_password: forgotPwNewPassword
+                    new_password: forgotPwNewPassword,
+                    reset_token: forgotPwResetToken
                 })
             });
             const data = await res.json();
@@ -265,6 +268,7 @@ export function UserMenu() {
                 setForgotPwEmail('');
                 setForgotPwNewPassword('');
                 setForgotPwNewPasswordConfirm('');
+                setForgotPwResetToken('');
             } else {
                 toast.error(data.detail || '비밀번호 변경에 실패했습니다.');
             }
@@ -800,6 +804,7 @@ export function UserMenu() {
                     setForgotPwEmail('');
                     setForgotPwNewPassword('');
                     setForgotPwNewPasswordConfirm('');
+                    setForgotPwResetToken('');
                 }
             }}>
                 <DialogContent className="bg-slate-900 border-slate-800 text-slate-100 sm:max-w-md rounded-2xl">

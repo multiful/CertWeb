@@ -513,14 +513,15 @@ async def hybrid_recommendation(
             else:
                 w_d, w_s, expanded_q = _classify_query_and_expand(q_text)
             # 벡터 검색 (HNSW cosine), 거리 순으로 정렬 후 qual_id별 첫 등장 순위 사용
-            vec_sql = text("""
+            _vec_exclude = "AND qual_id != ALL(:exclude_ids)" if exclude_qual_ids else ""
+            vec_sql = text(f"""
                 SELECT qual_id, name, 1 - (embedding <=> :vec) AS similarity
                 FROM certificates_vectors
                 WHERE embedding IS NOT NULL
-                  {exclude}
+                  {_vec_exclude}
                 ORDER BY embedding <=> :vec
                 LIMIT :limit
-            """.format(exclude="AND qual_id != ALL(:exclude_ids)" if exclude_qual_ids else ""))
+            """)
             params_v = {"vec": str(q_vec), "limit": top_per_query}
             if exclude_qual_ids:
                 params_v["exclude_ids"] = exclude_qual_ids
@@ -538,15 +539,16 @@ async def hybrid_recommendation(
             if use_fulltext:
                 # 풀텍스트 검색 (content_tsv) — content_tsv 컬럼이 있을 때만
                 try:
-                    ft_sql = text("""
+                    _ft_exclude = "AND qual_id != ALL(:exclude_ids)" if exclude_qual_ids else ""
+                    ft_sql = text(f"""
                         SELECT qual_id, name,
                                ts_rank_cd(content_tsv, plainto_tsquery('simple', :q)) AS rank
                         FROM certificates_vectors
                         WHERE content_tsv @@ plainto_tsquery('simple', :q)
-                          {exclude}
+                          {_ft_exclude}
                         ORDER BY rank DESC
                         LIMIT :limit
-                    """.format(exclude="AND qual_id != ALL(:exclude_ids)" if exclude_qual_ids else ""))
+                    """)
                     params_ft = {"q": expanded_q, "limit": top_per_query}
                     if exclude_qual_ids:
                         params_ft["exclude_ids"] = exclude_qual_ids

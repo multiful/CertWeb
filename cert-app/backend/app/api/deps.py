@@ -41,15 +41,19 @@ def verify_job_secret(x_job_secret: Optional[str] = Header(None)) -> bool:
     return True
 
 
+def _extract_client_ip(request: Request) -> str:
+    """클라이언트 IP 추출. Render 등 프록시 뒤에서는 XFF 마지막 값(프록시가 추가한 실제 IP) 사용.
+    첫 번째 값은 클라이언트가 위조 가능하므로 Rate Limit 키로 신뢰하지 않는다."""
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        # Rightmost = 프록시(Render)가 삽입한 실제 출처 IP
+        return xff.split(",")[-1].strip()
+    return getattr(request.client, "host", None) if request.client else "127.0.0.1"
+
+
 def check_rate_limit(request: Request) -> None:
     """Check rate limit for request."""
-    # Get client IP (request.client can be None under TestClient / some ASGI)
-    client_ip = request.headers.get(
-        "X-Forwarded-For",
-        getattr(request.client, "host", None) if request.client else "127.0.0.1",
-    )
-    if client_ip and "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = _extract_client_ip(request)
     
     key = f"rate_limit:{client_ip}"
     
@@ -77,12 +81,7 @@ def check_rate_limit(request: Request) -> None:
 
 def check_auth_rate_limit(request: Request) -> None:
     """Auth 전용 엄격 레이트 리밋 (send_code, login, password_reset 등). 분당 5회 등."""
-    client_ip = request.headers.get(
-        "X-Forwarded-For",
-        getattr(request.client, "host", None) if request.client else "127.0.0.1",
-    )
-    if client_ip and "," in client_ip:
-        client_ip = client_ip.split(",")[0].strip()
+    client_ip = _extract_client_ip(request)
     key = f"rate_limit_auth:{client_ip}"
     allowed, remaining, reset_after = redis_client.check_rate_limit(
         key,

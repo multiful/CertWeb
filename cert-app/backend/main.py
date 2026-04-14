@@ -243,7 +243,7 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
     expose_headers=["X-Process-Time", "X-RAG-Variant", "X-RateLimit-Remaining"],
 )
 
@@ -299,9 +299,8 @@ async def add_process_time_and_security_headers(request: Request, call_next):
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     if request.url.scheme == "https":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    client_ip = request.headers.get("X-Forwarded-For") or (getattr(request.client, "host", None) if request.client else None)
-    if client_ip and "," in str(client_ip):
-        client_ip = str(client_ip).split(",")[0].strip()
+    _xff = request.headers.get("X-Forwarded-For")
+    client_ip = _xff.split(",")[-1].strip() if _xff else (getattr(request.client, "host", None) if request.client else None)
     log_audit(
         method=request.method,
         path=request.url.path or "",

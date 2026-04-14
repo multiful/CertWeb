@@ -3,6 +3,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 import requests
 import logging
+import hmac
+import hashlib
+import time
 from typing import Optional, Tuple
 
 from app.database import get_db
@@ -25,6 +28,33 @@ from app.schemas.auth import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
 logger = logging.getLogger(__name__)
+
+_RESET_TOKEN_MAX_AGE = 900  # 15분
+
+
+def _make_reset_token(userid: str, email: str) -> str:
+    """비밀번호 재설정용 단기 HMAC 토큰 생성 (15분 유효)."""
+    ts = int(time.time())
+    msg = f"{userid.lower().strip()}:{email.lower().strip()}:{ts}".encode()
+    secret = (settings.SUPABASE_JWT_SECRET or settings.JOB_SECRET or "").encode()
+    sig = hmac.new(secret, msg, hashlib.sha256).hexdigest()
+    return f"{ts}:{sig}"
+
+
+def _verify_reset_token(token: str, userid: str, email: str) -> bool:
+    """비밀번호 재설정 토큰 검증. 위변조 및 만료 확인."""
+    try:
+        ts_str, sig = token.split(":", 1)
+        ts = int(ts_str)
+        if time.time() - ts > _RESET_TOKEN_MAX_AGE:
+            return False
+        msg = f"{userid.lower().strip()}:{email.lower().strip()}:{ts}".encode()
+        secret = (settings.SUPABASE_JWT_SECRET or settings.JOB_SECRET or "").encode()
+        expected = hmac.new(secret, msg, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(sig, expected)
+    except Exception:
+        return False
+
 
 def _admin_headers():
     return {
@@ -563,7 +593,8 @@ async def verify_userid_email(
     ).mappings().first()
     if not row:
         raise HTTPException(status_code=400, detail="아이디와 이메일이 일치하는 회원이 없습니다.")
-    return {"verified": True}
+    reset_token = _make_reset_token(payload.userid.strip(), payload.email.strip())
+    return {"verified": True, "reset_token": reset_token}
 
 
 @router.post("/reset-password-direct")
@@ -573,6 +604,8 @@ async def reset_password_direct(
     _: None = Depends(check_auth_rate_limit),
 ):
     """아이디+이메일 확인 후 인증코드 없이 비밀번호 직접 재설정."""
+    if not _verify_reset_token(payload.reset_token, payload.userid.strip(), payload.email.strip()):
+        raise HTTPException(status_code=400, detail="인증 토큰이 유효하지 않거나 만료되었습니다. 처음부터 다시 시도해 주세요.")
     row = db.execute(
         text(
             "SELECT id FROM profiles WHERE TRIM(userid) = TRIM(:userid) AND LOWER(TRIM(email)) = LOWER(TRIM(:email))"
